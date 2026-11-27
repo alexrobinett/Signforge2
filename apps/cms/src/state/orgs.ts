@@ -1,6 +1,7 @@
 /** Switching the active organization, and the create-organization forms. */
 import { createOrganization, switchOrganization } from '~/lib/orgs';
 import type { SliceCreator } from './store';
+import { forgetDrafts, saveWaiting } from './versioned-draft';
 
 /**
  * Where a create-organization form sits. Each has its own draft, since both can be on screen:
@@ -48,7 +49,7 @@ const emptyDraft: CreateOrgDraft = { name: '', pending: false, error: null };
  * (`reloadAs`), so only one runs at a time, from any menu or form: a second's reload would be
  * refused as a tab on the old org.
  */
-const busy = (orgs: OrgsState) => orgs.switchingTo !== null || Object.values(orgs.drafts).some((d) => d.pending);
+export const changingOrg = (orgs: OrgsState) => orgs.switchingTo !== null || Object.values(orgs.drafts).some((d) => d.pending);
 
 export const initialOrgs: OrgsState = {
   switchingTo: null,
@@ -66,7 +67,13 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
     orgs: initialOrgs,
 
     async switchOrg(org, from) {
-      if (busy(get().orgs)) return;
+      // A switch already on its way: this one changes nothing, so nothing here is dropped (#335).
+      if (changingOrg(get().orgs)) return;
+      // The drawer's conversation and turn, the sidebar's Publish question and a waiting sample-text question (review of
+      // #472) are this org's. Dropped before the switch, even one that then fails: a turn stops before the tab changes org.
+      get().forgetAgentDrawer();
+      get().cancelPublishAll();
+      get().dropSampleCheck();
       const announce = from === 'switcher';
       set((s) => ({
         orgs: {
@@ -77,9 +84,12 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
         },
       }));
       try {
+        // An edit still waiting out its autosave delay saves only in its own org: it goes before the tab leaves it.
+        await saveWaiting();
         await switchOrganization(router, org.id);
-        // Edits and confirmations belong to the org they were made in.
+        // Edits and confirmations belong to the org they were made in: every editor's drafts go too.
         get().forgetOrgSettings();
+        forgetDrafts();
         if (announce) set((s) => ({ orgs: { ...s.orgs, status: `Switched to ${org.name}.` } }));
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not switch organization.';
@@ -94,13 +104,20 @@ export const createOrgsSlice: SliceCreator<OrgsSlice> = (set, get, { router }) =
     editOrgName: (form, name) => draft(form, { name }),
 
     async createOrg(form) {
-      if (busy(get().orgs)) return;
+      if (changingOrg(get().orgs)) return;
       const name = get().orgs.drafts[form].name.trim();
       if (!name) return draft(form, { error: 'Enter a name.' });
       draft(form, { pending: true, error: null });
+      // Creating makes the new org active: the drawer's conversation stays with the org it was in, as on a switch.
+      get().forgetAgentDrawer();
+      get().cancelPublishAll();
+      get().dropSampleCheck();
       try {
+        // As on a switch: the new org becomes the tab's.
+        await saveWaiting();
         await createOrganization(router, name);
         get().forgetOrgSettings();
+        forgetDrafts();
         draft(form, emptyDraft);
         if (form === 'dialog') set((s) => ({ orgs: { ...s.orgs, createDialogOpen: false, status: 'Organization created.' } }));
       } catch (err) {

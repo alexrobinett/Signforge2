@@ -64,12 +64,21 @@ describe('a poll saved', () => {
     });
     expect(await o.dataSources.get(a.dataSource)).toMatchObject({ nextPollAt: NOW + 300_000, etag: '"e1"' });
     expect(await o.dataSources.snapshots([a.dataSource])).toEqual([
-      { dataSourceId: a.dataSource, version: 'h2', fetchedAt: NOW, checkedAt: NOW, dataJson: '{"t":13}' },
+      { orgId: a.orgId, dataSourceId: a.dataSource, version: 'h2', fetchedAt: NOW, checkedAt: NOW, dataJson: '{"t":13}', format: 'json', refreshS: 300 },
     ]);
 
     await o.dataSources.savePoll(a.dataSource, { source: { nextPollAt: NOW + 600_000 }, checkedAt: NOW + 300_000 });
     expect(await o.dataSources.snapshots([a.dataSource])).toEqual([
-      { dataSourceId: a.dataSource, version: 'h2', fetchedAt: NOW, checkedAt: NOW + 300_000, dataJson: '{"t":13}' },
+      {
+        orgId: a.orgId,
+        dataSourceId: a.dataSource,
+        version: 'h2',
+        fetchedAt: NOW,
+        checkedAt: NOW + 300_000,
+        dataJson: '{"t":13}',
+        format: 'json',
+        refreshS: 300,
+      },
     ]);
     // Without the data: what a list of sources needs.
     expect(await o.dataSources.checkedTimes([a.dataSource])).toEqual([{ dataSourceId: a.dataSource, checkedAt: NOW + 300_000 }]);
@@ -83,6 +92,18 @@ describe('a poll saved', () => {
   });
 });
 
+describe('reading many sources', () => {
+  it('reads snapshots and checked times for more sources than D1 binds in one statement', async () => {
+    const o = a.scope;
+    const { id } = await o.dataSources.insert({ id: 'many-sources', name: 'Many', format: 'json', urlEncrypted: 'enc:m', refreshS: 300, nextPollAt: NOW });
+    await o.dataSources.putSnapshot(id, { version: 'm1', fetchedAt: NOW, checkedAt: NOW, dataJson: '{}' });
+    const ids = [...Array.from({ length: 150 }, (_, i) => `missing-${i}`), id];
+
+    expect((await o.dataSources.snapshots(ids)).map((r) => [r.dataSourceId, r.version])).toEqual([[id, 'm1']]);
+    expect(await o.dataSources.checkedTimes(ids)).toEqual([{ dataSourceId: id, checkedAt: NOW }]);
+  });
+});
+
 describe('storing a feed photo', () => {
   it("drops the source's validators in its own org only, leaving its schedule, failures and version", async () => {
     const url = 'https://photo.example/test.jpg';
@@ -91,8 +112,16 @@ describe('storing a feed photo', () => {
     await a.scope.dataSources.update(a.dataSource, { format: 'rss', etag: '"a"', lastModified: 'Mon', nextPollAt: NOW + 5, failures: 2 });
     await b.scope.dataSources.update(b.dataSource, { format: 'rss', etag: '"b"', lastModified: 'Tue', photoUrlsJson });
     const before = (await a.scope.dataSources.get(a.dataSource))!;
-    await a.scope.feedImages.hold([url], { until: NOW + 1, now: NOW, sourceId: a.dataSource });
-    await a.scope.feedImages.save(url, { fileSha256: hash, thumbSha256: hash, nextCheckAt: NOW + 20 }, { sourceId: a.dataSource, now: NOW });
+    await a.scope.feedPhotos.put({ url, sourceId: a.dataSource, nextCheckAt: NOW });
+    const validators = { etag: null, lastModified: null, validatedFrom: 'https://cdn.example/a.jpg' };
+    await a.scope.feedPhotos.delivered(url, {
+      result: 'reused',
+      now: NOW,
+      sourceId: a.dataSource,
+      sourceSha256: hash,
+      copy: { file: hash, thumb: hash },
+      validators,
+    });
     expect(await a.scope.dataSources.get(a.dataSource)).toMatchObject({
       etag: null,
       lastModified: null,

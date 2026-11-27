@@ -1,19 +1,25 @@
+import { NEWS_SUMMARY_MAX } from '@signforge/contract';
 import { XMLParser } from 'fast-xml-parser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { type FeedImage, FeedError, LIMITS, normaliseFeed, parseNews } from '../src/index';
+import { type FeedImage, FeedError, LIMITS, normaliseFeed, parseNews, rendition } from '../src/index';
 import atom03 from './fixtures/atom-03.xml?raw';
 import atom from './fixtures/atom.xml?raw';
 import atomEnclosures from './fixtures/atom-enclosures.xml?raw';
 import atomXhtml from './fixtures/atom-xhtml.xml?raw';
+import bbc from './fixtures/bbc-world.xml?raw';
 import dcHttps from './fixtures/dc-https.xml?raw';
 import dcUndeclared from './fixtures/dc-undeclared.xml?raw';
 import enclosures from './fixtures/enclosures.xml?raw';
+import fox from './fixtures/fox-news.xml?raw';
 import hostile from './fixtures/hostile.xml?raw';
+import leMonde from './fixtures/le-monde.xml?raw';
 import mediaRss from './fixtures/media-rss.xml?raw';
 import npr from './fixtures/npr-news.xml?raw';
 import userland from './fixtures/rss-userland.xml?raw';
+import spiegel from './fixtures/spiegel.xml?raw';
+import wired from './fixtures/wired.xml?raw';
 import wordpress from './fixtures/wordpress.xml?raw';
-import { inLinearTime, linearMs } from './linear';
+import { inLinearTime } from './linear';
 
 const images = (body: string, url?: string) => parseNews(body, url ? { url } : {}).items.map((i) => i.image);
 const rss = (items: string, head = '') => `<?xml version="1.0"?>${head}<rss version="2.0"><channel><title>Test</title>${items}</channel></rss>`;
@@ -28,6 +34,8 @@ describe('NPR RSS 2.0', () => {
       title: 'Trump is in Asia ahead of Xi, Putin summit. And, tech leaders want Huang back at Nvidia',
       published: '2026-11-17T12:20:57+00:00',
       source: 'NPR Topics: News',
+      summary:
+        "Trump says he plans to discuss Ukraine during his Asia trip, which contradicts what the White House previously announced. And, Silicon Valley leaders are pushing for Jensen Huang's return to Nvidia.",
     });
     const times = feed.items.map((i) => Date.parse(i.published));
     expect(times).toEqual([...times].sort((a, b) => b - a));
@@ -45,15 +53,99 @@ describe('Atom', () => {
           title: 'Skating rink opens Saturday – free rentals all weekend',
           published: '2026-11-17T12:30:00+00:00',
           source: 'Parks & Recreation Department: Updates',
+          summary: 'The Riverside rink opens for the season on Saturday.',
         },
         {
           title: 'Leaf collection: the last pickup for the north side is Nov 20',
           published: '2026-11-14T08:00:00+00:00',
           source: 'Parks & Recreation Department: Updates',
         },
-        { title: 'Winter hours start December 1', published: '2026-11-10T14:00:00+00:00', source: 'Parks & Recreation Department: Updates' },
+        {
+          title: 'Winter hours start December 1',
+          published: '2026-11-10T14:00:00+00:00',
+          source: 'Parks & Recreation Department: Updates',
+          summary: 'Recreation centres close at 8 p.m. through February.',
+        },
       ],
     });
+  });
+});
+
+describe('summaries (#202)', () => {
+  const summaries = (descriptions: string[], title = 'Story') =>
+    parseNews(rss(descriptions.map((d) => `<item><title>${title}</title><description><![CDATA[${d}]]></description></item>`).join(''))).items.map(
+      (i) => i.summary,
+    );
+
+  it('reads the description as plain text: tags, scripts and styles dropped, references read, spaces collapsed', () => {
+    expect(
+      summaries([
+        '<p>Crews&nbsp;cleared the <b>north&nbsp;ramp</b> &mdash; reopening at 6&nbsp;p.m.</p><script>track()</script><style>p{}</style><p>Drive &amp; walk&hellip;</p>',
+      ]),
+    ).toEqual(['Crews cleared the north ramp — reopening at 6 p.m. Drive & walk…']);
+  });
+
+  it('leaves out a description that is empty, only markup, or the title again', () => {
+    expect(summaries(['', '<img src="a.jpg"><br/>', ' story '], 'Story')).toEqual([undefined, undefined, undefined]);
+  });
+
+  it(`cuts a long description on a word at ${NEWS_SUMMARY_MAX} characters, ending in an ellipsis`, () => {
+    const [cut] = summaries([`${'word '.repeat(100)}end`]);
+    expect(cut!.length).toBeLessThanOrEqual(NEWS_SUMMARY_MAX);
+    expect(cut).toMatch(/^(word )+word…$/);
+  });
+
+  it('reads an Atom summary, else its content', () => {
+    const atomFeed = (body: string) =>
+      `<feed xmlns="http://www.w3.org/2005/Atom"><title>T</title><entry><title>Story</title><updated>2026-11-17T12:00:00Z</updated>${body}</entry></feed>`;
+    expect(parseNews(atomFeed('<summary type="html">&lt;p&gt;Short one&lt;/p&gt;</summary><content>Long one</content>')).items[0]!.summary).toBe('Short one');
+    expect(parseNews(atomFeed('<content type="html">&lt;p&gt;Long one&lt;/p&gt;</content>')).items[0]!.summary).toBe('Long one');
+  });
+
+  // Each case named in #477, the description and the summary it gives.
+  it.each([
+    ['a Latin-1 named reference', 'Caf&eacute; prices up &pound;2 &copy; 2026', 'Café prices up £2 © 2026'],
+    ['a named reference beyond Latin-1', 'Fares &euro;3 &ndash; trains&trade; &bull; buses', 'Fares €3 – trains™ • buses'],
+    ['names, case-sensitive as in HTML', '&Eacute;t&eacute; &EACUTE;', 'Été &EACUTE;'],
+    ['a name not in the table, as written', 'Odd &zzz; and &amp; done', 'Odd &zzz; and & done'],
+    ['a soft hyphen, dropped', 'Thanks&shy;giving', 'Thanksgiving'],
+    ['a < in prose, kept', 'Rates stay < 5% and growth > 2%', 'Rates stay < 5% and growth > 2%'],
+    ['a < before a digit or a space, kept', 'a<5 and b <= 7', 'a<5 and b <= 7'],
+    ['a < before a letter, /, ! or ?, a tag', 'x<b>y</b><!doctype z><?php q ?>w', 'x y w'],
+    ['a comment holding >, dropped whole', 'Before <!-- a > b --> after', 'Before after'],
+    ['an unclosed comment, the rest dropped', 'Before <!-- a > b', 'Before'],
+    ['a script after İ, dropped whole', 'İstanbul <script>track("x")</script>opens', 'İstanbul opens'],
+    ['a <scripts> tag, not a script', 'A <scripts>b</scripts> c', 'A b c'],
+    ['NUL from a numeric reference, dropped', 'a&#0;b&#x0;c', 'abc'],
+    ['bidi controls, written or referenced, dropped', 'a&#x202E;b&#8238;c\u2066d', 'abcd'],
+    [
+      "an object's own property name, no reference",
+      'a &toString; &valueOf; &hasOwnProperty; &constructor; b',
+      'a &toString; &valueOf; &hasOwnProperty; &constructor; b',
+    ],
+    ['a reference to a lone surrogate, the replacement character', 'a&#55296;b&#xDC00;c', 'a\ufffdb\ufffdc'],
+    ['C0 and C1 controls, referenced, dropped', 'a&#7;b&#x1b;c&#x85;d&#x9f;e&#127;f', 'abcdef'],
+    ['tab, line feed and carriage return, a space', 'a&#9;b&#10;c&#13;d', 'a b c d'],
+    ['an empty comment, <!-->', 'a<!-->b', 'a b'],
+    ['an empty comment, <!--->', 'a<!--->b', 'a b'],
+    ['a comment ended by --!>', 'a<!-- c --!>b', 'a b'],
+    ['a > in a quoted attribute, inside the tag', 'a<img alt="1 > 0" src=x>b<img alt=\'2 > 1\'>c', 'a b c'],
+    ['an apostrophe in prose after a tag, not a quote', "<p>It's here</p> > fine", "It's here > fine"],
+  ])('%s', (_case, description, summary) => {
+    expect(summaries([description])).toEqual([summary]);
+  });
+
+  it(`cuts a long description with no space at ${NEWS_SUMMARY_MAX}, never between a surrogate pair's halves`, () => {
+    for (const lead of ['', 'x']) {
+      const [cut] = summaries([`${lead}${'😀'.repeat(NEWS_SUMMARY_MAX)}`]);
+      expect(cut!.length).toBeLessThanOrEqual(NEWS_SUMMARY_MAX);
+      expect(cut).toMatch(/^x?(\u{1F600})+…$/u);
+    }
+  });
+
+  it('reads a description of unclosed scripts and tags in linear time', () => {
+    for (const body of ['<script '.repeat(100_000), '<script>'.repeat(100_000), '<p '.repeat(150_000)])
+      expect(inLinearTime(() => parseNews(rss(`<item><title>x</title><description><![CDATA[${body}]]></description></item>`)))).toBe(true);
   });
 });
 
@@ -278,6 +370,59 @@ describe('images', () => {
       { url: 'https://cdn.museum.example/2026/11/fridays.jpg' },
       undefined,
     ]);
+  });
+});
+
+// Recorded 2026-11-26. Each CDN's copies were fetched and measured: BBC's 1920 is 1920×1080, Le
+// Monde's 2160/1080 is 2160×1080, Fox's upload 1280×720 and Wired's w_1920 1920×1281.
+describe('photo renditions (#488)', () => {
+  const renditions = (body: string) => images(body).map((i) => i && rendition(i.url));
+
+  it('keeps the feed’s own URL as the photo’s', () => {
+    expect(images(bbc)[0]).toEqual({
+      url: 'https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/cdd4/live/6fdb6db0-e946-11f1-8b2f-671485cea0be.jpg',
+      width: 240,
+      height: 135,
+    });
+  });
+
+  it("asks BBC's ichef for its 1920 copy, not the feed's 240", () => {
+    expect(renditions(bbc)).toEqual([
+      'https://ichef.bbci.co.uk/ace/standard/1920/cpsprodpb/cdd4/live/6fdb6db0-e946-11f1-8b2f-671485cea0be.jpg',
+      'https://ichef.bbci.co.uk/ace/standard/1920/cpsprodpb/8562/live/1f8d5d00-e8ec-11f1-a094-5fdc692f3e33.jpg',
+    ]);
+  });
+
+  it("asks Le Monde for the size that covers the screen at the photo's 2:1, within its crop", () => {
+    expect(renditions(leMonde)).toEqual([
+      'https://img.lemde.fr/2026/11/19/0/0/7056/3528/2160/1080/60/0/416287a_ftp-1-o72zp5beoynf-afp-d7yy2df.jpg',
+      'https://img.lemde.fr/2026/11/24/685/0/8225/4112/2160/1080/60/0/3dac54a_ftp-1-5hapjx1d3y1y-f6c999cf0f7b4c7daded4d5d29e15f89-0-b1859d1fb08648d3bcf4638b6964951a.jpg',
+    ]);
+  });
+
+  it('never asks Le Monde for more than its crop, which it would upscale', () => {
+    expect(rendition('https://img.lemde.fr/2026/11/19/0/0/1000/500/644/322/60/0/a.jpg')).toBe(
+      'https://img.lemde.fr/2026/11/19/0/0/1000/500/1000/500/60/0/a.jpg',
+    );
+    expect(rendition('https://img.lemde.fr/2026/11/19/0/0/600/300/644/322/60/0/a.jpg')).toBeUndefined();
+  });
+
+  it("takes Fox's upload rather than a57's resize, whose larger sizes are upscaled", () => {
+    expect(renditions(fox)).toEqual([
+      'https://static.foxnews.com/foxnews.com/content/uploads/2026/11/myles-garrett-jordan-love-rams-packers.jpg',
+      'https://static.foxnews.com/foxnews.com/content/uploads/2025/12/fcc-brendan-carr.png',
+    ]);
+  });
+
+  it("asks Wired's CDN for its uploads at most 1920 wide, which it never upscales", () => {
+    expect(renditions(wired)).toEqual([
+      'https://media.wired.com/photos/6b070bb9c3af37e5a5192585/master/w_1920,c_limit/GettyImages-2306835116.jpg',
+      'https://media.wired.com/photos/6b064e68966159a4e56ddef8/master/w_1920,c_limit/The-36-Very-Best-Gifts-for-Dads.jpg',
+    ]);
+  });
+
+  it("keeps Der Spiegel's 520, which its CDN serves at no other width", () => {
+    expect(renditions(spiegel)).toEqual([undefined]);
   });
 });
 
@@ -529,13 +674,12 @@ describe('what screens get', () => {
 });
 describe('image search cost', () => {
   // 1.8 s on CI for the first five bodies (run 44880983452), against 0.3 s on a laptop; each body may
-  // be tried three times, and the later ones make about as much work again.
+  // be tried five times, each after a pass of its own, and the later ones make about as much work again.
   it('finds images in linear time in bodies built to make a scanner backtrack, and finds the right ones', { timeout: 120_000 }, () => {
-    const base = linearMs();
     const timed = (feed: string, expected: (FeedImage | undefined)[]) => {
       expect(feed.length).toBeLessThanOrEqual(LIMITS.maxBytes);
       expect(images(feed)).toEqual(expected);
-      return inLinearTime(() => parseNews(feed), base);
+      return inLinearTime(() => parseNews(feed));
     };
     const body = (html: string, attrs = '') =>
       rss(`<item${attrs}><title>x</title><link>https://example.com/</link><description><![CDATA[${html}<img src="last.jpg">]]></description></item>`);

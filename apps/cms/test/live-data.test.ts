@@ -2,12 +2,45 @@
 // normalised feed through canonicalJson, which sorts every object's keys.
 import { canonicalJson, liveSources, parseTemplateManifest, readPath, type FieldDef, type TemplateManifest } from '@signforge/contract';
 import { parseCalendar, parseNews } from '@signforge/feeds';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import twoSources from '../e2e/fixtures/two-sources/template.json';
-import { bindAll, guessMapping, madeByEditor, rowTitles, tableRows, typedFields, weatherSource } from '../src/lib/live-data';
+import {
+  bindAll,
+  type DataSourceView,
+  freshness,
+  guessMapping,
+  madeByEditor,
+  rowTitles,
+  sameWeather,
+  tableRows,
+  typedFields,
+  weatherSource,
+  weatherToKeep,
+} from '../src/lib/live-data';
 
 /** What the poller writes as a snapshot's data (apps/api/src/data/poller.ts). */
 const stored = (feed: unknown): unknown => JSON.parse(canonicalJson(feed));
+
+describe("a source's freshness, by the age screens keep it (#624)", () => {
+  const NOW = Date.parse('2026-11-18T17:40:00Z');
+  const snapshot = (checkedAt: string) => ({ id: 'cal', version: 1, fetchedAt: checkedAt, checkedAt, data: {} });
+  const failing = (format: string) => ({ format, refreshS: 300, lastError: 'http-status' }) as unknown as DataSourceView;
+
+  it("keeps a calendar's data for its own minutes, and anything else's for a day", () => {
+    expect(freshness(failing('ical'), snapshot('2026-11-18T17:20:00Z'), NOW)).toBe(
+      'Checked 20 min ago. The last check failed: the feed answered with an error. Screens keep this data for 25 min, then show the fallback values.',
+    );
+    expect(freshness(failing('ical'), snapshot('2026-11-18T17:10:00Z'), NOW)).toBe('Not confirmed for 30 min: screens show the fallback values.');
+    expect(freshness(failing('csv'), snapshot('2026-11-18T17:15:00Z'), NOW)).toContain('Screens keep this data for a day');
+  });
+
+  it('calls a check fresh when the browser clock is behind the server (review of #630)', () => {
+    expect(freshness(failing('ical'), snapshot('2026-11-18T17:45:00Z'), NOW)).toBe(
+      'Checked just now. The last check failed: the feed answered with an error. Screens keep this data for 25 min, then show the fallback values.',
+    );
+  });
+});
 
 describe('rowTitles', () => {
   it("shows a news feed's headlines, dated or not, and whatever its source", () => {
@@ -38,23 +71,25 @@ describe('rowTitles', () => {
   });
 });
 
+/** A place as find_places gives it. */
+const ATLANTA = {
+  id: 4180439,
+  name: 'Atlanta',
+  region: 'Georgia',
+  country: 'United States',
+  latitude: 33.749,
+  longitude: -84.38798,
+  timezone: 'America/New_York',
+};
+
 describe('madeByEditor', () => {
   it('knows the weather sources the editor makes from a place and units, and nothing a person typed', async () => {
     const live = { source: 'open-meteo' as const, fields: { temp: 'current.temperature_2m', high: 'daily.temperature_2m_max.0' } };
-    const place = {
-      id: 4180439,
-      name: 'Atlanta',
-      region: 'Georgia',
-      country: 'United States',
-      latitude: 33.749,
-      longitude: -84.38798,
-      timezone: 'America/New_York',
-    };
     for (const units of [
       { temperature: '°F', wind: 'mph' },
       { temperature: '°C', wind: 'km/h' },
     ] as const)
-      expect(madeByEditor((await weatherSource(live, place, units)).id)).toBe(true);
+      expect(madeByEditor((await weatherSource(live, ATLANTA, units)).id)).toBe(true);
     // A feed or calendar added by its address gets the server's id, or one a person or agent chose.
     for (const id of ['src_8f2k3j4h5g6f7d8s', 'weather', 'news-bbc', 'weather-atlanta', 'weather-4180439-f-mph']) expect(madeByEditor(id), id).toBe(false);
   });
@@ -70,19 +105,55 @@ describe('madeByEditor', () => {
         day3Time: 'daily.time.3',
       },
     };
-    const place = {
-      id: 4180439,
-      name: 'Atlanta',
-      region: 'Georgia',
-      country: 'United States',
-      latitude: 33.749,
-      longitude: -84.38798,
-      timezone: 'America/New_York',
-    };
-    const url = new URL((await weatherSource(live, place, { temperature: '°F', wind: 'mph' })).feedUrl);
-    expect(url.searchParams.get('current')).toBe('temperature_2m');
-    expect(url.searchParams.get('daily')).toBe('temperature_2m_max');
+    const url = new URL((await weatherSource(live, ATLANTA, { temperature: '°F', wind: 'mph' })).feedUrl);
+    expect(url.searchParams.get('current')?.split(',')).not.toContain('time');
+    expect(url.searchParams.get('daily')?.split(',')).not.toContain('time');
     expect(url.searchParams.get('forecast_days')).toBe('4');
+  });
+
+  it('gives every base template with a forecast the one source for a place and units, and a template reading more its own (#345, #541)', async () => {
+    // Every base template's Open-Meteo sources, found, not named: a new forecast template is held to it too.
+    const root = new URL('../../../templates/', import.meta.url);
+    const forecasts = readdirSync(root, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && existsSync(new URL(`${d.name}/template.json`, root)))
+      .flatMap((d) => {
+        const { live } = JSON.parse(readFileSync(new URL(`${d.name}/template.json`, root), 'utf8'));
+        const sources = live ? (live.sources ? Object.values(live.sources) : [live]) : [];
+        return sources.filter((l: { source?: string }) => l.source === 'open-meteo').map((l) => [d.name, l] as const);
+      });
+    expect(forecasts.map(([name]) => name).toSorted()).toEqual(expect.arrayContaining(['info-frame', 'weather']));
+    for (const units of [
+      { temperature: '°F', wind: 'mph' },
+      { temperature: '°C', wind: 'km/h' },
+    ] as const) {
+      const ids = new Set(await Promise.all(forecasts.map(async ([, live]) => (await weatherSource(live, ATLANTA, units)).id)));
+      expect([...ids], units.temperature).toHaveLength(1);
+    }
+    // A metric org whose Info frame picker still holds mph, as one with no wind field does: the same source (#541).
+    const [, weather] = forecasts.find(([name]) => name === 'weather')!;
+    const [, infoFrame] = forecasts.find(([name]) => name === 'info-frame')!;
+    expect((await weatherSource(infoFrame, ATLANTA, { temperature: '°C', wind: 'mph' })).id).toBe(
+      (await weatherSource(weather, ATLANTA, { temperature: '°C', wind: 'km/h' })).id,
+    );
+    const more = { source: 'open-meteo' as const, fields: { gust: 'current.wind_gusts_10m' } };
+    expect((await weatherSource(more, ATLANTA, { temperature: '°F', wind: 'mph' })).id).not.toBe(
+      (await weatherSource(weather, ATLANTA, { temperature: '°F', wind: 'mph' })).id,
+    );
+  });
+
+  it("keeps a spot on the same place's source it reads when the shared one cannot be made, and on no other (#541)", () => {
+    const wanted = 'weather-4180439-c-kmh-aaaaaa';
+    const old = 'weather-4180439-c-kmh-bbbbbb';
+    expect(weatherToKeep(wanted, [undefined, old], [old, 'news'])).toBe(old);
+    expect(weatherToKeep(wanted, [old], ['news'])).toBeUndefined();
+    expect(weatherToKeep(wanted, ['weather-4180439-f-mph-bbbbbb'], ['weather-4180439-f-mph-bbbbbb'])).toBeUndefined();
+    expect(weatherToKeep(wanted, ['news'], ['news'])).toBeUndefined();
+  });
+
+  it('knows two of its ids for the same place and units, whatever variables they ask for (#541)', () => {
+    expect(sameWeather('weather-4180439-c-kmh-aaaaaa', 'weather-4180439-c-kmh-bbbbbb')).toBe(true);
+    expect(sameWeather('weather-4180439-c-kmh-aaaaaa', 'weather-4180439-f-mph-aaaaaa')).toBe(false);
+    expect(sameWeather('weather-4180439-c-kmh-aaaaaa', 'news-feed')).toBe(false);
   });
 });
 

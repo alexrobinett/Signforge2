@@ -14,7 +14,7 @@ const MIN = 60_000;
 const SECRET = 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD';
 const m = (c: string) => c.repeat(64);
 
-type Outcome = 'playing' | 'downloading' | 'asleep' | 'offline' | 'waiting' | 'fell_back' | 'revoked' | 'replaced';
+type Outcome = 'playing' | 'downloading' | 'asleep' | 'unreachable' | 'waiting' | 'fell_back' | 'revoked' | 'replaced';
 interface Page {
   publish: {
     id: string;
@@ -38,7 +38,7 @@ async function orgWith(names: string[], now: number) {
   await owner.signIn(email(`rollout-${n}`));
   const org = await owner.createOrg(`Rollout ${n}`);
   const webhookUrl = `https://ops${n}.example.com/hooks/sf`;
-  await owner.ok('/api/tools/set_webhook_alert_channel', { webhookUrl, signingSecret: SECRET });
+  await owner.ok('/api/tools/set_alert_channel', { kind: 'webhook', webhookUrl, signingSecret: SECRET });
   await owner.ok('/api/tools/update_org_settings', { alerts: { publish_finished: { webhook: true } } });
   const o = testScope(env.DB, org.id);
   const screens: Record<string, { id: string; credential: string }> = {};
@@ -55,7 +55,7 @@ async function orgWith(names: string[], now: number) {
     await o.commit([
       ...p.writes,
       ...o.publishes.stage.addScreens(p.row.id, rows).writes,
-      ...rows.flatMap((r) => o.screens.stage.setDesiredManifest(r.screenId, r.manifestId).writes),
+      ...rows.flatMap((r) => o.screens.stage.setDesiredManifest(r.screenId, r.manifestId, null).writes),
     ]);
     return p.row.id;
   };
@@ -180,7 +180,7 @@ describe('the publish page and the finished-publish alert', () => {
     // Annex was last heard from an hour ago, past the 15 minutes; Cellar is online and fetching it.
     await org.o.screens.update((await org.o.publishes.rollout(v1)).find((r) => r.name === 'Annex')!.id, { lastSeenAt: start - 60 * MIN });
     expect(await bothSides(org, v1, start + MIN)).toEqual({
-      outcomes: { Lobby: 'playing', Annex: 'offline', Cellar: 'downloading' },
+      outcomes: { Lobby: 'playing', Annex: 'unreachable', Cellar: 'downloading' },
       counts: { screens: 3, playing: 1, replaced: 0, open: 2 },
       finished: false,
       alert: null,

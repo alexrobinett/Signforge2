@@ -1,6 +1,8 @@
 // The CMS's colour tokens (src/styles.css) meet WCAG 2 in both themes: text 4.5:1 on what it sits
 // on, and field edges, focus rings, status glyphs and chart marks 3:1 (WCAG 1.4.11).
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { contrastRatio } from '@signforge/compiler';
 import { describe, expect, it } from 'vitest';
 
@@ -31,12 +33,25 @@ const TEXT_ON: [string, string][] = [
     [`actor-${a}`, 'card'],
     [`actor-${a}`, 'accent'],
   ]),
+  // The agent's fill (#263): its banner's title and pills, and the banner's line, on its muted tint.
+  ['actor-agent', 'actor-agent-muted'],
+  ['foreground', 'actor-agent-muted'],
+  ...(['updating', 'offline'] as const).map((s): [string, string] => [`status-${s}-foreground`, `status-${s}-muted`]),
+  // A toast's line and its second action, a link (#372).
+  ['toast-muted-foreground', 'toast'],
+  ['toast-link', 'toast'],
 ];
 const EDGES_ON: [string, string][] = [
   ['input', 'card'],
   ['input', 'background'],
   ['ring', 'card'],
   ['ring', 'background'],
+  // A selected choice (#373, ui/choice.tsx): its primary edge against its own tint and the card or canvas
+  // around it; its focus ring, opaque, on a selected one's tint too.
+  ['primary', 'accent'],
+  ['primary', 'card'],
+  ['primary', 'background'],
+  ['ring', 'accent'],
   ...STATUSES.map((s): [string, string] => [`status-${s}`, 'card']),
   ...[1, 2, 3, 4, 5].map((n): [string, string] => [`chart-${n}`, 'card']),
 ];
@@ -74,6 +89,40 @@ for (const [theme, selector] of [
   });
 }
 
+// A screen's dark surround is the same in both themes, so only :root sets it (#372): its words, and
+// the asleep moon's, on it and on its controls; its ring and warning 3:1.
+it('stage tokens hold their words at 4.5:1 and their marks at 3:1', () => {
+  const t = tokens(':root');
+  const ratio = (a: string, b: string) => contrastRatio(t[a] ?? '', t[b] ?? '');
+  for (const fg of ['stage-foreground', 'stage-muted-foreground', 'stage-asleep']) {
+    expect(ratio(fg, 'stage'), `--${fg} on --stage`).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(fg, 'stage-control'), `--${fg} on --stage-control`).toBeGreaterThanOrEqual(4.5);
+  }
+  for (const mark of ['stage-ring', 'stage-warning']) expect(ratio(mark, 'stage'), `--${mark} on --stage`).toBeGreaterThanOrEqual(3);
+});
+
+/** `fg` drawn at `alpha` over `bg`, as the browser renders it. */
+function over(fg: string, bg: string, alpha: number): string {
+  const ch = (hex: string, i: number) => Number.parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16);
+  return `#${[0, 1, 2]
+    .map((i) =>
+      Math.round(ch(fg, i) * alpha + ch(bg, i) * (1 - alpha))
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('')}`;
+}
+
+// An unreachable screen's thumbnail is dimmed to 80% (screen-thumb.tsx), its words with it; an asleep
+// one's moon and word are not dimmed (checked above as --stage-asleep on --stage).
+it('stage words dimmed on an unreachable screen still read at 4.5:1', () => {
+  const t = tokens(':root');
+  const stage = t.stage ?? '';
+  for (const fg of ['stage-foreground', 'stage-muted-foreground']) {
+    expect(contrastRatio(over(t[fg] ?? '', stage, 0.8), stage), `--${fg} at 80% on --stage`).toBeGreaterThanOrEqual(4.5);
+  }
+});
+
 /** `hsl(h s% l%)` as hex, for the contrast check of org avatars. */
 function hslHex(h: number, s: number, l: number): string {
   const a = s * Math.min(l, 1 - l);
@@ -104,3 +153,101 @@ for (const [theme, selector] of [
     }
   });
 }
+
+// The one selected look (#373, ui/choice.tsx): on the stage, a 20% stage-ring tint over the stage's
+// control groove with stage-foreground words; its edge, and the focus ring (also stage-ring), 3:1 on
+// the tint, the groove and the stage around it.
+it('a selected stage choice reads at 4.5:1, its edge and focus ring at 3:1', () => {
+  const t = tokens(':root');
+  const groove = t['stage-control'] ?? '';
+  const tint = over(t['stage-ring'] ?? '', groove, 0.2);
+  expect(contrastRatio(t['stage-foreground'] ?? '', tint)).toBeGreaterThanOrEqual(4.5);
+  for (const [name, bg] of [
+    ['tint', tint],
+    ['groove', groove],
+    ['stage', t.stage ?? ''],
+  ]) {
+    expect(contrastRatio(t['stage-ring'] ?? '', bg ?? ''), `--stage-ring on the ${name}`).toBeGreaterThanOrEqual(3);
+  }
+});
+
+// Every colour and text size in a class is a token (#405, review of #491): one written out in a class does not follow
+// the themes or the type scale, and no contrast check above can see it. Classes in `.tsx` and `.ts` alike.
+/** A hex colour, not an id that starts like one (`has-[#add-screen]`, review of #493): no letter, digit or dash after it. */
+const HEX = '#[0-9a-f]{3,8}(?![0-9a-z-])';
+const COLOR_FN = String.raw`\b(?:oklch|oklab|rgba?|hsla?|lab|lch|hwb)\(`;
+const PALETTE =
+  'slate|gray|zinc|neutral|stone|mauve|olive|mist|taupe|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose';
+/** The utilities a colour goes in, sides and offsets included (`border-t-`, `ring-offset-`). */
+const COLOR_UTILITY = String.raw`(?:text|bg|border(?:-[xytrblse])?|fill|stroke|ring(?:-offset)?|outline|decoration|divide|placeholder|caret|accent|shadow|inset-shadow|inset-ring|drop-shadow|text-shadow|from|via|to)`;
+const RAW = [
+  // A colour anywhere in an arbitrary value or property, not only first (a gradient's, a border's, a color-mix's):
+  // a hex, or a colour function.
+  new RegExp(String.raw`\[[^\]\s'"]*?(?:${HEX}|${COLOR_FN})`, 'gi'),
+  // A named colour as an arbitrary value (`bg-[red]`), and an arbitrary colour property that is not a variable.
+  new RegExp(String.raw`\b${COLOR_UTILITY}-\[(?:color:)?(?!transparent\]|currentcolor\]|inherit\])[a-z]+\]`, 'gi'),
+  /\[(?:color|background(?:-color)?|border(?:-[a-z]+)?-color|fill|stroke|outline-color|text-decoration-color|caret-color|accent-color):(?!var\()/gi,
+  // Any arbitrary text size, in whatever unit or function (vw, cqw, %, clamp, min): text-[…] takes a colour variable alone.
+  /\btext-\[(?!color:var\()/gi,
+  /\[font-size:/gi,
+  // Tailwind's own palette, white and black included, its newer palettes too: the themes do not set it.
+  new RegExp(String.raw`\b${COLOR_UTILITY}-(?:white|black|(?:${PALETTE})-[0-9]{2,3})\b`, 'g'),
+];
+it('no class names a colour or a text size that is not a token', () => {
+  const root = fileURLToPath(new URL('../src', import.meta.url));
+  const found = readdirSync(root, { recursive: true, encoding: 'utf8' })
+    .filter((f) => f.endsWith('.tsx') || f.endsWith('.ts'))
+    .flatMap((f) => {
+      const source = readFileSync(join(root, f), 'utf8');
+      return RAW.flatMap((raw) => [...source.matchAll(raw)].map((m) => `${f}: ${m[0]}`));
+    });
+  expect(found).toEqual([]);
+});
+it.each([
+  'stroke-[oklch(0.3_0.12_272)]',
+  'bg-[rgb(0_0_0)]',
+  'text-[hsl(0_0%_100%)]',
+  'bg-[color:#0f1115]',
+  'shadow-[0_1px_2px_#000]',
+  '[font-size:15px]',
+  'text-[length:13px]',
+  'text-[calc(1rem+2px)]',
+  'text-[15px]',
+  'text-white',
+  'bg-black/50',
+  'ring-slate-200',
+  // Review of #493: an arbitrary property, a colour not first in its value, a named colour, sides and offsets, newer
+  // palettes, and text sizes in any unit or function.
+  '[color:#fff]',
+  '[background-color:red]',
+  'bg-[linear-gradient(to_right,#000,#fff)]',
+  'border-[1px_solid_#000]',
+  'bg-[color-mix(in_srgb,#fff_50%,transparent)]',
+  'bg-[red]',
+  'border-t-black',
+  'ring-offset-white',
+  'bg-mauve-500',
+  'text-[2vw]',
+  'text-[5cqw]',
+  'text-[120%]',
+  'text-[clamp(1rem,2vw,2rem)]',
+  'text-[min(4vw,2rem)]',
+])('takes %s for what it is: not a token', (cls) => {
+  expect(RAW.some((raw) => new RegExp(raw.source, raw.flags).test(` ${cls} `))).toBe(true);
+});
+
+it.each([
+  'bg-stage',
+  'text-meta',
+  'rounded-[calc(var(--radius-lg)-(--spacing(1)))]',
+  'w-[calc(100%-2rem)]',
+  'text-muted-foreground',
+  'bg-scrim',
+  // An id, not a colour (review of #493); a mix of tokens; a colour variable; no colour at all.
+  'has-[#add-screen]:flex',
+  'bg-[color-mix(in_oklab,var(--chart-1)_20%,transparent)]',
+  'text-[color:var(--status-online)]',
+  'bg-[transparent]',
+])('leaves %s be', (cls) => {
+  expect(RAW.some((raw) => new RegExp(raw.source, raw.flags).test(` ${cls} `))).toBe(false);
+});

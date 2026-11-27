@@ -4,6 +4,7 @@
  */
 export {
   AGENT_LIMITS,
+  CMS_AGENT_CLIENT_ID,
   SCOPES,
   ROLES,
   ROLE_SCOPES,
@@ -14,12 +15,17 @@ export {
   type Actor,
   type AgentAllowance,
   type AgentLimit,
+  type AgentCallLog,
   type AgentLimiter,
   type AgentLimitWindow,
+  type AiKey,
+  type AiProviders,
+  type AiProviderTest,
   type AlertDeliverer,
   type AlertSecretSealer,
   type AnyTool,
   type Connectors,
+  type CursorSealer,
   type DataScope,
   type FeedUrlSealer,
   type Place,
@@ -36,19 +42,43 @@ export {
   type ToolContext,
   type ToolServices,
 } from './tool';
-export { dispatch, describeTools, effectiveScopes, grantOf, permits, redact, type Caller, type DispatchResult, type Grant } from './dispatch';
+export { type ClientRedirect, destinationOf, plainName, shownClient, shownClientName } from './agent-clients';
+export { grantClient } from './agent-grants';
+export {
+  dispatch,
+  refusedPress,
+  describeTools,
+  ListedInput,
+  effectiveScopes,
+  grantOf,
+  overLimit,
+  permits,
+  redact,
+  sha256Hex,
+  type Caller,
+  type DispatchResult,
+  type Grant,
+} from './dispatch';
 export { setOutputChecks } from './output';
 export { ALERT_RETRY_MS, type AlertEvent } from './alert-channels';
-export { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './paging';
-export { platformRegistry, PLATFORM_TOOLS, registry, TOOLS } from './registry';
-export { baseBlobKey, feedBlobKey, manifestKey, orgBlobKey, uploadKey } from './r2';
+export { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from './fields';
+export { agentOutput, platformRegistry, PLATFORM_TOOLS, registry, TOOLS } from './registry';
+export { isReadType, READ_TOOLS, READ_TYPES, readDescription, readTypes, servedByRead, toolsOf } from './read';
+export { describeInput, type ReadType, readInput } from './inputs';
+export { baseBlobKey, manifestKey, orgBlobKey, playerReleaseKey, uploadKey } from './r2';
 export { r2Presigner, type R2PresignConfig, type UploadSigner } from './upload';
-export { MAX_RENDITION_BYTES, UPLOAD_URL_SECONDS } from './assets';
+export { UPLOAD_URL_SECONDS } from './assets';
 export { IDENTIFY_SECONDS, liveOverride, OVERRIDE_LIMIT_MS } from './screens';
-export { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from './pairing';
+export { entryToDelete, entryView } from './schedule';
+export { MAX_RENDITION_BYTES, PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH, saveDataSourceInput } from './inputs';
 export { kitColors, type StoredColors } from './brand';
 export type { StoredCheckReport } from './templates';
+export { AI_PROVIDERS, AUDIENCE_ROLES } from './outputs';
+export { approves } from './publish-requests';
 export type {
+  AgentCall,
+  AgentUsage,
+  AiProviderName,
   AssetView,
   Audience,
   BrandKitView,
@@ -68,9 +98,12 @@ export {
   probeDrafts,
   promoteDrafts,
   previewInput,
+  dryPublish,
   publishOrg,
   spotDraft,
   type DraftKind,
+  type DraftPin,
+  type SampleAck,
   type DraftReport,
   type OrgGraph,
   type PreviewInput,
@@ -91,4 +124,5 @@ export {
 } from './screen-state';
 export { tally } from './rollout';
 export { orgSettings } from './settings';
-export { madeBySpotEditor } from './data-sources';
+export { madeBySpotEditor, reachesScreens, sourceRefusal } from './data-sources';
+export { orgGroups } from './memberships';

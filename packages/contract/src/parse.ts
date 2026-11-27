@@ -1,65 +1,47 @@
 /**
- * Each validator in `validate.ts` as a parser: the same check, but a value that passes comes back
- * typed, so a caller never casts what it has just checked. This file holds the contract's only
- * cast from a checked `unknown` to its shape.
+ * Each shape in `validate.ts` as a parser: the same check as its validator, but a value that passes comes back typed,
+ * as exactly the shape, any key it does not declare left out (`shape.ts`, #156). A caller never casts what it has just
+ * checked.
  */
-import type {
-  BrandKit,
-  DataSnapshot,
-  DeviceCommand,
-  DeviceSocketMessage,
-  DisplayHours,
-  PairPollResponse,
-  PairStartRequest,
-  PairStartResponse,
-  PreviewHostMessage,
-  ScreenManifest,
-  ServerSocketMessage,
-  SyncRequest,
-  SyncResponse,
-  TemplateManifest,
-  TemplateRuntimeReport,
-} from './shapes.ts';
 import {
-  displayHoursProblems,
-  validateBrandKit,
-  validateDataSnapshot,
-  validateDeviceCommand,
-  validateDeviceSocketMessage,
-  validateManifest,
-  validatePairPollResponse,
-  validatePairStartRequest,
-  validatePairStartResponse,
-  validatePreviewHostMessage,
-  validateServerSocketMessage,
-  validateSyncRequest,
-  validateSyncResponse,
-  validateTemplateManifest,
-  validateTemplateRuntimeReport,
+  brandKitShape,
+  dataSnapshotShape,
+  deviceCommandShape,
+  deviceSocketMessageShape,
+  pairPollResponseShape,
+  pairStartRequestShape,
+  pairStartResponseShape,
+  playerReleaseManifestShape,
+  playerReleaseOfferShape,
+  previewHostMessageShape,
+  serverSocketMessageShape,
+  supervisorAliveResponseShape,
+  syncRequestShape,
+  syncResponseShape,
+  templateManifestShape,
+  templateRuntimeReportShape,
+  validDisplayHoursShape,
+  validManifestShape,
 } from './validate.ts';
 
-/** The input itself, typed, when it passes; otherwise the validator's problems. */
+/** The value, typed, when it passes; otherwise the validator's problems. */
 export type Parsed<T> = { ok: true; value: T } | { ok: false; problems: string[] };
 
-const parser =
-  <T>(validate: (input: unknown) => string[]) =>
-  (input: unknown): Parsed<T> => {
-    const problems = validate(input);
-    return problems.length ? { ok: false, problems } : { ok: true, value: input as T };
-  };
-
-export const parseTemplateManifest = parser<TemplateManifest>(validateTemplateManifest);
-export const parseBrandKit = parser<BrandKit>(validateBrandKit);
-export const parseDisplayHours = parser<DisplayHours>(displayHoursProblems);
-export const parseManifest = parser<ScreenManifest>(validateManifest);
-export const parseDataSnapshot = parser<DataSnapshot>(validateDataSnapshot);
-export const parsePairStartRequest = parser<PairStartRequest>(validatePairStartRequest);
-export const parsePairStartResponse = parser<PairStartResponse>(validatePairStartResponse);
-export const parsePairPollResponse = parser<PairPollResponse>(validatePairPollResponse);
-export const parseDeviceCommand = parser<DeviceCommand>(validateDeviceCommand);
-export const parseSyncRequest = parser<SyncRequest>(validateSyncRequest);
-export const parseSyncResponse = parser<SyncResponse>(validateSyncResponse);
-export const parseServerSocketMessage = parser<ServerSocketMessage>(validateServerSocketMessage);
-export const parseDeviceSocketMessage = parser<DeviceSocketMessage>(validateDeviceSocketMessage);
-export const parsePreviewHostMessage = parser<PreviewHostMessage>(validatePreviewHostMessage);
-export const parseTemplateRuntimeReport = parser<TemplateRuntimeReport>(validateTemplateRuntimeReport);
+export const parseTemplateManifest = templateManifestShape.read;
+export const parseBrandKit = brandKitShape.read;
+export const parseDisplayHours = validDisplayHoursShape.read;
+export const parseManifest = validManifestShape.read;
+export const parseDataSnapshot = dataSnapshotShape.read;
+export const parsePairStartRequest = pairStartRequestShape.read;
+export const parsePairStartResponse = pairStartResponseShape.read;
+export const parsePairPollResponse = pairPollResponseShape.read;
+export const parseDeviceCommand = deviceCommandShape.read;
+export const parseSyncRequest = syncRequestShape.read;
+export const parseSyncResponse = syncResponseShape.read;
+export const parseServerSocketMessage = serverSocketMessageShape.read;
+export const parseDeviceSocketMessage = deviceSocketMessageShape.read;
+export const parsePreviewHostMessage = previewHostMessageShape.read;
+export const parseTemplateRuntimeReport = templateRuntimeReportShape.read;
+export const parsePlayerReleaseManifest = playerReleaseManifestShape.read;
+export const parsePlayerReleaseOffer = playerReleaseOfferShape.read;
+export const parseSupervisorAliveResponse = supervisorAliveResponseShape.read;

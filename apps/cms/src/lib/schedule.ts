@@ -1,20 +1,17 @@
 /**
  * The Schedule page's model (M3-19): schedule entries and takeovers as the tools return them
  * (`list_schedule_entries`), in words, and the week view: what one screen plays through its week,
- * as drafted, from the entries aimed at it, its groups or every screen. The week view asks
- * player-core's `resolvePlaylist`, which the screen itself runs, at every instant what plays can
- * change, so the page and the screen cannot disagree.
+ * as drafted, from the entries aimed at it, its groups or every screen. Which entries reach it, and in what order, is
+ * the compiler's Screen schedule, as the publish asks it (#330); the week view asks player-core's `playing`, which the
+ * screen itself runs, at every instant what plays can change, so the page and the screen cannot disagree.
  */
-import type { ScheduleEntry, ScreenManifest } from '@signforge/contract';
-import { activeTakeover, localTime, resolvePlaylist } from '@signforge/player-core';
+import { reaches, screenSchedule, targetIdOf, type TargetedEntry } from '@signforge/compiler/schedule';
+import { localTime, playing, type ScheduleView } from '@signforge/player-core';
 import type { ToolOutput } from '@signforge/tools/outputs';
 import { dayRange } from './days';
 
 /** One schedule entry or takeover, its draft, as `list_schedule_entries` returns it: `deleted` waits for a publish, `live` is what screens play. */
 export type ScheduleEntryView = ToolOutput<'list_schedule_entries'>['entries'][number];
-
-/** What an entry plays where and when, as drafted or as published. */
-type EntryFields = NonNullable<ScheduleEntryView['live']>;
 
 /** "Mon–Fri, 06:00–10:00", "Sat, all day, 2026-12-01 to 2026-12-24", or "Always". */
 export function describeWhen(e: Pick<ScheduleEntryView, 'days' | 'from' | 'to' | 'startDate' | 'endDate'>): string {
@@ -30,13 +27,19 @@ export function describeWhen(e: Pick<ScheduleEntryView, 'days' | 'from' | 'to' |
   return parts.length ? parts.join(', ') : 'Always';
 }
 
-/** The entry as a screen gets it: the contract's `ScheduleEntry`. */
-function toEntry(e: EntryFields & { id: string }): ScheduleEntry {
+/**
+ * An entry as drafted, as the Screen schedule takes it: published ones by when, then the drafts the next publish takes,
+ * after every published one.
+ */
+function toEntry(e: ScheduleEntryView): TargetedEntry {
+  const targetId = targetIdOf(e);
   return {
     id: e.id,
     playlist: e.playlistId,
     priority: e.priority,
     target: e.target,
+    ...(targetId === undefined ? {} : { targetId }),
+    order: e.draftChanged ? Number.POSITIVE_INFINITY : (e.publishedAt ?? Number.POSITIVE_INFINITY),
     ...(e.startDate ? { startDate: e.startDate } : {}),
     ...(e.endDate ? { endDate: e.endDate } : {}),
     ...(e.days ? { days: e.days } : {}),
@@ -47,9 +50,11 @@ function toEntry(e: EntryFields & { id: string }): ScheduleEntry {
   };
 }
 
-/** Whether an entry reaches the screen: aimed at every screen, one of its groups, or it. */
-const reaches = (e: Pick<ScheduleEntryView, 'target' | 'groupId' | 'screenId'>, screenId: string, groupIds: readonly string[]) =>
-  e.target === 'org' || (e.target === 'group' && groupIds.includes(e.groupId ?? '')) || (e.target === 'screen' && e.screenId === screenId);
+/** The screen as its schedule sees it: its id and the groups it is in. */
+const scheduleScreen = (screenId: string, groups: readonly { id: string; screenIds: readonly string[] }[]) => ({
+  id: screenId,
+  groups: groups.filter((g) => g.screenIds.includes(screenId)).map((g) => g.id),
+});
 
 /** A stretch of an hour with one playlist on screen. */
 interface Segment {
@@ -84,30 +89,17 @@ interface ScreenSchedule {
 }
 
 /**
- * The part of a manifest `resolvePlaylist` reads, for `screen`, as drafted: the entries that reach
- * it in the order a publish would list them (published ones by when, then the drafts the next
- * publish takes), the playlists they name, its time zone.
+ * What the screen's rule reads of `screen`'s schedule, as drafted: the entries that reach it, as the Screen schedule
+ * orders them. Every playlist it names counts as one the screen has, and none as alerts alone: the page reads it on a
+ * trusted clock, where that never matters.
  */
-function scheduleManifest({ screen, groups, entries, defaultPlaylistId }: ScreenSchedule): ScreenManifest {
-  const groupIds = groups.filter((g) => g.screenIds.includes(screen.id)).map((g) => g.id);
-  const when = (e: ScheduleEntryView) => (e.draftChanged ? Number.POSITIVE_INFINITY : (e.publishedAt ?? Number.POSITIVE_INFINITY));
-  const schedule = entries
-    .filter((e) => !e.deleted && reaches(e, screen.id, groupIds))
-    .sort((a, b) => when(a) - when(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .map(toEntry);
-  const ids = new Set([defaultPlaylistId, ...schedule.map((e) => e.playlist)]);
+function scheduleView({ screen, groups, entries, defaultPlaylistId }: ScreenSchedule): ScheduleView {
   return {
-    schema: 0,
-    id: 'schedule',
-    generatedAt: '',
-    screen: { id: screen.id, name: screen.id, timezone: screen.timezone, orientation: 'landscape' },
-    files: {},
-    templates: {},
-    spots: {},
-    playlists: Object.fromEntries([...ids].map((id) => [id, { id, name: id, transition: { type: 'cut' }, items: [] }])),
-    dataSources: {},
-    schedule,
+    timezone: screen.timezone,
+    schedule: screenSchedule(entries.filter((e) => !e.deleted).map(toEntry), scheduleScreen(screen.id, groups)),
     defaultPlaylist: defaultPlaylistId,
+    has: () => true,
+    alertsOnly: () => false,
   };
 }
 
@@ -123,9 +115,9 @@ const minutesOf = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.
  */
 export function weekOf(s: ScreenSchedule & { at: Date }): WeekDay[] {
   const { screen, at } = s;
-  const manifest = scheduleManifest(s);
-  const daily = manifest.schedule.flatMap((e) => [e.from, e.to].flatMap((t) => (t ? [minutesOf(t)] : [])));
-  const instants = manifest.schedule.flatMap((e) => [e.startsAt, e.endsAt].flatMap((t) => (t ? [Date.parse(t)] : [])));
+  const view = scheduleView(s);
+  const daily = view.schedule.flatMap((e) => [e.from, e.to].flatMap((t) => (t ? [minutesOf(t)] : [])));
+  const instants = view.schedule.flatMap((e) => [e.startsAt, e.endsAt].flatMap((t) => (t ? [Date.parse(t)] : [])));
   /** The hour starting at `start`, local hour `hour`, cut where what plays changes. */
   const hourAt = (start: number, hour: number): WeekHour => {
     const cuts = new Set([0]);
@@ -135,8 +127,9 @@ export function weekOf(s: ScreenSchedule & { at: Date }): WeekDay[] {
     const segments: Segment[] = [];
     minutes.forEach((from, i) => {
       const when = new Date(start + from * 60_000);
-      const playlistId = resolvePlaylist(manifest, when).id;
-      const takeover = activeTakeover(manifest, when) !== undefined;
+      const now = playing(view, when);
+      const playlistId = now.playlist;
+      const takeover = now.takeover !== undefined;
       const to = minutes[i + 1] ?? 60;
       const last = segments.at(-1);
       if (last && last.playlistId === playlistId && last.takeover === takeover) last.to = to;
@@ -188,8 +181,7 @@ export function howItReaches(
   screenId: string,
   groups: readonly { id: string; name: string; screenIds: readonly string[] }[],
 ): string | undefined {
-  const groupIds = groups.filter((g) => g.screenIds.includes(screenId)).map((g) => g.id);
-  if (!reaches(e, screenId, groupIds)) return undefined;
+  if (!reaches({ target: e.target, targetId: targetIdOf(e) }, scheduleScreen(screenId, groups))) return undefined;
   if (e.target === 'screen') return 'This screen';
   if (e.target === 'group') return `Via group ${groups.find((g) => g.id === e.groupId)?.name ?? 'removed'}`;
   return 'Every screen';
@@ -240,7 +232,7 @@ function winnersByMinute(week: WeekDay[]): (string | undefined)[][] {
 /**
  * "What this screen will play" (#181): `draft`, aimed at `screen`, over this week as drafted, as
  * one line. Each entry is given a playlist of its own id, so `weekOf` (which asks player-core's
- * `resolvePlaylist`, as the screen does) says which entry wins each minute: where the draft would
+ * `playing`, as the screen does) says which entry wins each minute: where the draft would
  * play alone, the entry that wins instead is where it loses. Takeovers cut in; anything else can
  * be outranked.
  */

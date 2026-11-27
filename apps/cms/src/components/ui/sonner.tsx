@@ -12,16 +12,16 @@ const style: CSSProperties & Record<`--${string}`, string> = {
 /**
  * The kit's toast (canvas kit, Toast and dialog): dark in both themes, a 15 px title, the actions
  * under the words, the main one first as a button and the other as a link. Its colours are the
- * kit's own, each read at 4.5:1 or more on its background.
+ * `toast` tokens, each checked at 4.5:1 or more on its background (test/tokens.test.ts).
  */
 const toastOptions: ToasterProps['toastOptions'] = {
   classNames: {
-    toast: 'flex-wrap! items-start! gap-x-2.5! gap-y-3! bg-[#101828]! text-white! border-[#101828]! dark:bg-[#262b36]! dark:border-[#3a4150]!',
-    title: 'text-[15px]! font-semibold! text-white!',
-    description: 'text-[#d0d5dd]!',
+    toast: 'flex-wrap! items-start! gap-x-2.5! gap-y-3! bg-toast! text-toast-foreground! border-toast-edge!',
+    title: 'text-md! font-semibold! text-toast-foreground!',
+    description: 'text-toast-muted-foreground!',
     content: 'basis-[calc(100%-2rem)]',
-    actionButton: 'order-1 h-9! px-3.5! text-sm! font-semibold! bg-white! text-[#101828]! ml-8!',
-    cancelButton: 'order-2 h-9! bg-transparent! text-sm! text-[#c7d2fe]! underline! underline-offset-4!',
+    actionButton: 'order-1 h-9! px-3.5! text-sm! font-semibold! bg-toast-action! text-toast-action-foreground! ml-8!',
+    cancelButton: 'order-2 h-9! bg-transparent! text-sm! text-toast-link! underline! underline-offset-4!',
   },
 };
 

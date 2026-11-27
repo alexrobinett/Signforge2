@@ -1,21 +1,61 @@
-/**
- * The org's audit log (#82): every change a tool, Better Auth's membership endpoints or an agent's
- * limit refusal recorded, newest first, filtered, a page at a time read in SQL. Inputs were
- * redacted when the row was written (`redact()` in ./dispatch.ts) and are returned as stored.
- *
- * An entry carries no id of its own: an agent-limit row's id is longer than the contract's id rules
- * allow (#77), and the cursor, made from each row's time and `rowid` and the org, is what pages.
- */
-import { z } from 'zod';
-import { keysetPage, pageInput } from './paging';
+import { shownClientName } from './agent-clients';
+import { keysetPage } from './paging';
 import { defineTool, ToolError } from './tool';
-import { ACTOR_KINDS, outputs } from './outputs';
+import { outputs } from './outputs';
+import { inputs } from './inputs';
 
 /**
  * Membership changes whose detail names the invitee by email. Better Auth lets only owners list
  * invitations, so only an owner gets the email here, or finds the row by it.
  */
 const INVITATIONS = ['invite_member', 'cancel_invitation', 'reject_invitation'];
+
+/** A content save's rows under the create (no id given) and the update (its id given) it replaced (#345 PR 4). */
+const saves = (save: string, idKey: string, created: string, changed: string) => ({
+  [created]: { actions: [save], inputHas: { [idKey]: false } },
+  [changed]: { actions: [save], inputHas: { [idKey]: true } },
+});
+
+/**
+ * Rows an action's filter finds besides its own. A publish, or an approval's (M4-09), that made the org's first default
+ * changed it too (#243). A screen command, a group's save, a content save, a delete, a takeover, an upload and an alert channel set (#345) do
+ * what the tools they replaced did: their rows are found under those tools' names, by the input they recorded (or, for
+ * an upload's finish, the kind it checked).
+ */
+const ALSO: Record<string, { actions: readonly string[]; detailHas?: string; inputHas?: Readonly<Record<string, boolean>>; inputHasAny?: readonly string[] }> =
+  {
+    set_default_playlist: { actions: ['publish', 'approve_publish_request'], detailHas: '"madeDefault"' },
+    identify_screen: { actions: ['screen_command'], detailHas: '"command":"identify"' },
+    restart_screen: { actions: ['screen_command'], detailHas: '"command":"restart"' },
+    set_display_override: { actions: ['screen_command'], detailHas: '"command":"display_' },
+    // A screen's update (#345 PR 3) that renamed it, or changed a setting: found under each tool it replaced (#507).
+    rename_screen: { actions: ['update_screen'], inputHas: { name: true } },
+    update_screen_settings: { actions: ['update_screen'], inputHasAny: ['timezone', 'locale', 'orientation', 'displayHours'] },
+    create_group: { actions: ['save_group'], inputHas: { groupId: false } },
+    rename_group: { actions: ['save_group'], inputHas: { groupId: true, name: true } },
+    set_group_members: { actions: ['save_group'], detailHas: '"membership":"set"', inputHas: { groupId: true } },
+    add_group_members: { actions: ['save_group'], detailHas: '"membership":"add"', inputHas: { groupId: true } },
+    remove_group_members: { actions: ['save_group'], detailHas: '"membership":"remove"', inputHas: { groupId: true } },
+    ...saves('save_spot', 'spotId', 'create_spot', 'update_spot'),
+    ...saves('save_playlist', 'playlistId', 'create_playlist', 'update_playlist'),
+    ...saves('save_schedule_entry', 'scheduleEntryId', 'create_schedule_entry', 'update_schedule_entry'),
+    ...saves('save_brand_kit', 'brandKitId', 'create_brand_kit', 'update_brand_kit'),
+    ...saves('save_data_source', 'dataSourceId', 'create_data_source', 'update_data_source'),
+    // Its outcome, which the save records (`madeDefault`), not its input: the first kit, and never a kit already the default (#507).
+    set_default_brand_kit: { actions: ['save_brand_kit'], detailHas: '"madeDefault":true' },
+    delete_asset: { actions: ['delete'], detailHas: '"type":"asset"' },
+    delete_data_source: { actions: ['delete'], detailHas: '"type":"data_source"' },
+    delete_playlist: { actions: ['delete'], detailHas: '"type":"playlist"' },
+    delete_schedule_entry: { actions: ['delete'], detailHas: '"type":"schedule_entry"' },
+    publish_takeover: { actions: ['takeover'], detailHas: '"action":"publish"' },
+    end_takeover: { actions: ['takeover'], detailHas: '"action":"end"' },
+    create_asset_upload: { actions: ['start_upload'], detailHas: '"kind":"image"' },
+    create_video_upload: { actions: ['start_upload'], detailHas: '"kind":"video"' },
+    finalize_asset: { actions: ['finalize_upload'], detailHas: '"kind":"image"' },
+    finalize_video_upload: { actions: ['finalize_upload'], detailHas: '"kind":"video"' },
+    set_slack_alert_channel: { actions: ['set_alert_channel'], detailHas: '"kind":"slack"' },
+    set_webhook_alert_channel: { actions: ['set_alert_channel'], detailHas: '"kind":"webhook"' },
+  };
 
 const listAuditLog = defineTool({
   name: 'list_audit_log',
@@ -24,21 +64,7 @@ const listAuditLog = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({
-    ...pageInput,
-    actor: z
-      .object({ kind: z.enum(ACTOR_KINDS).optional(), id: z.string().min(1).max(200).optional().describe('One actor, as an entry names it') })
-      .optional()
-      .describe('Only what this kind of actor, or this one actor, did'),
-    action: z.string().min(1).max(64).optional().describe('Only this action, such as rename_screen'),
-    target: z
-      .object({ kind: z.string().min(1).max(40).describe('Such as screen or spot'), id: z.string().min(1).max(200).optional() })
-      .optional()
-      .describe('Only what was done to this kind of thing, or this one thing, even one since deleted'),
-    from: z.number().int().nonnegative().optional().describe('Only entries at or after this time, in ms'),
-    to: z.number().int().nonnegative().optional().describe('Only entries before this time, in ms'),
-    query: z.string().trim().min(1).max(100).optional().describe('Only entries whose action, actor, target or recorded input contains this text'),
-  }),
+  input: inputs.list_audit_log,
   output: outputs.list_audit_log,
   example: {},
   handler: async ({ org, input, role }) => {
@@ -53,6 +79,7 @@ const listAuditLog = defineTool({
           actorKind: actor?.kind,
           actorId: actor?.id,
           action,
+          alsoAction: action === undefined ? undefined : ALSO[action],
           targetKind: target?.kind,
           targetId: target?.id,
           from,
@@ -64,7 +91,21 @@ const listAuditLog = defineTool({
     );
     const entries = rows.map((e) => {
       const detail: Record<string, unknown> = e.detailJson ? JSON.parse(e.detailJson) : {};
-      if (!owner && INVITATIONS.includes(e.action)) delete detail.email;
+      // Better Auth's rows hold the email in their detail; a tool's (cancel_invitation's, #321) under `detail.detail`; and a
+      // drawer card's summary (`confirmed.summary`) may name it, as rows written before the card withheld it do (review of #414).
+      if (!owner && INVITATIONS.includes(e.action)) {
+        delete detail.email;
+        const more = detail.detail;
+        if (typeof more === 'object' && more !== null && !Array.isArray(more))
+          detail.detail = Object.fromEntries(Object.entries(more).filter(([k]) => k !== 'email'));
+        const confirmed = detail.confirmed;
+        if (typeof confirmed === 'object' && confirmed !== null && !Array.isArray(confirmed))
+          detail.confirmed = Object.fromEntries(Object.entries(confirmed).filter(([k]) => k !== 'summary'));
+      }
+      // A connection's client named itself: only as a page may show it, rows written before that rule too.
+      if (e.action === 'create_agent_grant' && typeof detail.clientId === 'string' && typeof detail.clientName === 'string') {
+        detail.clientName = shownClientName(detail.clientId, detail.clientName);
+      }
       return {
         at: e.at,
         actor: { kind: e.actorKind, id: e.actorId, clientId: e.clientId },

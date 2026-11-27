@@ -13,13 +13,22 @@
     "dev": {
       "name": "signforge-api",
       "main": "src/index.ts",
-      "vars": { "ENVIRONMENT": "dev", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
+      "vars": {
+        "ENVIRONMENT": "dev",
+        "BUILD_VERSION": "dev",
+        "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>",
+        "AGENT_CALLS_DATASET": "signforge_agent_calls_dev",
+        // The contract's test-only release key (packages/contract/test/player-release), which signs nothing real.
+        "PLAYER_RELEASE_PUBLIC_KEY": "MCowBQYDK2VwAyEAE2z9q2IHuZImrWNK3+j95fk1Ed8+M9JHiCvuMpgShSI="
+      },
       // Cloudflare Email Sending. Dev records mail instead of sending it (src/email); the binding is
       // here so its type is generated. Secrets (AUTH_SECRET, GITHUB_*) are listed in src/env.d.ts.
       // Pairing (src/device/pairing.ts): per address for the screen's calls, per member and per
       // address for claims. Counted per Cloudflare location, which is enough to stop guessing.
       // Place search (find_places): per member and per address, each a request to Open-Meteo.
       // Table reads (read_table): per member and per address, each a fetch of a URL the member typed.
+      // Agent calls (src/agents/grant-object.ts): per agent grant, AGENT_LIMITS' 120 a minute. Writes are counted in the grant's object.
+      // Player releases (src/releases): per address, before the secret is checked, so it cannot be guessed at speed.
       // Template checks (src/template-check.ts): per org, which has one check container. Also counted per
       // location, so an org pushing through two gets two allowances; its container's queue (4) is the exact bound.
       "ratelimits": [
@@ -28,12 +37,18 @@
         { "name": "PAIR_CLAIM_LIMIT", "namespace_id": "803", "simple": { "limit": 10, "period": 60 } },
         { "name": "TEMPLATE_CHECK_LIMIT", "namespace_id": "804", "simple": { "limit": 10, "period": 60 } },
         { "name": "PLACE_SEARCH_LIMIT", "namespace_id": "805", "simple": { "limit": 30, "period": 60 } },
-        { "name": "TABLE_READ_LIMIT", "namespace_id": "806", "simple": { "limit": 30, "period": 60 } }
+        { "name": "TABLE_READ_LIMIT", "namespace_id": "806", "simple": { "limit": 30, "period": 60 } },
+        { "name": "PAGE_READ_LIMIT", "namespace_id": "808", "simple": { "limit": 30, "period": 60 } },
+        { "name": "CHAT_TURN_LIMIT", "namespace_id": "809", "simple": { "limit": 10, "period": 60 } },
+        { "name": "AGENT_CALL_LIMIT", "namespace_id": "807", "simple": { "limit": 120, "period": 60 } },
+        { "name": "PLAYER_RELEASE_LIMIT", "namespace_id": "800", "simple": { "limit": 10, "period": 60 } }
       ],
       "send_email": [{ "name": "EMAIL" }],
+      // Agents' calls over /mcp, one data point each (src/agents/calls.ts); read back through the SQL API.
+      "analytics_engine_datasets": [{ "binding": "AGENT_CALLS", "dataset": "signforge_agent_calls_dev" }],
       // One Durable Object per screen, holding its nudge socket (src/device/screen-object.ts), one
       // per agent grant, counting its calls against its limits (src/agents/grant-object.ts), and one
-      // per org, holding its publish lock (src/publish.ts).
+      // per org, holding its publish lock (src/org-object.ts).
       "durable_objects": {
         "bindings": [
           { "name": "SCREENS", "class_name": "ScreenObject" },
@@ -50,7 +65,7 @@
         { "tag": "v3", "new_sqlite_classes": ["OrgObject"] }
       ],
       // A publish tells its screens through this queue, 50 a message (src/publish.ts). The poller queues the
-      // stories' photos it has not fetched to the other (src/data/images.ts): one a batch, so an invocation's
+      // stories' photos it has not fetched to the other (src/data/feed-photos.ts): one a batch, so an invocation's
       // memory, CPU and subrequests (up to 12 fetches, at most two Images calls, R2) are one photo's, within the Free plan's.
       "queues": {
         "producers": [{ "binding": "PUBLISH_NOTICES", "queue": "signforge-publish-notices" }, { "binding": "FEED_IMAGES", "queue": "signforge-feed-images" }],
@@ -59,9 +74,9 @@
           { "queue": "signforge-feed-images", "max_batch_size": 1, "max_retries": 2 }
         ]
       },
-      // Decodes and scales the stories' photos off the Worker's CPU (src/data/images.ts).
+      // Decodes and scales the stories' photos off the Worker's CPU (src/data/feed-photos.ts).
       "images": { "binding": "IMAGES" },
-      // The data-source poller every minute (feed-photo cleanup takes its 01:00 UTC invocation) and the offline alert check every 5;
+      // The data-source poller every minute (feed-photo cleanup takes each hour's :30 invocation, storage cleanup 02:00 UTC's) and the offline alert check every 5;
       // src/index.ts routes on the schedule. Locally: `wrangler dev --env dev --test-scheduled`, then GET /__scheduled?cron=*/5+*+*+*+*.
       "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
       // A placeholder id: dev only ever runs locally.
@@ -80,33 +95,56 @@
           "binding": "BLOBS",
           "bucket_name": "signforge-dev",
           "local_dev": { "experimental_s3_credentials": { "accessKeyId": "signforge-local", "secretAccessKey": "signforge-local-only" } }
-        }
+        },
+        // Player release tarballs (#628), apart from org data: only /v1/player-releases writes them (src/releases).
+        { "binding": "PLAYER_RELEASES", "bucket_name": "signforge-releases-dev" }
       ]
     },
     "demo": {
       "name": "signforge-api-demo",
       "main": "src/index.ts",
       "vars": {
+        // The Ed25519 key (base64 SPKI DER) player releases are signed with (#628): `/v1/player-releases/register` takes only a
+        // release that verifies against it. It must be the key in device/pi/player-release.pub, which screens check (test/releases.test.ts).
+        "PLAYER_RELEASE_PUBLIC_KEY": "MCowBQYDK2VwAyEAwCkrMWF7x/CTowuvNj/Nf1gY+pzpogvDKvv1JMlgfks=",
         "ENVIRONMENT": "demo",
         "BUILD_VERSION": "dev",
         "EMAIL_FROM": "SignForge <no-reply@alexrobinett.dev>",
         "CMS_ORIGIN": "https://demo.signforge.alexrobinett.dev",
         "R2_S3_ENDPOINT": "https://30e327dbb4fcf68bf6605f549d9b6198.r2.cloudflarestorage.com",
-        "R2_BUCKET_NAME": "signforge-demo"
+        "R2_BUCKET_NAME": "signforge-demo",
+        "AGENT_CALLS_DATASET": "signforge_agent_calls_demo",
+        // The demo's real-feed test: every shown story gets its photo. Past what six feeds polling hourly can bring in a
+        // day (250 each, at ten a poll); unset elsewhere, which keeps 60 an org and 30 a source (docs/backend-plan.md).
+        "FEED_PHOTOS_ORG_DAILY": "1800",
+        "FEED_PHOTOS_SOURCE_DAILY": "300",
+        // Its share of the account's 10,000 Queues operations a day (Free plan, #339), at three a message: with prod's 500,
+        // 7,500 together, leaving 2,500 for publish notices. The six feeds above bring in about 1,500 a day an org.
+        "FEED_PHOTOS_QUEUE_DAILY": "2000",
+        // Its share of the account's 5,000 Images transformations a month (Free plan, #500): with prod's 1,000, 4,500
+        // together. The two must stay under 5,000 together (docs/backend-plan.md).
+        "IMAGES_MONTHLY_TRANSFORMS": "3500"
       },
       // Pairing (src/device/pairing.ts): per address for the screen's calls, per member and per
       // address for claims. Counted per Cloudflare location, which is enough to stop guessing.
       // Place search (find_places): per member and per address, each a request to Open-Meteo.
       // Table reads (read_table): per member and per address, each a fetch of a URL the member typed.
+      // Agent calls (src/agents/grant-object.ts): per agent grant, AGENT_LIMITS' 120 a minute. Writes are counted in the grant's object.
+      // Player releases (src/releases): per address, before the secret is checked, so it cannot be guessed at speed.
       "ratelimits": [
         { "name": "PAIR_START_LIMIT", "namespace_id": "811", "simple": { "limit": 10, "period": 60 } },
         { "name": "PAIR_POLL_LIMIT", "namespace_id": "812", "simple": { "limit": 600, "period": 60 } },
         { "name": "PAIR_CLAIM_LIMIT", "namespace_id": "813", "simple": { "limit": 10, "period": 60 } },
         { "name": "TEMPLATE_CHECK_LIMIT", "namespace_id": "814", "simple": { "limit": 10, "period": 60 } },
         { "name": "PLACE_SEARCH_LIMIT", "namespace_id": "815", "simple": { "limit": 30, "period": 60 } },
-        { "name": "TABLE_READ_LIMIT", "namespace_id": "816", "simple": { "limit": 30, "period": 60 } }
+        { "name": "TABLE_READ_LIMIT", "namespace_id": "816", "simple": { "limit": 30, "period": 60 } },
+        { "name": "PAGE_READ_LIMIT", "namespace_id": "818", "simple": { "limit": 30, "period": 60 } },
+        { "name": "CHAT_TURN_LIMIT", "namespace_id": "819", "simple": { "limit": 10, "period": 60 } },
+        { "name": "AGENT_CALL_LIMIT", "namespace_id": "817", "simple": { "limit": 120, "period": 60 } },
+        { "name": "PLAYER_RELEASE_LIMIT", "namespace_id": "810", "simple": { "limit": 10, "period": 60 } }
       ],
       "send_email": [{ "name": "EMAIL" }],
+      "analytics_engine_datasets": [{ "binding": "AGENT_CALLS", "dataset": "signforge_agent_calls_demo" }],
       "durable_objects": {
         "bindings": [
           { "name": "SCREENS", "class_name": "ScreenObject" },
@@ -140,25 +178,46 @@
           "migrations_dir": "../../packages/db/migrations"
         }
       ],
-      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-demo" }]
+      // PLAYER_RELEASES: player release tarballs (#628), apart from org data: only /v1/player-releases writes them (src/releases).
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-demo" }, { "binding": "PLAYER_RELEASES", "bucket_name": "signforge-releases-demo" }]
     },
     "prod": {
       "name": "signforge-api-prod",
       "main": "src/index.ts",
-      "vars": { "ENVIRONMENT": "prod", "BUILD_VERSION": "dev", "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>" },
+      "vars": {
+        "ENVIRONMENT": "prod",
+        "BUILD_VERSION": "dev",
+        "EMAIL_FROM": "SignForge <no-reply@signforge.invalid>",
+        "AGENT_CALLS_DATASET": "signforge_agent_calls_prod",
+        // No release key yet: prod takes no player release until it has one (`/v1/player-releases` answers 404).
+        "PLAYER_RELEASE_PUBLIC_KEY": "",
+        // Its share of the account's 10,000 Queues operations a day (Free plan, #339): with demo's 2,000, 7,500 operations
+        // together, leaving 2,500 for publish notices.
+        "FEED_PHOTOS_QUEUE_DAILY": "500",
+        // Its share of the account's 5,000 Images transformations a month (Free plan, #500): no users yet; with demo's
+        // 3,500, 4,500 together. The two must stay under 5,000 together (docs/backend-plan.md).
+        "IMAGES_MONTHLY_TRANSFORMS": "1000"
+      },
       // Pairing (src/device/pairing.ts): per address for the screen's calls, per member and per
       // address for claims. Counted per Cloudflare location, which is enough to stop guessing.
       // Place search (find_places): per member and per address, each a request to Open-Meteo.
       // Table reads (read_table): per member and per address, each a fetch of a URL the member typed.
+      // Agent calls (src/agents/grant-object.ts): per agent grant, AGENT_LIMITS' 120 a minute. Writes are counted in the grant's object.
+      // Player releases (src/releases): per address, before the secret is checked, so it cannot be guessed at speed.
       "ratelimits": [
         { "name": "PAIR_START_LIMIT", "namespace_id": "821", "simple": { "limit": 10, "period": 60 } },
         { "name": "PAIR_POLL_LIMIT", "namespace_id": "822", "simple": { "limit": 600, "period": 60 } },
         { "name": "PAIR_CLAIM_LIMIT", "namespace_id": "823", "simple": { "limit": 10, "period": 60 } },
         { "name": "TEMPLATE_CHECK_LIMIT", "namespace_id": "824", "simple": { "limit": 10, "period": 60 } },
         { "name": "PLACE_SEARCH_LIMIT", "namespace_id": "825", "simple": { "limit": 30, "period": 60 } },
-        { "name": "TABLE_READ_LIMIT", "namespace_id": "826", "simple": { "limit": 30, "period": 60 } }
+        { "name": "TABLE_READ_LIMIT", "namespace_id": "826", "simple": { "limit": 30, "period": 60 } },
+        { "name": "PAGE_READ_LIMIT", "namespace_id": "828", "simple": { "limit": 30, "period": 60 } },
+        { "name": "CHAT_TURN_LIMIT", "namespace_id": "829", "simple": { "limit": 10, "period": 60 } },
+        { "name": "AGENT_CALL_LIMIT", "namespace_id": "827", "simple": { "limit": 120, "period": 60 } },
+        { "name": "PLAYER_RELEASE_LIMIT", "namespace_id": "820", "simple": { "limit": 10, "period": 60 } }
       ],
       "send_email": [{ "name": "EMAIL" }],
+      "analytics_engine_datasets": [{ "binding": "AGENT_CALLS", "dataset": "signforge_agent_calls_prod" }],
       "durable_objects": {
         "bindings": [
           { "name": "SCREENS", "class_name": "ScreenObject" },
@@ -184,6 +243,7 @@
       },
       "images": { "binding": "IMAGES" },
       "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
+      // Placeholder id until the database exists: `pnpm --filter @signforge/api check:deploy prod` refuses a deploy while it is.
       "d1_databases": [
         {
           "binding": "DB",
@@ -192,7 +252,8 @@
           "migrations_dir": "../../packages/db/migrations"
         }
       ],
-      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-prod" }]
+      // PLAYER_RELEASES: player release tarballs (#628), apart from org data. Create the bucket before prod's first deploy.
+      "r2_buckets": [{ "binding": "BLOBS", "bucket_name": "signforge-prod" }, { "binding": "PLAYER_RELEASES", "bucket_name": "signforge-releases-prod" }]
     }
   }
 }

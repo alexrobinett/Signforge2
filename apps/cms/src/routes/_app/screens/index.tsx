@@ -5,15 +5,19 @@
  * Needs attention lists the groups with a screen that needs a person. A retired (revoked) screen
  * is off the list and its counts unless the Retired filter asks for it. The table's rows can be
  * ticked, and the selection added to a group or removed from one.
+ * Labels (#185): the search finds label values and group names too, and a typed `key=value` becomes a chip; the chips
+ * are kept in the URL (`l=region:north`), so a filtered view can be shared; "Group by" shows the screens in sections by
+ * a key's value; the table has a Labels column and each tile its labels (`src/lib/label-filter.ts`).
  */
+import { Choice } from '~/components/ui/choice';
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import {
   ArrowDownIcon,
   ArrowUpIcon,
   ChevronDownIcon,
-  CloudOffIcon,
   LayoutGridIcon,
+  LoaderCircleIcon,
   MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
@@ -21,33 +25,40 @@ import {
   TriangleAlertIcon,
   XIcon,
 } from 'lucide-react';
-import { useMemo } from 'react';
+import { useCallback, useId, useMemo, type ReactNode } from 'react';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { EmptyFleet } from '~/components/screens/empty-fleet';
-import { RolloutBar, RolloutLegend } from '~/components/publishes/rollout';
+import { LatestPublish } from '~/components/publishes/latest-publish';
 import { PairScreenForm } from '~/components/screens/pair-screen-form';
+import { NotCurrent } from '~/components/screens/not-current';
 import { ScreenThumb } from '~/components/screens/screen-thumb';
+import { Badge } from '~/components/ui/badge';
 import { KIND_WORD, ScreenStatus } from '~/components/screens/status';
 import { Button } from '~/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog';
+import { Label } from '~/components/ui/label';
+import { LabelChips } from '~/components/screens/labels';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '~/components/ui/dropdown-menu';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import { describeHours } from '~/components/screens/display-hours-editor';
 import { needingAttention } from '~/lib/groups';
+import { matchesTerms, searchFinds, sectionsBy, termsOf, termsParam, typedTerm, withTerm, type LabelSection, type LabelTerm } from '~/lib/label-filter';
+import { acrossWords, labelsAcross, lonelyValue, MAX_BULK_SCREENS, type LabelKey } from '~/lib/labels';
 import { ago, describeScreen, isRetired, summarise } from '~/lib/screen-status';
-import { isStateKind, STATE_KINDS, type GroupView, type ScreenView, type StateKind } from '~/lib/screen-types';
+import { isStateKind, listedGroups, STATE_KINDS, type GroupView, type ScreenView, type StateKind } from '~/lib/screen-types';
 import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { cn } from '~/lib/utils';
 import { withStatus } from '~/lib/fleet-status';
-import { byWord, publishTitle } from '~/lib/publishes';
 import { byName, isScreenSort, sortScreens, type ScreenSort } from '~/lib/targets';
-import { publishQuery } from '~/queries/publishes';
-import { screensQuery, screenStatusQuery } from '~/queries/screens';
+import { labelKeysQuery, screensQuery, screenStatusQuery } from '~/queries/screens';
 import { getOrgSettings } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
-import { selectedIn } from '~/state/screens';
+import { NEXT_PUBLISH } from '~/state/labels';
+import { ID_COLUMN, importPlan, labelsCsv, NAME_COLUMN } from '~/lib/label-csv';
+import { tooManyFilters } from '~/state/save-as-group';
+import { searchText, selectedIn } from '~/state/screens';
 
 type View = 'tiles' | 'table';
 /** A state, or `retired`: the revoked screens, which no other filter shows. */
@@ -59,6 +70,12 @@ interface Search {
   status?: StatusFilter;
   /** Absent: by name. */
   sort?: ScreenSort;
+  /** Label chips (#185), `key:value,value` with `;` between: a screen has every key at one of its values. */
+  l?: string;
+  /** A label key to show the screens in sections by. */
+  by?: string;
+  /** The Pair a screen dialog is open: ⌘K's Pair a screen comes here (#358). */
+  pair?: true;
 }
 
 const isStatusFilter = (v: unknown): v is StatusFilter => v === 'retired' || isStateKind(v);
@@ -70,6 +87,9 @@ export const Route = createFileRoute('/_app/screens/')({
     ...(typeof s.group === 'string' && s.group ? { group: s.group } : {}),
     ...(isStatusFilter(s.status) ? { status: s.status } : {}),
     ...(isScreenSort(s.sort) && s.sort !== 'name' ? { sort: s.sort } : {}),
+    ...(termsOf(s.l).length ? { l: termsParam(termsOf(s.l)) } : {}),
+    ...(typeof s.by === 'string' && s.by ? { by: s.by } : {}),
+    ...(s.pair === true ? { pair: true as const } : {}),
   }),
   // The org's settings give the pairing form its defaults for new screens. The list is read again
   // on every load, as after a change (`router.invalidate()` in the store's actions), never from the cache.
@@ -106,25 +126,42 @@ function ScreensPage() {
   const active = screens.filter((s) => !isRetired(s));
   const activeIds = new Set(active.map((s) => s.id));
   const retired = search.status === 'retired';
+  const terms = termsOf(search.l);
+  const keys = useQuery(labelKeysQuery(orgId)).data?.keys ?? [];
+  const setTerms = (next: LabelTerm[]) => set({ l: termsParam(next) });
+  // The box's value is the store's as typed, so the caret stays where it is while the URL catches up (review of #601).
+  const searchBox = useAppStore((s) => searchText(s.screens, search.q));
+  const searchScreens = useAppStore((s) => s.searchScreens);
+  const openLabelFilter = useAppStore((s) => s.openLabelFilter);
   const sort = search.sort ?? 'name';
   const matching = (retired ? screens.filter(isRetired) : active).filter((s) => {
     if (search.group && !groupsOf.get(s.id)?.some((g) => g.id === search.group)) return false;
     if (search.status && !retired && s.state.kind !== search.status) return false;
-    if (search.q) {
-      const q = search.q.toLowerCase();
-      if (!s.name.toLowerCase().includes(q) && !s.showing?.spot?.name.toLowerCase().includes(q)) return false;
-    }
+    if (terms.length && !matchesTerms(s, terms)) return false;
+    if (search.q && !searchFinds(s, search.q, groupsOf.get(s.id)?.map((g) => g.name) ?? [])) return false;
     return true;
   });
   const shown = sortScreens(matching, sort);
+  const sections = search.by ? sectionsBy(shown, search.by) : undefined;
   const set = (next: Partial<Search>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
+  // With no screen yet the page is its own pairing form: ⌘K's Pair a screen focuses its code instead of a dialog (#358).
+  const takePair = useCallback(
+    (form: HTMLDivElement | null) => {
+      if (!form || !search.pair) return;
+      form.querySelector('input')?.focus();
+      void navigate({ search: (prev) => ({ ...prev, pair: undefined }), replace: true });
+    },
+    [search.pair, navigate],
+  );
 
   if (!screens.length) {
     return (
       <div className="space-y-6">
         <PageHeader title="Screens" description="No screens here yet." />
         {/* The player build on this site (vite.config.ts), with the device API on this origin too. */}
-        <EmptyFleet groups={groups} canManage={canManage} testScreenHref="/test-screen/?kind=browser&content=/v1/device" />
+        <div ref={takePair}>
+          <EmptyFleet groups={groups} canManage={canManage} testScreenHref="/test-screen/?kind=browser&content=/v1/device" />
+        </div>
       </div>
     );
   }
@@ -149,11 +186,24 @@ function ScreensPage() {
             <Input
               id="screen-search"
               type="search"
-              placeholder="Search by name or spot"
-              defaultValue={search.q}
-              onChange={(e) => set({ q: e.target.value || undefined })}
+              placeholder="Search names, labels, groups"
+              title="Search by name, spot, label or group"
+              value={searchBox}
+              onChange={(e) => void searchScreens(e.target.value)}
+              onKeyDown={(e) => {
+                // A typed key=value becomes a chip: "region=north", then Enter.
+                const term = e.key === 'Enter' ? typedTerm(e.currentTarget.value) : undefined;
+                if (!term) return;
+                e.preventDefault();
+                void searchScreens('');
+                set({ l: termsParam(withTerm(terms, term)) });
+              }}
+              aria-describedby="screen-search-help"
               className="pl-9"
             />
+            <p id="screen-search-help" className="sr-only">
+              Type key=value and press Enter to filter by a label.
+            </p>
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground sm:ml-auto">
             <label htmlFor="screen-group">Group</label>
@@ -169,21 +219,36 @@ function ScreensPage() {
               Manage groups
             </Link>
           </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <label htmlFor="screen-status">Status</label>
-            <NativeSelect
-              id="screen-status"
-              value={search.status ?? ''}
-              onChange={(e) => set({ status: isStatusFilter(e.target.value) ? e.target.value : undefined })}
-            >
-              <option value="">Any</option>
-              {STATE_KINDS.map((k) => (
-                <option key={k} value={k}>
-                  {KIND_WORD[k]}
-                </option>
-              ))}
-              <option value="retired">Retired</option>
-            </NativeSelect>
+          {/* Group by and Status share a line on a phone, so the first screen stays in the first view. */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <label htmlFor="screen-by">Group by</label>
+              <NativeSelect id="screen-by" value={search.by ?? ''} onChange={(e) => set({ by: e.target.value || undefined })}>
+                <option value="">Nothing</option>
+                {keys.map((k) => (
+                  <option key={k.key} value={k.key}>
+                    {k.key}
+                  </option>
+                ))}
+                {search.by && !keys.some((k) => k.key === search.by) && <option value={search.by}>{search.by}</option>}
+              </NativeSelect>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <label htmlFor="screen-status">Status</label>
+              <NativeSelect
+                id="screen-status"
+                value={search.status ?? ''}
+                onChange={(e) => set({ status: isStatusFilter(e.target.value) ? e.target.value : undefined })}
+              >
+                <option value="">Any</option>
+                {STATE_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {KIND_WORD[k]}
+                  </option>
+                ))}
+                <option value="retired">Retired</option>
+              </NativeSelect>
+            </div>
           </div>
           <fieldset className="flex rounded-lg border border-border-strong bg-card p-0.5">
             <legend className="sr-only">View</legend>
@@ -193,56 +258,51 @@ function ScreensPage() {
                 ['table', 'Table', TableIcon],
               ] as const
             ).map(([v, label, Icon]) => (
-              <button
+              <Choice
                 key={v}
-                type="button"
-                aria-pressed={view === v}
+                selected={view === v}
                 onClick={() => set({ view: v === 'tiles' ? undefined : v })}
-                className={cn(
-                  'flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                  view === v ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground',
-                )}
+                className="flex h-9 items-center gap-1.5 rounded-[calc(var(--radius-lg)-(--spacing(0.5)))] px-3 text-sm font-medium"
               >
                 <Icon className="size-4" aria-hidden /> {label}
-              </button>
+              </Choice>
             ))}
           </fieldset>
+          <Button variant="outline" className="h-10" onClick={() => openLabelFilter()} disabled={!keys.length}>
+            <PlusIcon aria-hidden /> Filter
+          </Button>
+          <LabelFileMenu screens={active} canManage={canManage} />
         </EditorFields>
       </div>
+      <LabelImportDialog screens={active} />
+
+      <LabelFilterRow terms={terms} keys={keys} canManage={canManage} onChange={setTerms} />
+      <SaveAsGroupDialog screens={active} others={Boolean(search.q || search.group || search.status)} />
 
       {shown.length === 0 ? (
         <p className="rounded-xl border bg-card p-8 text-center text-muted-foreground">No screens match. Clear the search or filters to see them all.</p>
       ) : view === 'tiles' ? (
-        <Tiles screens={shown} groupsOf={groupsOf} now={now} />
+        sections ? (
+          sections.map((sec) => (
+            <Section key={sec.value ?? ''} by={search.by!} section={sec}>
+              <Tiles screens={sec.screens} groupsOf={groupsOf} now={now} />
+            </Section>
+          ))
+        ) : (
+          <Tiles screens={shown} groupsOf={groupsOf} now={now} />
+        )
       ) : (
-        <ScreenTable screens={shown} groups={groups} groupsOf={groupsOf} now={now} canManage={canManage} sort={sort} />
+        <ScreenTable
+          sections={sections ?? [{ value: null, screens: shown }]}
+          by={sections ? search.by : undefined}
+          groups={groups}
+          groupsOf={groupsOf}
+          now={now}
+          canManage={canManage}
+          sort={sort}
+        />
       )}
     </div>
-  );
-}
-
-/** The latest publish and how its rollout stands (board Screens A), linking to its reasons. */
-function LatestPublish({ orgId, now }: { orgId: string; now: number }) {
-  const { data } = useQuery(publishQuery(orgId, null));
-  const publish = data?.publish;
-  if (!publish || !data.screens.length) return null;
-  const at = new Date(publish.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  return (
-    <section aria-label="Latest publish" className="flex flex-col gap-3.5 rounded-[14px] border bg-card px-5 py-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-        <p className="text-[15px]">
-          <strong className="font-semibold">{publishTitle(publish)}</strong>{' '}
-          <span className="text-muted-foreground">
-            · {publish.restoresId ? 'rolled back' : 'published'} {at} by {byWord(publish)}
-          </span>
-        </p>
-        <Link to="/publishes" className="flex min-h-11 items-center text-sm text-primary underline-offset-4 hover:underline sm:min-h-0 sm:py-1.5">
-          View rollout
-        </Link>
-      </div>
-      <RolloutBar publish={publish} screens={data.screens} now={now} />
-      <RolloutLegend publish={publish} screens={data.screens} now={now} />
-    </section>
   );
 }
 
@@ -251,7 +311,7 @@ function Summary({ screens }: { screens: ScreenView[] }) {
   const parts = summarise(screens).split(' · ');
   const needs = parts.at(-1)?.endsWith(' you') ? parts.pop() : undefined;
   return (
-    <p role="status" className="-mt-4 text-[15px] text-muted-foreground">
+    <p role="status" className="-mt-4 text-md text-muted-foreground tabular-nums">
       {parts.join(' · ')}
       {needs && (
         <>
@@ -263,30 +323,12 @@ function Summary({ screens }: { screens: ScreenView[] }) {
   );
 }
 
-/**
- * While the poll fails, the states on the page are the last ones heard, so it says so and since
- * when; the next good poll clears it. The live region stays in the accessibility tree while empty
- * (visually hidden, not `display: none`), so the notice is announced when it comes.
- */
-function NotCurrent({ failing, heardAt, now }: { failing: boolean; heardAt: number; now: number }) {
-  return (
-    <div role="status" className="empty:sr-only">
-      {failing && (
-        <p className="flex items-start gap-3 rounded-xl border bg-card px-4 py-3.5 text-[15px] leading-normal">
-          <CloudOffIcon className="mt-0.5 size-5 shrink-0 text-muted-foreground" aria-hidden />
-          <span>
-            <strong className="font-semibold">Status is not current.</strong> SignForge has not answered since{' '}
-            {new Date(heardAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} ({ago(now - heardAt)} ago). This page keeps trying.
-          </span>
-        </p>
-      )}
-    </div>
-  );
-}
-
+/** Pair a screen: open while the URL says `pair`, so ⌘K can open it from any page (#358). */
 function PairDialog({ groups }: { groups: GroupView[] }) {
+  const { pair } = Route.useSearch();
+  const navigate = Route.useNavigate();
   return (
-    <Dialog>
+    <Dialog open={pair === true} onOpenChange={(open) => void navigate({ search: (s) => ({ ...s, pair: open ? true : undefined }), replace: true })}>
       <DialogTrigger asChild>
         <Button size="lg">
           <PlusIcon aria-hidden /> Pair a screen
@@ -325,13 +367,13 @@ function NeedsAttention({ groups, screens, onPick }: { groups: GroupView[]; scre
                 onClick={() => onPick(g.id)}
                 className="flex min-h-10 w-full flex-col gap-1 rounded-xl border bg-card px-3.5 py-2 text-left outline-none hover:border-border-strong focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:px-4 sm:py-3"
               >
-                <span className="flex items-baseline gap-2 text-[15px] whitespace-nowrap">
+                <span className="flex items-baseline gap-2 text-md whitespace-nowrap">
                   <strong className="font-semibold">{g.name}</strong>
                   <span className="font-medium text-status-needs-you-foreground">
                     {needs.length} {needs.length === 1 ? 'needs' : 'need'} you
                   </span>
                 </span>
-                <span className="hidden truncate text-[13px] text-muted-foreground sm:block">{needs.map((s) => s.name).join(', ')}</span>
+                <span className="hidden truncate text-meta text-muted-foreground sm:block">{needs.map((s) => s.name).join(', ')}</span>
               </button>
             </EditorFields>
           </li>
@@ -355,7 +397,6 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
     <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(18rem,100%),1fr))] gap-4">
       {screens.map((s) => {
         const d = describeScreen(s, now);
-        const v = versionText(s);
         const where = groupsOf
           .get(s.id)
           ?.map((g) => g.name)
@@ -365,9 +406,12 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
             <div className="relative">
               <ScreenThumb screen={s} />
               <ScreenStatus screen={s} now={now} className="absolute top-2.5 left-2.5" />
-              <span className="absolute right-2.5 bottom-2.5 rounded-md bg-black/80 px-1.5 py-0.5 font-mono text-[11px] text-white">
-                {s.orientation === 'portrait' ? '9:16' : '16:9'}
-              </span>
+              {/* Only a portrait screen says its ratio: landscape is every other tile's (#374). */}
+              {s.orientation === 'portrait' && (
+                <Badge variant="stage" className="absolute top-2.5 right-2.5 text-2xs tabular-nums">
+                  9:16
+                </Badge>
+              )}
             </div>
             <div className="flex flex-col gap-1.5 px-4 pt-3.5 pb-4">
               <div className="flex items-baseline justify-between gap-2">
@@ -378,16 +422,13 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
                 >
                   {s.name}
                 </Link>
-                {s.desiredManifestId && (
-                  <span
-                    className={cn('font-mono text-xs tabular-nums', v.behind ? 'text-status-updating-foreground' : 'text-muted-foreground')}
-                    title="Version (manifest id)"
-                  >
-                    {v.text}
-                  </span>
-                )}
+                {s.showing?.spot?.templateName && <span className="truncate text-xs text-muted-foreground">{s.showing.spot.templateName}</span>}
               </div>
-              <p className="text-[13px] text-muted-foreground">{[s.kind === 'browser' && 'Test screen', where, d.line].filter(Boolean).join(' · ')}</p>
+              {Object.keys(s.labels).length > 0 && <LabelChips labels={s.labels} max={3} />}
+              <p className="text-meta text-muted-foreground tabular-nums">
+                {/* Nothing published is said once, by the thumbnail (#374). */}
+                {[s.kind === 'browser' && 'Test screen', where, s.state.reason !== 'nothing_published' && d.line].filter(Boolean).join(' · ')}
+              </p>
             </div>
           </li>
         );
@@ -396,17 +437,183 @@ function Tiles({ screens, groupsOf, now }: { screens: ScreenView[]; groupsOf: Ma
   );
 }
 
+/** A section's heading: "store: 0142 · 3 screens", or "No store · 1 screen". */
+const sectionTitle = (by: string, sec: LabelSection<ScreenView>) =>
+  `${sec.value === null ? `No ${by}` : `${by}: ${sec.value}`} · ${sec.screens.length} ${sec.screens.length === 1 ? 'screen' : 'screens'}`;
+
+/** One value's screens, when the page is grouped by a label key. */
+function Section({ by, section, children }: { by: string; section: LabelSection<ScreenView>; children: ReactNode }) {
+  const id = useId();
+  return (
+    <section aria-labelledby={id} className="space-y-3">
+      <h2 id={id} className="text-base font-semibold">
+        {sectionTitle(by, section)}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * The label chips in the URL, each removable, and the dialog the toolbar's "+ Filter" opens, which adds one from the
+ * keys and values the org's screens have (`list_label_keys`). A chip on a key replaces that key's chip: a screen has one value of a key.
+ */
+function LabelFilterRow({
+  terms,
+  keys,
+  canManage,
+  onChange,
+}: {
+  terms: LabelTerm[];
+  keys: LabelKey[];
+  canManage: boolean;
+  onChange: (terms: LabelTerm[]) => void;
+}) {
+  const orgId = useOrgId();
+  const openSaveAsGroup = useAppStore((s) => s.openSaveAsGroup);
+  const open = useAppStore((s) => s.labels.filter);
+  const openLabelFilter = useAppStore((s) => s.openLabelFilter);
+  const chooseFilterKey = useAppStore((s) => s.chooseFilterKey);
+  const tickFilterValue = useAppStore((s) => s.tickFilterValue);
+  const close = useAppStore((s) => s.closeLabelFilter);
+  const id = useId();
+  const values = keys.find((k) => k.key === open?.key)?.values ?? [];
+  return (
+    <>
+      {/* A box of its own, only with chips in it: EditorFields draws none, so the page's spacing would fall on nothing. */}
+      {terms.length > 0 && (
+        <div>
+          <EditorFields>
+            <div className="flex flex-wrap items-center gap-2">
+              <ul aria-label="Label filters" className="flex flex-wrap gap-2">
+                {terms.map((t) => (
+                  <li key={t.key}>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-border-strong bg-card py-0.5 pr-1 pl-3 text-sm">
+                      <button
+                        type="button"
+                        className="rounded outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                        onClick={() => openLabelFilter(t.key, t.values)}
+                      >
+                        <span className="text-muted-foreground">{t.key}:</span> {t.values.join(', ')}
+                      </button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 rounded-full"
+                        aria-label={`Remove filter ${t.key}`}
+                        data-chip-remove
+                        onClick={(e) => {
+                          // Focus goes on to the next chip, else the one before, else the search box: never lost to the page.
+                          const all = [...document.querySelectorAll<HTMLElement>('[data-chip-remove]')];
+                          const at = all.indexOf(e.currentTarget);
+                          (all[at + 1] ?? all[at - 1] ?? document.getElementById('screen-search'))?.focus();
+                          onChange(terms.filter((x) => x.key !== t.key));
+                        }}
+                      >
+                        <XIcon aria-hidden />
+                      </Button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <Button
+                variant="link"
+                size="sm"
+                onClick={() => {
+                  document.getElementById('screen-search')?.focus();
+                  onChange([]);
+                }}
+              >
+                Clear filters
+              </Button>
+              {canManage && (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => openSaveAsGroup(orgId, terms, 'done')}>
+                    Save as group…
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => openSaveAsGroup(orgId, terms, 'schedule')}>
+                    Schedule a playlist for these…
+                  </Button>
+                </>
+              )}
+            </div>
+          </EditorFields>
+        </div>
+      )}
+      <EditorFields>
+        <Dialog open={open !== null} onOpenChange={(o) => !o && close()}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Filter by a label</DialogTitle>
+              <DialogDescription>Screens with any of the values you tick. A filter on a key replaces that key&apos;s.</DialogDescription>
+            </DialogHeader>
+            {open && (
+              <form
+                className="grid gap-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!open.key || !open.values.length) return;
+                  onChange(withTerm(terms, { key: open.key, values: open.values }));
+                  close();
+                }}
+              >
+                <div className="grid gap-1.5">
+                  <Label htmlFor={`${id}-key`}>Label</Label>
+                  <NativeSelect id={`${id}-key`} value={open.key} onChange={(e) => chooseFilterKey(e.target.value)}>
+                    <option value="">Choose a label</option>
+                    {keys.map((k) => (
+                      <option key={k.key} value={k.key}>
+                        {k.key}
+                        {k.system ? ' (from settings)' : ''}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </div>
+                {values.length > 0 && (
+                  <fieldset className="grid max-h-64 gap-2 overflow-y-auto">
+                    <legend className="mb-1.5 text-sm font-medium">Values</legend>
+                    {values.map((v) => (
+                      <label key={v.value} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="size-4 accent-primary"
+                          checked={open.values.some((x) => x.trim().toLowerCase() === v.value.trim().toLowerCase())}
+                          onChange={(e) => tickFilterValue(v.value, e.target.checked)}
+                        />
+                        {v.value} <span className="text-muted-foreground tabular-nums">({v.screens})</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={close}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={!open.key || !open.values.length}>
+                    Apply
+                  </Button>
+                </DialogFooter>
+              </form>
+            )}
+          </DialogContent>
+        </Dialog>
+      </EditorFields>
+    </>
+  );
+}
+
 /**
  * What to do with the rows ticked: add them to a group or take them out of one, one call each.
  * Only the ticked rows the table shows count, so a filter changed since never acts on hidden ones.
  * The actions wrap, so more fit beside them.
  */
-function SelectionBar({ orgId, selected, groups }: { orgId: string; selected: string[]; groups: GroupView[] }) {
+function SelectionBar({ orgId, selected, groups, screens }: { orgId: string; selected: string[]; groups: GroupView[]; screens: ScreenView[] }) {
+  const openBulkLabels = useAppStore((s) => s.openBulkLabels);
   const busy = useAppStore((s) => s.screens.bulkPending);
   const add = useAppStore((s) => s.addScreensToGroup);
   const remove = useAppStore((s) => s.removeScreensFromGroup);
   const clear = useAppStore((s) => s.clearScreenSelection);
-  const byNameGroups = [...groups].sort(byName);
+  const byNameGroups = listedGroups(groups).toSorted(byName);
   const holding = byNameGroups.filter((g) => g.screenIds.some((id) => selected.includes(id)));
   const menu = (label: string, choices: GroupView[], act: (g: GroupView) => void) => (
     <DropdownMenu>
@@ -426,7 +633,7 @@ function SelectionBar({ orgId, selected, groups }: { orgId: string; selected: st
   );
   return (
     <section aria-label="Selected screens" className="flex flex-wrap items-center gap-2 rounded-xl border border-border-strong bg-card px-4 py-2.5">
-      <p role="status" className="mr-2 text-sm font-medium">
+      <p role="status" className="mr-2 text-sm font-medium tabular-nums">
         {selected.length} selected
       </p>
       <div className="flex flex-wrap gap-2">
@@ -442,10 +649,333 @@ function SelectionBar({ orgId, selected, groups }: { orgId: string; selected: st
             ),
         )}
       </div>
+      <Button
+        variant="outline"
+        size="sm"
+        aria-disabled={busy || undefined}
+        className={cn(busy && 'opacity-60')}
+        onClick={() => !busy && openBulkLabels(orgId, selected)}
+      >
+        Labels…
+      </Button>
+      <BulkLabelsDialog screens={screens} />
       <Button variant="ghost" size="sm" onClick={clear} className="ml-auto">
         <XIcon aria-hidden /> Clear selection
       </Button>
     </section>
+  );
+}
+
+/**
+ * Bulk "Labels…" (#185): one key set to one value on every selected screen, or removed from each, in one
+ * `update_screen_labels`. Each key the selection has is listed with its values across it, so a fix is made from what
+ * is there ("region: north (6), south (2), none (4)").
+ */
+function BulkLabelsDialog({ screens }: { screens: ScreenView[] }) {
+  const id = useId();
+  const bulk = useAppStore((s) => s.labels.bulk);
+  const chooseBulkKey = useAppStore((s) => s.chooseBulkKey);
+  const chooseBulkMode = useAppStore((s) => s.chooseBulkMode);
+  const typeBulkValue = useAppStore((s) => s.typeBulkValue);
+  const close = useAppStore((s) => s.closeBulkLabels);
+  const apply = useAppStore((s) => s.applyBulkLabels);
+  const keys = useQuery(labelKeysQuery(useOrgId())).data?.keys ?? [];
+  if (!bulk) return null;
+  const across = labelsAcross(screens.filter((s) => bulk.screenIds.includes(s.id)));
+  const key = bulk.key.trim().toLowerCase();
+  const values = keys.find((k) => k.key === key && !k.system)?.values ?? [];
+  // The typo guard, worded for a selection: a new store's value is often new to every screen.
+  const warning = bulk.mode === 'set' && lonelyValue(keys, { key, value: bulk.value }) ? `${bulk.value.trim()}: no screen has this value yet` : undefined;
+  const n = `${bulk.screenIds.length} ${bulk.screenIds.length === 1 ? 'screen' : 'screens'}`;
+  const tooMany = bulk.screenIds.length > MAX_BULK_SCREENS;
+  return (
+    <Dialog open onOpenChange={(o) => !o && close()}>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Labels on {n}</DialogTitle>
+          <DialogDescription>{NEXT_PUBLISH}</DialogDescription>
+        </DialogHeader>
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void apply();
+          }}
+        >
+          {tooMany && (
+            <p
+              role="alert"
+              className="flex gap-2 rounded-lg border border-status-needs-you/50 bg-status-needs-you-muted px-3 py-2 text-sm text-status-needs-you-foreground"
+            >
+              <TriangleAlertIcon aria-hidden className="mt-0.5 size-4 shrink-0" />
+              <span>
+                One change labels at most {MAX_BULK_SCREENS.toLocaleString('en-US')} screens, and this selection has{' '}
+                {bulk.screenIds.length.toLocaleString('en-US')}. Select fewer, by a filter for example, and label them in parts.
+              </span>
+            </p>
+          )}
+          {across.length > 0 ? (
+            <dl aria-label="Their labels now" className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+              {across.map((k) => (
+                <div key={k.key} className="contents">
+                  <dt className="font-medium">
+                    <button
+                      type="button"
+                      className="rounded underline-offset-4 outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      onClick={() => chooseBulkKey(k.key)}
+                    >
+                      {k.key}
+                    </button>
+                  </dt>
+                  <dd className="text-muted-foreground tabular-nums">{acrossWords(k)}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className="text-sm text-muted-foreground">None of them has a label yet.</p>
+          )}
+          <div className="grid gap-1.5">
+            <Label htmlFor={`${id}-key`}>Label</Label>
+            <Input
+              id={`${id}-key`}
+              list={`${id}-keys`}
+              value={bulk.key}
+              onChange={(e) => chooseBulkKey(e.target.value)}
+              placeholder="region"
+              maxLength={63}
+              autoComplete="off"
+            />
+            <datalist id={`${id}-keys`}>
+              {keys
+                .filter((k) => !k.system)
+                .map((k) => (
+                  <option key={k.key} value={k.key} />
+                ))}
+            </datalist>
+          </div>
+          <fieldset className="grid gap-2">
+            <legend className="mb-1.5 text-sm font-medium">On all {n}</legend>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="radio" name={`${id}-mode`} className="size-4 accent-primary" checked={bulk.mode === 'set'} onChange={() => chooseBulkMode('set')} />
+              Set it to
+            </label>
+            {bulk.mode === 'set' && (
+              <div className="grid gap-1 pl-6">
+                <Input
+                  aria-label="Value"
+                  list={`${id}-values`}
+                  value={bulk.value}
+                  onChange={(e) => typeBulkValue(e.target.value)}
+                  placeholder="north"
+                  maxLength={63}
+                  autoComplete="off"
+                  aria-describedby={warning ? `${id}-warn` : undefined}
+                />
+                <datalist id={`${id}-values`}>
+                  {values.map((v) => (
+                    <option key={v.value} value={v.value} />
+                  ))}
+                </datalist>
+                {warning && (
+                  <p id={`${id}-warn`} className="text-xs text-status-needs-you-foreground">
+                    {warning}
+                  </p>
+                )}
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name={`${id}-mode`}
+                className="size-4 accent-primary"
+                checked={bulk.mode === 'remove'}
+                onChange={() => chooseBulkMode('remove')}
+              />
+              Remove it
+            </label>
+          </fieldset>
+          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+            {bulk.error}
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={close}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={bulk.pending || tooMany}>
+              {bulk.pending && <LoaderCircleIcon className="animate-spin" aria-hidden />}
+              {bulk.mode === 'set' ? `Set on ${n}` : `Remove from ${n}`}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Labels as a CSV file (#188): every screen's labels downloaded, edited anywhere, and read back with a preview first.
+ * In a menu beside "+ Filter", so a phone's toolbar keeps the first screen in view.
+ */
+function LabelFileMenu({ screens, canManage }: { screens: ScreenView[]; canManage: boolean }) {
+  const orgId = useOrgId();
+  const openLabelImport = useAppStore((s) => s.openLabelImport);
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([labelsCsv(screens)], { type: 'text/csv;charset=utf-8' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: 'screen-labels.csv' });
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="icon" className="size-10" aria-label="Labels as a file">
+          <MoreHorizontalIcon aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={download}>Download labels (CSV)</DropdownMenuItem>
+        {canManage && <DropdownMenuItem onSelect={() => openLabelImport(orgId)}>Import labels…</DropdownMenuItem>}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * "Import labels…" (#188): a CSV file read once and shown as what it would change, screen by screen, before anything
+ * is written; then one `import_screen_labels`, all of it or none. A refused column or value stops it; a row with no
+ * screen, or a name two screens have, is listed and skipped.
+ */
+function LabelImportDialog({ screens }: { screens: ScreenView[] }) {
+  const id = useId();
+  const imp = useAppStore((s) => s.labels.import);
+  const readLabelFile = useAppStore((s) => s.readLabelFile);
+  const chooseImportMode = useAppStore((s) => s.chooseImportMode);
+  const close = useAppStore((s) => s.closeLabelImport);
+  const apply = useAppStore((s) => s.applyLabelImport);
+  if (!imp) return null;
+  const plan = imp.file ? importPlan(imp.file, screens, imp.mode) : null;
+  const n = plan ? `${plan.changes.length} ${plan.changes.length === 1 ? 'screen' : 'screens'}` : '';
+  return (
+    <Dialog open onOpenChange={(o) => !o && close()}>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Import labels</DialogTitle>
+          <DialogDescription>
+            A CSV file with a {ID_COLUMN} or {NAME_COLUMN} column and a column per label, as Download labels writes it. You see what it changes before anything
+            is saved. {NEXT_PUBLISH}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void apply(screens);
+          }}
+        >
+          <div className="grid gap-1.5">
+            <Label htmlFor={`${id}-file`}>File</Label>
+            <Input
+              id={`${id}-file`}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                // Emptied once read, so the same file chosen again after it is fixed is read again (review of #612).
+                e.target.value = '';
+                if (file) void readLabelFile(file);
+              }}
+            />
+          </div>
+          <fieldset className="grid gap-2">
+            <legend className="mb-1.5 text-sm font-medium">An empty cell</legend>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name={`${id}-mode`}
+                className="size-4 accent-primary"
+                checked={imp.mode === 'merge'}
+                onChange={() => chooseImportMode('merge')}
+              />
+              Leaves the label as it is (merge)
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name={`${id}-mode`}
+                className="size-4 accent-primary"
+                checked={imp.mode === 'replace'}
+                onChange={() => chooseImportMode('replace')}
+              />
+              Removes the label (replace)
+            </label>
+          </fieldset>
+          {plan && (
+            <section aria-label="What it changes" className="grid gap-3">
+              {/* One short line read out as the preview comes or changes; the lists are read when someone moves to them (review of #612). */}
+              <p role="status" className="sr-only">
+                {[
+                  plan.problems.length ? `${plan.problems.length} ${plan.problems.length === 1 ? 'problem' : 'problems'} to fix before saving.` : '',
+                  plan.changes.length ? `Changes ${n}.` : 'Changes no screen.',
+                  plan.skipped.length ? `${plan.skipped.length} ${plan.skipped.length === 1 ? 'row' : 'rows'} skipped.` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              </p>
+              {plan.problems.length > 0 && (
+                <div className="grid gap-1 rounded-lg border border-destructive/40 p-3 text-sm">
+                  <p className="font-medium text-destructive">Nothing can be saved until the file is fixed:</p>
+                  <ul className="list-disc pl-5">
+                    {plan.problems.map((p) => (
+                      <li key={p}>{p}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <p className="text-sm font-medium">{plan.changes.length ? `Changes ${n}` : 'Changes no screen.'}</p>
+              {plan.changes.length > 0 && (
+                <ul className="grid max-h-72 gap-2 overflow-y-auto text-sm">
+                  {plan.changes.map((c) => (
+                    <li key={c.screenId} className="rounded-lg border px-3 py-2">
+                      <p className="font-semibold">{c.name}</p>
+                      <p className="wrap-anywhere text-muted-foreground">
+                        {[
+                          ...c.added.map(([k, v]) => `+ ${k}: ${v}`),
+                          ...c.changed.map(([k, from, to]) => `${k}: ${from} → ${to}`),
+                          ...c.removed.map(([k, was]) => `− ${k} (was ${was})`),
+                        ].join(' · ')}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {plan.skipped.length > 0 && (
+                <details className="text-sm">
+                  <summary className="cursor-pointer">
+                    {plan.skipped.length} {plan.skipped.length === 1 ? 'row' : 'rows'} skipped
+                  </summary>
+                  <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+                    {plan.skipped.map((p) => (
+                      <li key={p}>{p}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </section>
+          )}
+          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+            {imp.error}
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={close}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={imp.pending || !plan || plan.problems.length > 0 || plan.changes.length === 0}>
+              {plan?.changes.length ? `Save on ${n}` : 'Save'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -505,14 +1035,17 @@ function RowMenu({ orgId, screen }: { orgId: string; screen: ScreenView }) {
 }
 
 function ScreenTable({
-  screens,
+  sections,
+  by,
   groups,
   groupsOf,
   now,
   canManage,
   sort,
 }: {
-  screens: ScreenView[];
+  /** The screens shown, in sections by a label key's value when `by` names one; one section otherwise. */
+  sections: LabelSection<ScreenView>[];
+  by: string | undefined;
   groups: GroupView[];
   groupsOf: Map<string, GroupView[]>;
   now: number;
@@ -522,6 +1055,8 @@ function ScreenTable({
   const orgId = useOrgId();
   const ticked = useAppStore((s) => selectedIn(s.screens, orgId));
   const select = useAppStore((s) => s.selectScreens);
+  const screens = sections.flatMap((sec) => sec.screens);
+  const columns = (canManage ? 1 : 0) + 9;
   const ids = screens.map((s) => s.id);
   const selected = ids.filter((id) => ticked.includes(id));
   const all = selected.length === ids.length;
@@ -529,9 +1064,11 @@ function ScreenTable({
     // The checkboxes change the store, so they wait for the page to hydrate (#140).
     <EditorFields>
       <div className="space-y-3">
-        {canManage && selected.length > 0 && <SelectionBar orgId={orgId} selected={selected} groups={groups} />}
+        {canManage && selected.length > 0 && (
+          <SelectionBar orgId={orgId} selected={selected} groups={groups} screens={screens.filter((s) => selected.includes(s.id))} />
+        )}
         <div className="relative overflow-x-auto rounded-xl border bg-card">
-          <table className="w-full min-w-[56rem] border-collapse text-sm">
+          <table className="w-full min-w-[68rem] border-collapse text-sm">
             <thead className="bg-muted text-xs tracking-wide text-muted-foreground uppercase">
               <tr>
                 {canManage && (
@@ -554,6 +1091,9 @@ function ScreenTable({
                 <SortHeader column="name" sort={sort}>
                   Screen
                 </SortHeader>
+                <th scope="col" className="px-3 py-2.5 text-left font-semibold">
+                  Labels
+                </th>
                 <SortHeader column="status" sort={sort}>
                   Status
                 </SortHeader>
@@ -574,74 +1114,157 @@ function ScreenTable({
                 </th>
               </tr>
             </thead>
-            <tbody>
-              {screens.map((s) => {
-                const d = describeScreen(s, now);
-                const v = versionText(s);
-                return (
-                  <tr key={s.id} className="h-9 border-t hover:bg-muted/50">
-                    {canManage && (
-                      <td className="py-1.5 pl-4">
-                        <input
-                          type="checkbox"
-                          className="size-4 accent-primary"
-                          aria-label={`Select ${s.name}`}
-                          checked={selected.includes(s.id)}
-                          onChange={(e) => select(orgId, [s.id], e.target.checked)}
-                        />
-                      </td>
-                    )}
-                    <td className="py-1.5 pr-3 pl-4">
-                      <ScreenThumb screen={s} size="row" className="w-24 rounded" />
-                    </td>
-                    <th scope="row" className="px-3 py-1.5 text-left font-semibold whitespace-nowrap">
-                      <Link to="/screens/$screenId" params={{ screenId: s.id }} className="hover:underline">
-                        {s.name}
-                      </Link>
-                      <div className="text-[13px] font-normal text-muted-foreground">
-                        {s.kind === 'browser' && 'Test screen · '}
-                        {groupsOf
-                          .get(s.id)
-                          ?.map((g) => g.name)
-                          .join(', ') || 'No group'}
-                      </div>
+            {sections.map((sec) => (
+              <tbody key={sec.value ?? ''}>
+                {by && (
+                  <tr className="border-t bg-muted/40">
+                    <th scope="rowgroup" colSpan={columns} className="px-4 py-2 text-left text-sm font-semibold">
+                      {sectionTitle(by, sec)}
                     </th>
-                    <td className="px-3 py-1.5">
-                      <ScreenStatus screen={s} now={now} />
-                    </td>
-                    <td className="max-w-[28rem] px-3 py-1.5 leading-snug text-foreground/85">{d.line}</td>
-                    <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{describeHours(s.displayHours)}</td>
-                    <td
-                      className={cn(
-                        'px-3 py-1.5 text-right font-mono text-[13px] whitespace-nowrap tabular-nums',
-                        v.behind ? 'text-status-updating-foreground' : 'text-muted-foreground',
-                      )}
-                    >
-                      {v.text}
-                    </td>
-                    <td
-                      className="px-3 py-1.5 text-right font-mono text-[13px] whitespace-nowrap text-muted-foreground tabular-nums"
-                      title={s.lastSeenAt ? new Date(s.lastSeenAt).toLocaleString() : undefined}
-                    >
-                      {s.lastSeenAt ? `${ago(now - s.lastSeenAt)} ago` : 'never'}
-                    </td>
-                    <td className="px-3 py-1.5 pr-4 text-right whitespace-nowrap">
-                      {s.state.kind === 'needs_you' && (
-                        <Button asChild variant="outline" size="sm">
-                          <Link to="/screens/$screenId" params={{ screenId: s.id }} aria-label={`Troubleshoot ${s.name}`}>
-                            Troubleshoot
-                          </Link>
-                        </Button>
-                      )}
-                      {canManage && !isRetired(s) && <RowMenu orgId={orgId} screen={s} />}
-                    </td>
                   </tr>
-                );
-              })}
-            </tbody>
+                )}
+                {sec.screens.map((s) => {
+                  const d = describeScreen(s, now);
+                  const v = versionText(s);
+                  return (
+                    <tr key={s.id} className="h-9 border-t hover:bg-muted/50">
+                      {canManage && (
+                        <td className="py-1.5 pl-4">
+                          <input
+                            type="checkbox"
+                            className="size-4 accent-primary"
+                            aria-label={`Select ${s.name}`}
+                            checked={selected.includes(s.id)}
+                            onChange={(e) => select(orgId, [s.id], e.target.checked)}
+                          />
+                        </td>
+                      )}
+                      <td className="py-1.5 pr-3 pl-4">
+                        <ScreenThumb screen={s} size="row" className="w-24 rounded" />
+                      </td>
+                      <th scope="row" className="px-3 py-1.5 text-left font-semibold whitespace-nowrap">
+                        <Link to="/screens/$screenId" params={{ screenId: s.id }} className="hover:underline">
+                          {s.name}
+                        </Link>
+                        <div className="text-meta font-normal text-muted-foreground">
+                          {s.kind === 'browser' && 'Test screen · '}
+                          {groupsOf
+                            .get(s.id)
+                            ?.map((g) => g.name)
+                            .join(', ') || 'No group'}
+                        </div>
+                      </th>
+                      <td className="w-60 min-w-60 px-3 py-1.5">
+                        <LabelChips labels={s.labels} max={3} />
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <ScreenStatus screen={s} now={now} />
+                      </td>
+                      <td className="max-w-[28rem] min-w-48 px-3 py-1.5 leading-snug text-foreground/85 tabular-nums">{d.line}</td>
+                      <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">{describeHours(s.displayHours)}</td>
+                      <td
+                        className={cn(
+                          'px-3 py-1.5 text-right font-mono text-meta whitespace-nowrap tabular-nums',
+                          v.behind ? 'text-status-updating-foreground' : 'text-muted-foreground',
+                        )}
+                      >
+                        {v.text}
+                      </td>
+                      <td
+                        className="px-3 py-1.5 text-right text-meta whitespace-nowrap text-muted-foreground tabular-nums"
+                        title={s.lastSeenAt ? new Date(s.lastSeenAt).toLocaleString() : undefined}
+                      >
+                        {s.lastSeenAt ? `${ago(now - s.lastSeenAt)} ago` : 'never'}
+                      </td>
+                      <td className="px-3 py-1.5 pr-4 text-right whitespace-nowrap">
+                        {s.state.kind === 'needs_you' && (
+                          <Button asChild variant="outline" size="sm">
+                            <Link to="/screens/$screenId" params={{ screenId: s.id }} aria-label={`Troubleshoot ${s.name}`}>
+                              Troubleshoot
+                            </Link>
+                          </Button>
+                        )}
+                        {canManage && !isRetired(s) && <RowMenu orgId={orgId} screen={s} />}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            ))}
           </table>
         </div>
       </div>
     </EditorFields>
+  );
+}
+
+/**
+ * "Save as group…" (#186): the label chips as a smart group's rule, named here, with how many screens it matches now;
+ * the search and the group and status filters are not part of a rule, and it says so when one is on.
+ */
+function SaveAsGroupDialog({ screens, others }: { screens: ScreenView[]; others: boolean }) {
+  const id = useId();
+  const d = useAppStore((s) => s.saveAsGroup);
+  const name = useAppStore((s) => s.nameGroupFromFilters);
+  const close = useAppStore((s) => s.cancelSaveAsGroup);
+  const save = useAppStore((s) => s.saveFiltersAsGroup);
+  if (!d) return null;
+  const tooMany = tooManyFilters(d.terms);
+  const n = screens.filter((s) => matchesTerms(s, d.terms)).length;
+  return (
+    <Dialog open onOpenChange={(o) => !o && close()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{d.then === 'schedule' ? 'Schedule a playlist for these screens' : 'Save as group'}</DialogTitle>
+          <DialogDescription>
+            A smart group: the screens whose labels match these filters, now and at each publish.
+            {d.then === 'schedule' && ' Saved first, then aimed at by a new schedule entry.'}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <ul aria-label="Its rule" className="flex flex-wrap gap-1.5 text-sm">
+            {d.terms.map((t) => (
+              <li key={t.key} className="rounded-full border px-2.5 py-0.5">
+                <span className="text-muted-foreground">{t.key}:</span> {t.values.join(', ')}
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm">
+            Matches {n} {n === 1 ? 'screen' : 'screens'} now.
+            {others && <span className="text-muted-foreground"> The search and the group and status filters are not part of it.</span>}
+          </p>
+          <div className="grid gap-1.5">
+            <Label htmlFor={`${id}-name`}>Name</Label>
+            <Input
+              id={`${id}-name`}
+              value={d.name}
+              onChange={(e) => name(e.target.value)}
+              maxLength={100}
+              placeholder="North drive-thru"
+              disabled={Boolean(tooMany)}
+            />
+          </div>
+          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+            {tooMany ?? d.error}
+          </p>
+          <DialogFooter>
+            {/* While the save runs, Cancel waits for it (the store ignores it), and says so. */}
+            <Button type="button" variant="outline" onClick={close} aria-disabled={d.pending || undefined} className={cn(d.pending && 'opacity-60')}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={Boolean(tooMany)} aria-disabled={d.pending || undefined}>
+              {d.pending && <LoaderCircleIcon className="animate-spin" aria-hidden />}
+              {d.then === 'schedule' ? 'Save and schedule…' : 'Save group'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

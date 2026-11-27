@@ -1,5 +1,5 @@
 #!/bin/sh
-# One agent (or person) on the Pi test rig at a time.
+# One agent (or person) on a test rig at a time: the Pi, or with SF_PI=signforge-n100 the N100.
 #
 #   sh device/pi/pi-lock.sh take "<who>" "<what for>" [minutes, default 60]
 #   sh device/pi/pi-lock.sh release "<who>"
@@ -42,7 +42,7 @@ rm -rf "$L"; echo "$(date -Is) $1 released the lock" >> ~/signforge/agent-lock.l
 EOF
     ;;
   status)
-    ssh "$PI" 'L=~/signforge/.agent-lock; if [ -d "$L" ]; then echo "held by $(cat $L/who 2>/dev/null || echo "unknown (old-style lock)"): $(cat $L/what 2>/dev/null), until $( [ -f $L/expires ] && date -d "@$(cat $L/expires)" +%H:%M || echo "released by hand (no expiry)")"; else echo free; fi; tail -3 ~/signforge/agent-lock.log 2>/dev/null; grep -q . ~/signforge/kiosk.env && cmp -s ~/signforge/kiosk.env ~/signforge/kiosk.env.cloud && echo "kiosk: cloud config" || echo "kiosk: NOT on the cloud config"'
+    ssh "$PI" 'L=~/signforge/.agent-lock; if [ -d "$L" ]; then echo "held by $(cat $L/who 2>/dev/null || echo "unknown (old-style lock)"): $(cat $L/what 2>/dev/null), until $( [ -f $L/expires ] && date -d "@$(cat $L/expires)" +%H:%M || echo "released by hand (no expiry)")"; else echo free; fi; tail -3 ~/signforge/agent-lock.log 2>/dev/null; [ ! -f ~/signforge/kiosk.env.cloud ] || { grep -q . ~/signforge/kiosk.env && cmp -s ~/signforge/kiosk.env ~/signforge/kiosk.env.cloud && echo "kiosk: cloud config" || echo "kiosk: NOT on the cloud config"; }'
     ;;
   *) echo "usage: pi-lock.sh take|release|status" >&2; exit 2 ;;
 esac

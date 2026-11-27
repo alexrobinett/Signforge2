@@ -7,8 +7,10 @@ import { seedOrganization, testScope } from '@signforge/db/testing';
 import { resolvePlaylist } from '@signforge/player-core';
 import { env } from 'cloudflare:workers';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { manifestKey } from '../src';
-import { editorCalls, ok } from './calls';
+import type { OrgScope } from '@signforge/db';
+import { type Caller, dispatch, manifestKey, registry } from '../src';
+import { editorCalls, ok, racing } from './calls';
+import { memberOf } from './member';
 
 /** Instants in Europe/London, which is UTC in November. 2026-11-17 is a Tuesday. */
 const at = (iso: string) => new Date(`${iso}Z`);
@@ -52,7 +54,7 @@ async function setup(orgId: string) {
   /** Publish these entries' drafts. */
   const publish = (...entries: { id: string; version: number }[]) =>
     ok(call('publish', { drafts: entries.map((e) => ({ kind: 'schedule_entry', id: e.id, version: e.version })) }));
-  return { org, call, playingAt, publish, lobby: lobby.id, hall: hall.id, front: front.id, main, breakfast, lunch, flash };
+  return { org, call, playingAt, publish, lobby: lobby.id, hall: hall.id, front: front.id, main, breakfast, lunch, flash, still: still.id };
 }
 
 type Entry = { id: string; version: number; takeover: boolean };
@@ -64,7 +66,7 @@ describe('schedule entries', () => {
   it('schedules a playlist on every screen, a group or one screen, on dates, weekdays and a daily window', async () => {
     const { call, hall, front, breakfast, lunch, flash } = await setup('sch-create');
     const weekdays = await ok(
-      call('create_schedule_entry', {
+      call('save_schedule_entry', {
         playlistId: breakfast,
         target: 'group',
         groupId: front,
@@ -91,8 +93,8 @@ describe('schedule entries', () => {
       published: false,
       draftChanged: true,
     });
-    const atHall = await ok(call('create_schedule_entry', { playlistId: lunch, target: 'screen', screenId: hall, from: '11:00', to: '14:00' }));
-    const season = await ok(call('create_schedule_entry', { playlistId: flash, target: 'org', priority: 5, startDate: '2026-12-01', endDate: '2026-12-24' }));
+    const atHall = await ok(call('save_schedule_entry', { playlistId: lunch, target: 'screen', screenId: hall, from: '11:00', to: '14:00' }));
+    const season = await ok(call('save_schedule_entry', { playlistId: flash, target: 'org', priority: 5, startDate: '2026-12-01', endDate: '2026-12-24' }));
     expect(season.entry).toMatchObject({
       target: 'org',
       groupId: null,
@@ -107,9 +109,21 @@ describe('schedule entries', () => {
     expect(entries).toHaveLength(3);
   });
 
+  it('lists the unpublished entries alone, newest edit first, counting them all (#357)', async () => {
+    const { call, breakfast, lunch, publish } = await setup('sch-unpublished');
+    type Entry = { id: string; version: number };
+    const first = (await ok(call('save_schedule_entry', { playlistId: breakfast, target: 'org', priority: 1 }))).entry as Entry;
+    await publish(first);
+    const second = (await ok(call('save_schedule_entry', { playlistId: lunch, target: 'org', priority: 2 }))).entry as Entry;
+    const page = await ok(call('list_schedule_entries', { unpublished: true, limit: 1 }));
+    expect((page.entries as Entry[]).map((e) => e.id)).toEqual([second.id]);
+    expect(page.total).toBe(1);
+    expect((await ok(call('list_schedule_entries', {}))).total).toBe(2);
+  });
+
   it('refuses an entry a screen would refuse, one aimed wrongly, or at what does not exist', async () => {
     const { call, lobby, front, breakfast } = await setup('sch-refuse');
-    const make = (over: Record<string, unknown>) => call('create_schedule_entry', { playlistId: breakfast, target: 'screen', screenId: lobby, ...over });
+    const make = (over: Record<string, unknown>) => call('save_schedule_entry', { playlistId: breakfast, target: 'screen', screenId: lobby, ...over });
     expect(await make({ from: '6am', days: [7], startDate: 'Monday' })).toMatchObject({
       ok: false,
       error: 'invalid_input',
@@ -126,9 +140,9 @@ describe('schedule entries', () => {
 
   it('changes an entry with ifVersion, refuses an edit from an old read or of the other kind, and deletes', async () => {
     const { call, lobby, front, breakfast, lunch } = await setup('sch-update');
-    const made = entryOf(await ok(call('create_schedule_entry', { playlistId: breakfast, target: 'screen', screenId: lobby, from: '06:00', to: '10:00' })));
+    const made = entryOf(await ok(call('save_schedule_entry', { playlistId: breakfast, target: 'screen', screenId: lobby, from: '06:00', to: '10:00' })));
     const edited = await ok(
-      call('update_schedule_entry', { scheduleEntryId: made.id, playlistId: lunch, target: 'group', groupId: front, from: null, days: [0, 6], ifVersion: 1 }),
+      call('save_schedule_entry', { scheduleEntryId: made.id, playlistId: lunch, target: 'group', groupId: front, from: null, days: [0, 6], ifVersion: 1 }),
     );
     expect(edited.entry).toMatchObject({
       playlistId: lunch,
@@ -140,31 +154,37 @@ describe('schedule entries', () => {
       days: [0, 6],
       version: 2,
     });
-    expect(await call('update_schedule_entry', { scheduleEntryId: made.id, priority: 3, ifVersion: 1 })).toMatchObject({
+    expect(await call('save_schedule_entry', { scheduleEntryId: made.id, priority: 3, ifVersion: 1 })).toMatchObject({
       ok: false,
       error: 'conflict',
       details: { id: made.id, version: 2 },
     });
-    expect(await call('update_schedule_entry', { scheduleEntryId: made.id, endsAt: '2030-01-01T00:00:00Z', ifVersion: 2 })).toMatchObject({
+    expect(await call('save_schedule_entry', { scheduleEntryId: made.id, endsAt: '2030-01-01T00:00:00Z', ifVersion: 2 })).toMatchObject({
       ok: false,
       error: 'invalid_input',
     });
-    expect(await call('update_schedule_entry', { scheduleEntryId: made.id, to: '25:00', ifVersion: 2 })).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await call('save_schedule_entry', { scheduleEntryId: made.id, to: '25:00', ifVersion: 2 })).toMatchObject({ ok: false, error: 'invalid_input' });
+    // Not at a version it has moved on from (#268: the drawer's Undo of an entry it made).
+    expect(await call('delete', { type: 'schedule_entry', id: made.id, ifVersion: 1 })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { id: made.id, version: 2 },
+    });
     // Never published: it goes at once.
-    expect(await ok(call('delete_schedule_entry', { scheduleEntryId: made.id }))).toEqual({ deleted: made.id, version: null });
-    expect(await call('delete_schedule_entry', { scheduleEntryId: made.id })).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await ok(call('delete', { type: 'schedule_entry', id: made.id, ifVersion: 2 }))).toEqual({ deleted: made.id, version: null });
+    expect(await call('delete', { type: 'schedule_entry', id: made.id })).toMatchObject({ ok: false, error: 'not_found' });
     expect((await ok(call('list_schedule_entries', {}))).entries).toEqual([]);
   });
 
   it('an entry made again with a deleted one’s id continues its versions, so an edit from the old read is refused (#64)', async () => {
     const { org, call, lobby, breakfast, lunch } = await setup('sch-tombstone');
-    const made = entryOf(await ok(call('create_schedule_entry', { playlistId: breakfast, target: 'screen', screenId: lobby })));
-    const read = entryOf(await ok(call('update_schedule_entry', { scheduleEntryId: made.id, from: '06:00', ifVersion: 1 })));
-    await ok(call('delete_schedule_entry', { scheduleEntryId: made.id }));
+    const made = entryOf(await ok(call('save_schedule_entry', { playlistId: breakfast, target: 'screen', screenId: lobby })));
+    const read = entryOf(await ok(call('save_schedule_entry', { scheduleEntryId: made.id, from: '06:00', ifVersion: 1 })));
+    await ok(call('delete', { type: 'schedule_entry', id: made.id }));
     const again = await org.scheduleEntries.insert({ id: made.id, playlistId: breakfast, target: 'screen', screenId: lobby });
     expect(again.rowVersion).toBe(read.version + 1);
 
-    expect(await call('update_schedule_entry', { scheduleEntryId: made.id, playlistId: lunch, ifVersion: read.version })).toMatchObject({
+    expect(await call('save_schedule_entry', { scheduleEntryId: made.id, playlistId: lunch, ifVersion: read.version })).toMatchObject({
       ok: false,
       error: 'conflict',
       details: { id: made.id, version: read.version + 1 },
@@ -174,7 +194,7 @@ describe('schedule entries', () => {
 
   it('after a publish each screen plays, hour by hour, the entry that applies: highest priority, then most specific, else the default', async () => {
     const { call, publish, playingAt, hall, front, main, breakfast, lunch, flash } = await setup('sch-publish');
-    const made = (input: Record<string, unknown>) => ok(call('create_schedule_entry', input)).then(entryOf);
+    const made = (input: Record<string, unknown>) => ok(call('save_schedule_entry', input)).then(entryOf);
     const entries = [
       await made({ playlistId: breakfast, target: 'group', groupId: front, days: [1, 2, 3, 4, 5], from: '06:00', to: '10:00' }),
       await made({ playlistId: lunch, target: 'screen', screenId: hall, from: '11:00', to: '14:00' }),
@@ -201,7 +221,7 @@ describe('schedule entries', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(at('2026-11-17T12:00'));
     const { call, publish, playingAt, hall, main, lunch, flash } = await setup('sch-takeover');
-    const atHall = entryOf(await ok(call('create_schedule_entry', { playlistId: lunch, target: 'screen', screenId: hall, from: '11:00', to: '14:00' })));
+    const atHall = entryOf(await ok(call('save_schedule_entry', { playlistId: lunch, target: 'screen', screenId: hall, from: '11:00', to: '14:00' })));
     const takeover = await ok(call('start_takeover', { playlistId: flash, target: 'org', endsAt: '2026-11-17T14:00:00Z', idempotencyKey: 'takeover-1' }));
     expect(takeover.entry).toMatchObject({
       playlistId: flash,
@@ -220,7 +240,7 @@ describe('schedule entries', () => {
     expect(await playingAt(at('2026-11-17T14:00'))).toEqual({ lobby: main, hall: main });
 
     // Ended early: from the next publish it is over at its new end.
-    const ended = entryOf(await ok(call('update_schedule_entry', { scheduleEntryId: entryOf(takeover).id, endsAt: '2026-11-17T12:30:00Z', ifVersion: 1 })));
+    const ended = entryOf(await ok(call('save_schedule_entry', { scheduleEntryId: entryOf(takeover).id, endsAt: '2026-11-17T12:30:00Z', ifVersion: 1 })));
     await publish(ended);
     expect(await playingAt(at('2026-11-17T12:31'))).toEqual({ lobby: main, hall: lunch });
 
@@ -229,7 +249,7 @@ describe('schedule entries', () => {
     expect(await start({ endsAt: '2026-11-18T12:00:01Z' })).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await start({ startsAt: '2026-11-17T15:00:00Z' })).toMatchObject({ ok: false, error: 'invalid_input' });
     expect(await start({ startsAt: '2026-11-17T13:00:00Z', endsAt: '2026-11-18T13:00:00Z' })).toMatchObject({ ok: true });
-    expect(await call('update_schedule_entry', { scheduleEntryId: entryOf(takeover).id, from: '06:00', ifVersion: 2 })).toMatchObject({
+    expect(await call('save_schedule_entry', { scheduleEntryId: entryOf(takeover).id, from: '06:00', ifVersion: 2 })).toMatchObject({
       ok: false,
       error: 'invalid_input',
     });
@@ -265,7 +285,7 @@ describe('schedule entries', () => {
       return (await (await env.BLOBS.get(manifestKey(org.orgId, lobby, id)))!.json()) as ScreenManifest;
     };
     expect(Object.keys((await manifest()).playlists)).toContain(flash);
-    expect(await call('delete_playlist', { playlistId: flash })).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await call('delete', { type: 'playlist', id: flash })).toMatchObject({ ok: false, error: 'conflict' });
 
     // Ten days later, a publish that pins nothing.
     vi.setSystemTime(at('2026-11-27T12:00'));
@@ -274,7 +294,7 @@ describe('schedule entries', () => {
     expect(after.schedule).toEqual([]);
     expect(Object.keys(after.playlists)).not.toContain(flash);
     expect((await ok(call('list_schedule_entries', {}))).entries).toEqual([]);
-    expect(await ok(call('delete_playlist', { playlistId: flash }))).toEqual({ deleted: flash });
+    expect(await ok(call('delete', { type: 'playlist', id: flash }))).toEqual({ deleted: flash, version: null });
   });
 
   it('a playlist whose takeover has ended can be deleted before any publish, the takeover with it', async () => {
@@ -286,7 +306,7 @@ describe('schedule entries', () => {
     );
     await publish(takeover);
     vi.setSystemTime(at('2026-11-17T13:00'));
-    expect(await ok(call('delete_playlist', { playlistId: flash }))).toEqual({ deleted: flash });
+    expect(await ok(call('delete', { type: 'playlist', id: flash }))).toEqual({ deleted: flash, version: null });
     expect(await org.scheduleEntries.get(takeover.id)).toBeUndefined();
   });
 
@@ -304,7 +324,7 @@ describe('schedule entries', () => {
     expect(await org.scheduleEntries.get(takeover.id)).toBeUndefined();
   });
 
-  it('end_takeover deletes a takeover and publishes that alone, in one call', async () => {
+  it('takeover end deletes a takeover and publishes that alone, in one call', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(at('2026-11-17T12:00'));
     const { call, publish, playingAt, hall, main, flash, lunch } = await setup('sch-end');
@@ -313,36 +333,73 @@ describe('schedule entries', () => {
     );
     await publish(takeover);
     // A draft someone else is working on: ending the takeover does not publish it.
-    await ok(call('create_schedule_entry', { playlistId: lunch, target: 'screen', screenId: hall, idempotencyKey: 'lunch-hall' }));
-    expect(await ok(call('end_takeover', { scheduleEntryId: takeover.id }))).toMatchObject({
+    await ok(call('save_schedule_entry', { playlistId: lunch, target: 'screen', screenId: hall, idempotencyKey: 'lunch-hall' }));
+    expect(await ok(call('takeover', { action: 'end', scheduleEntryId: takeover.id }))).toMatchObject({
       publish: { screens: 2 },
       promoted: [],
       removed: [{ kind: 'schedule_entry', id: takeover.id }],
     });
     expect(await playingAt(at('2026-11-17T12:30'))).toEqual({ lobby: main, hall: main });
-    expect(await call('end_takeover', { scheduleEntryId: takeover.id })).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await call('takeover', { action: 'end', scheduleEntryId: takeover.id })).toMatchObject({ ok: false, error: 'not_found' });
+  });
+
+  it('takeover publish makes a takeover and publishes it in one batch, whole or not at all: one it cannot publish leaves no draft (#351)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, call, playingAt, flash, still } = await setup('sch-publish-takeover');
+    const out = await ok(call('takeover', { action: 'publish', playlistId: flash, target: 'org', endsAt: '2026-11-17T14:00:00Z' }));
+    expect(out).toMatchObject({ publish: { screens: 2 }, entry: { takeover: true, live: expect.anything() } });
+    expect(await playingAt(at('2026-11-17T12:30'))).toMatchObject({ lobby: flash, hall: flash });
+
+    // A playlist never published, not given to publish with it: refused, and no takeover is left as a draft.
+    const fresh = await org.playlists.insert({ name: 'Storm', transitionJson: JSON.stringify({ type: 'cut' }) });
+    await org.playlists.setItems(fresh.id, [still]);
+    const entries = (await org.scheduleEntries.list()).length;
+    const revision = (await org.publishes.history({ limit: 1 }))[0]?.revision;
+    expect(await call('takeover', { action: 'publish', playlistId: fresh.id, target: 'org', endsAt: '2026-11-17T14:00:00Z' })).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: expect.stringContaining('the takeover cannot be published'),
+    });
+    expect(await org.scheduleEntries.list()).toHaveLength(entries);
+    expect((await org.publishes.history({ limit: 1 }))[0]?.revision).toBe(revision);
+    // Given with it, at its version: both go live in the one call. Starting later, it wins over the first.
+    const row = (await org.playlists.get(fresh.id))!;
+    const later = { startsAt: '2026-11-17T12:05:00Z', endsAt: '2026-11-17T14:00:00Z' };
+    expect(
+      await ok(
+        call('takeover', {
+          action: 'publish',
+          playlistId: fresh.id,
+          target: 'org',
+          ...later,
+          with: [{ kind: 'playlist', id: fresh.id, version: row.rowVersion }],
+        }),
+      ),
+    ).toMatchObject({ promoted: expect.arrayContaining([{ kind: 'playlist', id: fresh.id }]) });
+    expect(await playingAt(at('2026-11-17T12:30'))).toMatchObject({ lobby: fresh.id, hall: fresh.id });
   });
 
   it('a published entry deleted waits for a publish that applies it: one of everything, or one that pins it; never one that pins something else', async () => {
     const { org, call, publish, playingAt, lobby, hall, main, breakfast, lunch } = await setup('sch-delete');
-    const atLobby = entryOf(await ok(call('create_schedule_entry', { playlistId: breakfast, target: 'screen', screenId: lobby })));
-    const atHall = entryOf(await ok(call('create_schedule_entry', { playlistId: lunch, target: 'screen', screenId: hall })));
+    const atLobby = entryOf(await ok(call('save_schedule_entry', { playlistId: breakfast, target: 'screen', screenId: lobby })));
+    const atHall = entryOf(await ok(call('save_schedule_entry', { playlistId: lunch, target: 'screen', screenId: hall })));
     await publish(atLobby, atHall);
     const noon = at('2026-11-17T12:00');
     expect(await playingAt(noon)).toEqual({ lobby: breakfast, hall: lunch });
 
     // Only someone who may publish deletes what screens play.
     await org.commit((await org.settings.stage.set({ editorsPublish: false })).writes);
-    expect(await call('delete_schedule_entry', { scheduleEntryId: atLobby.id })).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await call('delete', { type: 'schedule_entry', id: atLobby.id })).toMatchObject({ ok: false, error: 'forbidden' });
     await org.commit((await org.settings.stage.set({ editorsPublish: true })).writes);
 
-    const deletion = await ok(call('delete_schedule_entry', { scheduleEntryId: atLobby.id }));
+    const deletion = await ok(call('delete', { type: 'schedule_entry', id: atLobby.id }));
     expect(deletion).toEqual({ deleted: atLobby.id, version: atLobby.version + 1 });
     expect((await ok(call('list_schedule_entries', {}))).entries).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: atLobby.id, deleted: true, live: expect.objectContaining({ playlistId: breakfast }) })]),
     );
     // A publish that pins something else leaves it on screens.
-    const edited = entryOf(await ok(call('update_schedule_entry', { scheduleEntryId: atHall.id, playlistId: main, ifVersion: atHall.version })));
+    const edited = entryOf(await ok(call('save_schedule_entry', { scheduleEntryId: atHall.id, playlistId: main, ifVersion: atHall.version })));
     expect(await ok(call('publish', { drafts: [{ kind: 'schedule_entry', id: atHall.id, version: edited.version }] }))).toMatchObject({ removed: [] });
     expect(await playingAt(noon)).toEqual({ lobby: breakfast, hall: main });
     // Pinned, it goes; so would a publish of everything.
@@ -353,9 +410,195 @@ describe('schedule entries', () => {
     expect(await playingAt(noon)).toEqual({ lobby: main, hall: main });
     expect(await org.scheduleEntries.get(atLobby.id)).toBeUndefined();
 
-    const again = entryOf(await ok(call('create_schedule_entry', { playlistId: lunch, target: 'org' })));
+    const again = entryOf(await ok(call('save_schedule_entry', { playlistId: lunch, target: 'org' })));
     await publish(again);
-    await ok(call('delete_schedule_entry', { scheduleEntryId: again.id }));
+    await ok(call('delete', { type: 'schedule_entry', id: again.id }));
     expect(await ok(call('publish', {}))).toMatchObject({ removed: [{ kind: 'schedule_entry', id: again.id }] });
+  });
+
+  it('holds the right to delete what screens play to its batch: an editor whose editors stop publishing meanwhile is refused (review of #419)', async () => {
+    const { org, call, publish, lunch } = await setup('sch-delete-race');
+    const entry = entryOf(await ok(call('save_schedule_entry', { playlistId: lunch, target: 'org' })));
+    await publish(entry);
+    // The editor a member, whose right the batch reads as it runs.
+    const now = new Date(0).toISOString();
+    const userId = `${org.orgId}-editor-user`;
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)').bind(
+        userId,
+        'Ed',
+        `${userId}@signforge.test`,
+        now,
+        now,
+      ),
+      env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'editor', ?)").bind(
+        `${userId}-m`,
+        org.orgId,
+        userId,
+        now,
+      ),
+    ]);
+    const raced = racing({ ...memberOf(org, 'editor'), member: userId }, async () =>
+      org.commit((await org.settings.stage.set({ editorsPublish: false })).writes),
+    );
+    expect(await dispatch(registry, 'delete', { type: 'schedule_entry', id: entry.id }, raced)).toMatchObject({
+      ok: false,
+      error: 'forbidden',
+      message: 'Only owners publish in this organization',
+    });
+    expect((await org.scheduleEntries.get(entry.id))?.deletedAt).toBeNull();
+  });
+});
+
+/**
+ * `caller` whose org runs `before` once, the first time `repo`'s `method` (its `stage`'s, with `staged`) is called: a
+ * change landing at that point of a call, between two of its reads, whatever the machine's speed.
+ */
+function beforeFirst(caller: Caller, repo: 'scheduleEntries', method: string, before: () => Promise<unknown>, staged = false): Caller {
+  const org = caller.org as OrgScope;
+  const rows = org[repo];
+  const target: Record<string, unknown> = staged ? rows.stage : rows;
+  let done = false;
+  const hooked = new Proxy(target, {
+    get: (t, k) => {
+      const real = Reflect.get(t, k);
+      if (k !== method || typeof real !== 'function') return real;
+      return async (...args: unknown[]) => {
+        if (!done) {
+          done = true;
+          await before();
+        }
+        return Reflect.apply(real, t, args);
+      };
+    },
+  });
+  const repoOf = staged ? new Proxy(rows, { get: (t, k) => (k === 'stage' ? hooked : Reflect.get(t, k)) }) : hooked;
+  return { ...caller, org: new Proxy(org, { get: (t, k) => (k === repo ? repoOf : Reflect.get(t, k)) }) };
+}
+
+describe("a takeover's or a delete's card, held to the commit (#408)", () => {
+  afterEach(() => vi.useRealTimers());
+  const start = (flash: string, more: Record<string, unknown> = {}) => ({
+    action: 'publish',
+    playlistId: flash,
+    target: 'org',
+    endsAt: '2026-11-17T14:00:00Z',
+    ...more,
+  });
+  const takeovers = async (org: Awaited<ReturnType<typeof setup>>['org']) => (await org.scheduleEntries.list()).filter((e) => e.endsAt !== null);
+
+  it('ends a takeover only at the version shown: one changed just before the batch is refused and left as it is', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, call, flash } = await setup('card-end');
+    const made = entryOf(await ok(call('takeover', start(flash))));
+    const raced = racing(memberOf(org, 'editor'), () =>
+      ok(call('save_schedule_entry', { scheduleEntryId: made.id, endsAt: '2026-11-17T13:00:00Z', ifVersion: made.version })),
+    );
+    expect(await dispatch(registry, 'takeover', { action: 'end', scheduleEntryId: made.id, ifVersion: made.version }, raced)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { id: made.id },
+    });
+    expect(await org.scheduleEntries.get(made.id)).toMatchObject({ deletedAt: null });
+  });
+
+  it("holds an end to the version shown between the tool's read and the publish's (review of #553)", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, call, flash } = await setup('card-end-window');
+    const made = entryOf(await ok(call('takeover', start(flash))));
+    // Edited after the tool read the takeover and before the publish reads the org's entries.
+    const edited = beforeFirst(memberOf(org, 'editor'), 'scheduleEntries', 'list', () =>
+      ok(call('save_schedule_entry', { scheduleEntryId: made.id, endsAt: '2026-11-17T13:00:00Z', ifVersion: made.version })),
+    );
+    expect(await dispatch(registry, 'takeover', { action: 'end', scheduleEntryId: made.id, ifVersion: made.version }, edited)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: 'the takeover of Flash has changed since it was read',
+    });
+    expect(await org.scheduleEntries.get(made.id)).toMatchObject({ deletedAt: null });
+  });
+
+  it('checks what a takeover plays on the read its publish uses: a publish between the check and the batch refuses it (review of #553)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, call, flash, still } = await setup('card-plays-window');
+    const playlist = (await org.playlists.get(flash))!;
+    const spot = (await org.spots.get(still))!;
+    const plays = { playlist: playlist.publishedVersion, spots: { [still]: spot.publishedVersion } };
+    // Published after the tool checked what it plays and before the takeover is staged.
+    const republished = beforeFirst(
+      memberOf(org, 'editor'),
+      'scheduleEntries',
+      'insert',
+      async () => {
+        await ok(call('save_spot', { spotId: still, durationMs: 7000, ifVersion: spot.rowVersion }));
+        await ok(call('publish', {}));
+      },
+      true,
+    );
+    expect(await dispatch(registry, 'takeover', start(flash, { ifPlays: plays }), republished)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: 'Flash, or a spot of it, was published again since it was shown',
+    });
+    expect((await org.scheduleEntries.list()).filter((e) => e.endsAt !== null)).toEqual([]);
+  });
+
+  it('deletes a playlist only at the version shown: one renamed just before the batch is refused and kept', async () => {
+    const { org, call, breakfast } = await setup('card-delete');
+    const row = (await org.playlists.get(breakfast))!;
+    const raced = racing(memberOf(org, 'editor'), () => ok(call('save_playlist', { playlistId: breakfast, name: 'Brunch', ifVersion: row.rowVersion })));
+    expect(await dispatch(registry, 'delete', { type: 'playlist', id: breakfast, ifVersion: row.rowVersion }, raced)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: 'the playlist Brunch has changed since it was read',
+    });
+    expect(await org.playlists.get(breakfast)).toMatchObject({ name: 'Brunch' });
+    // A takeover of a playlist deleted since its card says so, not that it was published again.
+    await ok(call('delete', { type: 'playlist', id: breakfast }));
+    expect(await call('takeover', start(breakfast, { ifPlays: { playlist: 1, spots: {} } }))).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: 'its playlist was deleted since it was shown',
+    });
+  });
+
+  it('takes over only the screens shown: a member or a screen added just before the batch refuses it, making nothing', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, flash, front, lobby, hall } = await setup('card-reach');
+    const joined = racing(memberOf(org, 'editor'), () => org.screenGroups.setMembers(front, [lobby, hall]));
+    expect(await dispatch(registry, 'takeover', start(flash, { target: 'group', groupId: front, ifReach: [lobby] }), joined)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      details: { screens: [hall, lobby].sort() },
+    });
+    const added = racing(memberOf(org, 'editor'), () => org.screens.insert({ name: 'Annex', timezone: 'Europe/London', orientation: 'landscape' }));
+    expect(await dispatch(registry, 'takeover', start(flash, { ifReach: [lobby, hall] }), added)).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await takeovers(org)).toEqual([]);
+  });
+
+  it('takes over with what it plays as shown: a spot published again just before the batch refuses it, and as shown it runs', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(at('2026-11-17T12:00'));
+    const { org, call, flash, still, lobby, hall } = await setup('card-plays');
+    const playlist = (await org.playlists.get(flash))!;
+    const spot = (await org.spots.get(still))!;
+    const plays = { playlist: playlist.publishedVersion, spots: { [still]: spot.publishedVersion } };
+    const republished = racing(memberOf(org, 'editor'), async () => {
+      await ok(call('save_spot', { spotId: still, durationMs: 6000, ifVersion: spot.rowVersion }));
+      await ok(call('publish', {}));
+    });
+    expect(await dispatch(registry, 'takeover', start(flash, { ifPlays: plays }), republished)).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: expect.stringContaining('published again'),
+    });
+    expect(await takeovers(org)).toEqual([]);
+    const now = { playlist: playlist.publishedVersion, spots: { [still]: (await org.spots.get(still))!.publishedVersion } };
+    await ok(call('takeover', start(flash, { ifReach: [lobby, hall], ifPlays: now })));
+    expect(await takeovers(org)).toHaveLength(1);
   });
 });

@@ -6,16 +6,24 @@
  * no org (base templates). It is never served on `/api`, so no org member can reach it.
  */
 import type { PlatformScope } from '@signforge/db';
+import { agentGrantTools } from './agent-grants';
+import { aiProviderTools } from './ai-providers';
 import { alertChannelTools } from './alert-channels';
 import { assetTools } from './assets';
 import { auditTools } from './audit';
 import { brandTools } from './brand';
 import { connectionTools } from './connections';
 import { dataSourceTools } from './data-sources';
+import { deleteTools } from './delete';
 import { groupTools } from './groups';
 import { labelTools } from './labels';
+import { memberTools } from './members';
 import { pairingTools } from './pairing';
+import { agentDraftTools } from './agent-drafts';
 import { playlistTools } from './playlists';
+import { agentOutputOf, readTools } from './read';
+import { publishRequestTools } from './publish-requests';
+import { previewPublish } from './preview';
 import { publishTools } from './publish';
 import { scheduleTools } from './schedule';
 import { screenTools } from './screens';
@@ -23,26 +31,34 @@ import { settingsTools } from './settings';
 import { spotTools } from './spots';
 import { platformTemplateTools, templateTools } from './templates';
 import type { AnyTool, DataScope } from './tool';
-import { videoTools } from './videos';
+import { uploadTools } from './uploading';
 
-export const TOOLS: readonly AnyTool[] = [
+/** Every tool but `read` and `describe`, which read and describe these. */
+const BASE_TOOLS: readonly AnyTool[] = [
   ...screenTools,
   ...pairingTools,
   ...groupTools,
   ...labelTools,
   ...publishTools,
+  previewPublish,
+  ...publishRequestTools,
   ...templateTools,
   ...assetTools,
-  ...videoTools,
+  ...uploadTools,
   ...brandTools,
   ...dataSourceTools,
   ...connectionTools,
   ...settingsTools,
   ...alertChannelTools,
+  ...aiProviderTools,
   ...spotTools,
   ...playlistTools,
+  ...agentDraftTools,
   ...scheduleTools,
+  ...deleteTools,
   ...auditTools,
+  ...memberTools,
+  ...agentGrantTools,
 ];
 export const PLATFORM_TOOLS: readonly AnyTool<PlatformScope>[] = [...platformTemplateTools];
 
@@ -58,5 +74,10 @@ function build<D extends DataScope>(tools: readonly AnyTool<D>[]): ReadonlyMap<s
   return map;
 }
 
+export const TOOLS: readonly AnyTool[] = [...BASE_TOOLS, ...readTools(build(BASE_TOOLS))];
+
 export const registry = build(TOOLS);
+
+/** A tool's output as an agent reads it, its times ISO 8601 (#345): `/mcp`'s results and the drawer's tool outputs. */
+export const agentOutput = agentOutputOf(registry);
 export const platformRegistry = build(PLATFORM_TOOLS);

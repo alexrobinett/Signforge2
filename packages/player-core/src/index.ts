@@ -157,11 +157,10 @@ const isAlert = (s: Spot | undefined) =>
  * not yet surely ended. An alert published to start at once was started before the sync that
  * brought it, so it plays; one scheduled for later waits until it has surely started.
  */
-function withinBounds(manifest: ScreenManifest, e: ScheduleEntry, now: Date, trust: ClockTrust): boolean {
+function withinBounds(view: ScheduleView, e: ScheduleEntry, now: Date, trust: ClockTrust): boolean {
   if (e.startsAt === undefined && e.endsAt === undefined) return true;
   if (trust.clockTrusted === false) {
-    const items = manifest.playlists[e.playlist]?.items ?? [];
-    const alert = items.length > 0 && items.every((i) => isAlert(manifest.spots[i.spot]));
+    const alert = view.alertsOnly(e.playlist);
     const started = e.startsAt === undefined || Date.parse(e.startsAt) <= trust.notBefore;
     return alert && started && e.endsAt !== undefined && trust.notBefore < Date.parse(e.endsAt);
   }
@@ -177,11 +176,11 @@ const startOf = (e: ScheduleEntry) => (e.startsAt === undefined ? Number.NEGATIV
  * target, then the later `startsAt`, then the later in `schedule` (publish order), so of two
  * takeovers the newest wins. Undefined: the default playlist.
  */
-function winningEntry(manifest: ScreenManifest, now: Date, trust: ClockTrust): ScheduleEntry | undefined {
-  const t = localTime(now, manifest.screen.timezone);
+function winningEntry(view: ScheduleView, now: Date, trust: ClockTrust): ScheduleEntry | undefined {
+  const t = localTime(now, view.timezone);
   let best: { e: ScheduleEntry; at: number } | undefined;
-  for (const e of manifest.schedule) {
-    if (!withinBounds(manifest, e, now, trust) || !entryApplies(e, t) || !manifest.playlists[e.playlist]) continue;
+  for (const e of view.schedule) {
+    if (!withinBounds(view, e, now, trust) || !entryApplies(e, t) || !view.has(e.playlist)) continue;
     const at = startOf(e);
     // At least as good: an entry later in the list wins a full tie.
     if (
@@ -194,9 +193,45 @@ function winningEntry(manifest: ScreenManifest, now: Date, trust: ClockTrust): S
   return best?.e;
 }
 
+/**
+ * What the screen's rule reads of its schedule (#330): a manifest's (`scheduleOf`), or a schedule the CMS's week view
+ * reads as drafted, which has no manifest.
+ */
+export interface ScheduleView {
+  timezone: string;
+  schedule: readonly ScheduleEntry[];
+  defaultPlaylist: string;
+  /** Whether the screen has the playlist: an entry naming one it lacks never wins. */
+  has: (playlistId: string) => boolean;
+  /** Whether the playlist plays only alerts: a takeover of alerts alone plays on a clock the screen does not trust. */
+  alertsOnly: (playlistId: string) => boolean;
+}
+
+/** A manifest's schedule, as the screen's rule reads it. */
+export const scheduleOf = (manifest: ScreenManifest): ScheduleView => ({
+  timezone: manifest.screen.timezone,
+  schedule: manifest.schedule,
+  defaultPlaylist: manifest.defaultPlaylist,
+  has: (id) => !!manifest.playlists[id],
+  alertsOnly: (id) => {
+    const items = manifest.playlists[id]?.items ?? [];
+    return items.length > 0 && items.every((i) => isAlert(manifest.spots[i.spot]));
+  },
+});
+
+/**
+ * What plays at `now`: the winning entry's playlist, else the default; and the takeover, when the winner has an
+ * `endsAt`. Highest priority wins; on a tie the more specific target, then the later `startsAt`, then the later in the
+ * schedule.
+ */
+export function playing(view: ScheduleView, now: Date, trust: ClockTrust = {}): { playlist: string; takeover?: string } {
+  const e = winningEntry(view, now, trust);
+  return { playlist: e?.playlist ?? view.defaultPlaylist, ...(e?.endsAt !== undefined ? { takeover: e.id } : {}) };
+}
+
 /** Highest priority wins; on a tie the more specific target wins; otherwise the default playlist. */
 export function resolvePlaylist(manifest: ScreenManifest, now: Date, trust: ClockTrust = {}): Playlist {
-  const id = winningEntry(manifest, now, trust)?.playlist ?? manifest.defaultPlaylist;
+  const id = playing(scheduleOf(manifest), now, trust).playlist;
   const playlist = manifest.playlists[id];
   if (!playlist) throw new Error(`manifest ${manifest.id} has no playlist "${id}"`);
   return playlist;
@@ -207,8 +242,7 @@ export function resolvePlaylist(manifest: ScreenManifest, now: Date, trust: Cloc
  * changes, the player ends the spot on screen at once instead of at its end (M3-19).
  */
 export function activeTakeover(manifest: ScreenManifest, now: Date, trust: ClockTrust = {}): string | undefined {
-  const e = winningEntry(manifest, now, trust);
-  return e?.endsAt !== undefined ? e.id : undefined;
+  return playing(scheduleOf(manifest), now, trust).takeover;
 }
 
 /** The next instant after `now` at which a takeover starts or ends: when the player checks `activeTakeover` again, offline too. */
@@ -287,31 +321,81 @@ export interface Rejected {
   problem: string;
 }
 
+/** The poller's longest wait between tries of a failing source. */
+export const BACKOFF_MAX_MS = 6 * 3_600_000;
+
+/** How long the poller waits before polling a source again after its `failures`th failure in a row. */
+export const pollBackoffMs = (refreshS: number, failures: number) => Math.min(refreshS * 1000 * 2 ** failures, BACKOFF_MAX_MS);
+
+/**
+ * The `staleS` the server gives a snapshot of a source of `format` polled every `refreshS` seconds (#624), from the
+ * source as it is when the snapshot is sent, so a new poll interval reaches screens with no publish. A calendar
+ * (`ical`) outlives one failed poll and its retry (`pollBackoffMs`): the poll due `refreshS` after the last success
+ * fails, the retry comes `2 * refreshS` later, and ten minutes cover a screen hearing of it (its sync, and the
+ * poller's minute). That is 25 minutes at a calendar's default 5-minute poll, and at most a day. The ten minutes
+ * assume the poller keeps up: it polls at most 6 sources a minute platform-wide (`POLLS_PER_RUN` in apps/api), so
+ * more than 60 sources due in the same ten minutes delay some past it. Any other kind keeps the day: old weather,
+ * news or a menu misleads no one into a booked room.
+ */
+export function sourceStaleS(format: string, refreshS: number): number | undefined {
+  if (format !== 'ical') return undefined;
+  return Math.min((refreshS * 1000 + pollBackoffMs(refreshS, 1)) / 1000 + 600, SNAPSHOT_STALE_MS / 1000);
+}
+
+/** A snapshot's `staleS` field from its source as it is now: none for a source that keeps the day. */
+export function staleAge(source: { format: string; refreshS: number }): { staleS?: number } {
+  const staleS = sourceStaleS(source.format, source.refreshS);
+  return staleS === undefined ? {} : { staleS };
+}
+
+/**
+ * Whether a snapshot is stale at `now` (#624): not confirmed (`checkedAt`) within its `staleS`, or a day
+ * (`SNAPSHOT_STALE_MS`) without one, or with no `checkedAt` the screen can read. On a clock the screen does not trust
+ * (`Clock.trusted`: its corrected time is before the player's build or its last sync, such as a reboot that lost the
+ * time) the age cannot be told, so a snapshot
+ * with a shorter `staleS` than a day is stale, and any other is judged by the day as before: a menu keeps playing
+ * offline. A stale snapshot plays the spot's fallback, which the template is told of (`InitPayload.fallback`).
+ */
+export function isStale(snapshot: Pick<DataSnapshot, 'checkedAt' | 'staleS'>, now: number, clockTrusted: boolean): boolean {
+  const at = Date.parse(snapshot.checkedAt);
+  if (!Number.isFinite(at)) return true;
+  const staleMs = snapshot.staleS === undefined ? SNAPSHOT_STALE_MS : snapshot.staleS * 1000;
+  if (!clockTrusted && staleMs < SNAPSHOT_STALE_MS) return true;
+  return now - at > staleMs;
+}
+
 /**
  * The data a template spot plays with at `now`: its static values, with each bound field replaced
  * by the latest snapshot value when that value fits the field (the contract's `boundValue`; a
  * table's rows mapped onto a list field, numbers written in `locale`). A missing source, or a
- * snapshot the server last confirmed more than `SNAPSHOT_STALE_MS` before `now`, leaves the static
- * fallback in place quietly; a value that is missing at its path or does not fit also leaves the
+ * stale snapshot (`isStale`, on a clock the screen trusts or not), leaves the static fallback in place quietly; a value that is missing at its path or does not fit also leaves the
  * fallback, and is listed in `rejected` so a broken feed can be seen, as is a table row left out.
+ * `fallback` names each bound field left on its static value, for `init` to tell the template (#225); a list that
+ * kept some rows of a table is live.
  */
 export function resolveSpotData(
   spot: Extract<Spot, { kind: 'template' }>,
   fields: unknown,
   snapshots: ReadonlyMap<string, DataSnapshot>,
   now: number,
+  clockTrusted: boolean,
   locale: string,
-): { data: Record<string, unknown>; rejected: Rejected[] } {
+): { data: Record<string, unknown>; rejected: Rejected[]; fallback: string[] } {
   const data = { ...spot.data };
   const rejected: Rejected[] = [];
+  const fallback: string[] = [];
   for (const [field, b] of Object.entries(spot.bindings ?? {})) {
     const snapshot = snapshots.get(b.source);
-    if (!snapshot || now - Date.parse(snapshot.checkedAt) > SNAPSHOT_STALE_MS) continue;
+    if (!snapshot || isStale(snapshot, now, clockTrusted)) {
+      fallback.push(field);
+      continue;
+    }
     const { value, problems } = boundValue(fields, field, b, snapshot.data, locale);
     rejected.push(...problems.map((problem) => ({ source: b.source, problem })));
     if (value !== undefined) data[field] = value;
+    else fallback.push(field);
   }
-  return { data, rejected };
+  return { data, rejected, fallback };
 }
 
 // --------------------------------------------------------------------- files
@@ -348,5 +432,18 @@ export function planSync(next: ScreenManifest, have: Iterable<string>): { missin
 
 export { Clock, CLOCK_JUMP_MS, type ClockOptions, type ClockTrust, type PersistedClock } from './clock';
 export { PlayLedger, hourOf, type PlayBatch } from './plays';
-export { containedFrames, READY_TIMEOUT_MS, TEMPLATE_SANDBOX } from './frame';
-export { boundFields, manifestBoundFields, PLAYER_LOCALE, screenLocale, snapshotFit, type BindingSpot, type BoundField } from './bound';
+export { alive, containedFrames, READY_TIMEOUT_MS, TEMPLATE_SANDBOX } from './frame';
+export {
+  boundFields,
+  boundImageHashes,
+  hasBoundListImage,
+  manifestBoundFields,
+  manifestPhotoSources,
+  manifestSnapshotFiles,
+  PLAYER_LOCALE,
+  screenLocale,
+  snapshotFit,
+  spotSnapshotFiles,
+  type BindingSpot,
+  type BoundField,
+} from './bound';

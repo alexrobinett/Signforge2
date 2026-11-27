@@ -4,7 +4,7 @@
  * deliveries a run takes, as the Free plan allows 50 queries an invocation. Every row is named by
  * its org as well as its id, so nothing here reaches past the org a claimed row belongs to.
  */
-import { and, asc, eq, inArray, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import * as s from './schema';
 
@@ -38,16 +38,18 @@ export async function claimDueAlertDeliveries(d1: D1Database, now: number, { lim
     .all();
 }
 
-/** The channels the given deliveries go to, in one query; email deliveries name none. */
+/**
+ * The channels the given deliveries go to, in one query; email deliveries name none. The pairs are
+ * one JSON value, as D1 binds at most 100 values a statement and a run may take more deliveries.
+ */
 export async function alertChannelsOf(d1: D1Database, deliveries: readonly Pick<Delivery, 'orgId' | 'channel'>[]) {
   const c = s.alertChannels;
-  const pairs: SQL[] = [];
-  for (const d of deliveries) if (d.channel !== 'email') pairs.push(and(eq(c.orgId, d.orgId), eq(c.kind, d.channel))!);
+  const pairs = deliveries.filter((d) => d.channel !== 'email').map((d) => [d.orgId, d.channel]);
   if (!pairs.length) return [];
   return drizzle(d1)
     .select()
     .from(c)
-    .where(or(...pairs))
+    .where(sql`(${c.orgId}, ${c.kind}) IN (SELECT value ->> 0, value ->> 1 FROM json_each(${JSON.stringify(pairs)}))`)
     .all();
 }
 

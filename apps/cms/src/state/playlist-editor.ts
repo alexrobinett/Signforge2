@@ -6,7 +6,7 @@
  * and reaches the stage a moment later: the draft is compiled in the browser with each spot's saved
  * draft (`compilePlaylistPreview`) and played by the real player on the spot editor's stage
  * (src/state/spot-editor.ts). Each playlist's draft is a versioned draft (./versioned-draft.ts):
- * its save to the server (`update_playlist`) waits a second after the last edit and sends the whole
+ * its save to the server (`save_playlist`) waits a second after the last edit and sends the whole
  * order with the version the editor opened with as `ifVersion`, so an order made from an old read
  * is refused rather than dropping someone else's change. A playlist's saves run one at a time, each
  * building on the version the one before returned, and a draft waiting to be saved is sent before
@@ -18,13 +18,12 @@ import { playlistDraftOf, rowKeys, type PlaylistDraft, type PlaylistView } from 
 import { compilePlaylistPreview, versionsById, type SpotPreview } from '~/lib/spots';
 import { orgOnScreen } from '~/lib/live';
 import { callTool, isGone, toolMessage } from '~/lib/tools';
-import { playlistKeys, playlistQuery } from '~/queries/playlists';
+import { overviewKey } from '~/lib/overview';
+import { playlistKeys, playlistQuery, playlistsQuery } from '~/queries/playlists';
 import { assetsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { StageTarget } from './spot-editor';
 import type { SliceCreator } from './store';
-import { autosave, createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
-
-const SAVE_DELAY_MS = 1000;
+import { AUTOSAVE_MS, autosave, createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
 interface PlaylistEditorState {
   /** Each playlist's draft, by playlist id. A saved one is shown while the playlist is at the version it saved. */
@@ -66,13 +65,19 @@ export interface PlaylistEditorSlice {
   dropSpot: (orgId: string, playlistId: string, index: number) => void;
   openAddSpots: (open: boolean) => void;
   searchAddSpots: (query: string) => void;
-  /** Saves the playlist's draft now (Save draft, Publish): resolves once the save in flight and this one are done. */
+  /** Saves the playlist's draft now (Publish): resolves once the save in flight and this one are done. */
   savePlaylistDraft: (playlistId: string) => Promise<void>;
   /** After a refused save: reads the playlist again and drops its draft, to edit what is there now. */
   reloadPlaylist: (orgId: string, playlistId: string) => Promise<void>;
   /** The stage's manifest for a playlist target (called by the stage's redraw). */
   playlistStageDraft: (target: StageTarget & { playlistId: string }) => Promise<{ manifest?: ScreenManifest; problems: string[] } | undefined>;
   openNewPlaylist: (open: boolean) => void;
+  /**
+   * New playlist from elsewhere (⌘K, a screen's fix, #367): Playlists, with its dialog when the org has a spot to
+   * put in one. With none, that page's own first step is a spot, and no dialog is left asked for, to open on a later
+   * visit (review of #458).
+   */
+  startNewPlaylist: (orgId: string) => Promise<void>;
   nameNewPlaylist: (name: string) => void;
   /** Creates an empty playlist from the dialog and opens its editor. */
   createPlaylist: (orgId: string) => Promise<void>;
@@ -123,12 +128,13 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     state: { read: () => get().playlistEditor.drafts, write: (change) => editor((e) => ({ ...e, drafts: change(e.drafts) })) },
     async save({ key: playlistId, draft: { orgId, edit, version } }) {
       const saved = (
-        await callTool('update_playlist', { playlistId, name: edit.name.trim(), transition: edit.transition, spotIds: edit.spotIds, ifVersion: version })
+        await callTool('save_playlist', { playlistId, name: edit.name.trim(), transition: edit.transition, spotIds: edit.spotIds, ifVersion: version! })
       ).playlist;
       const key = playlistKeys.one(orgId, playlistId);
       // A playlist deleted meanwhile has left the cache: it is not written back.
       if (queryClient.getQueryData(key)) queryClient.setQueryData(key, saved);
       void queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });
+      void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
       return { version: saved.version };
     },
     invalid: ({ edit }) => unsaveable(edit),
@@ -138,7 +144,7 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     currentOrg: () => orgOnScreen(router),
     clock: realClock,
   });
-  const saveSoon = autosave(realClock, SAVE_DELAY_MS, (playlistId) => drafts.save(playlistId));
+  const saveSoon = autosave(realClock, AUTOSAVE_MS, (playlistId) => drafts.save(playlistId));
 
   /** The draft of `playlist` as it stands: the one edited here, else the saved one. */
   const current = (playlist: PlaylistView) => shown(get().playlistEditor.drafts[playlist.id], playlist.version) ?? playlistDraftOf(playlist);
@@ -247,15 +253,25 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     },
 
     openNewPlaylist: (open) => editor((e) => ({ ...e, newPlaylist: { ...closedNew(), open } })),
+    async startNewPlaylist(orgId) {
+      await router.navigate({ to: '/playlists' });
+      // Tied to the visit it made: any navigation since, even back to Playlists, leaves nothing asked for (review of #458).
+      const visit = router.state.location.state.__TSR_key;
+      const [{ playlists }, { spots }] = await Promise.all([queryClient.query(playlistsQuery(orgId)), queryClient.query(spotsQuery(orgId))]);
+      const still = router.state.location.state.__TSR_key === visit && orgOnScreen(router) === orgId;
+      // Opens wherever the page shows its New playlist button: there is one unless the org has neither a playlist nor a spot.
+      if (still && (playlists.length || spots.length)) get().openNewPlaylist(true);
+    },
     nameNewPlaylist: (name) => editor((e) => ({ ...e, newPlaylist: { ...e.newPlaylist, name, error: null } })),
 
     async createPlaylist(orgId) {
       const key = get().playlistEditor.newPlaylist.key ?? crypto.randomUUID();
       editor((e) => ({ ...e, newPlaylist: { ...e.newPlaylist, key, pending: true, error: null } }));
       try {
-        const made = (await callTool('create_playlist', { name: get().playlistEditor.newPlaylist.name.trim(), idempotencyKey: key })).playlist;
+        const made = (await callTool('save_playlist', { name: get().playlistEditor.newPlaylist.name.trim(), idempotencyKey: key })).playlist;
         queryClient.setQueryData(playlistKeys.one(orgId, made.id), made);
         void queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });
+        void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
         await router.navigate({ to: '/playlists/$playlistId', params: { playlistId: made.id } });
         editor((e) => ({ ...e, newPlaylist: closedNew() }));
       } catch (err) {
@@ -268,12 +284,13 @@ export const createPlaylistEditorSlice: SliceCreator<PlaylistEditorSlice> = (set
     async deletePlaylist(orgId, playlistId) {
       editor((e) => ({ ...e, deleting: { ...e.deleting, pending: true, error: null } }));
       try {
-        await callTool('delete_playlist', { playlistId });
+        await callTool('delete', { type: 'playlist', id: playlistId });
         // Only once it is gone: a refused delete leaves the waiting save to run.
         drafts.drop(playlistId);
         await router.navigate({ to: '/playlists' });
         queryClient.removeQueries({ queryKey: playlistKeys.one(orgId, playlistId), exact: true });
         await queryClient.invalidateQueries({ queryKey: playlistKeys.all(orgId), exact: true });
+        void queryClient.invalidateQueries({ queryKey: overviewKey(orgId) });
         editor((e) => ({ ...initial, drafts: e.drafts }));
       } catch (err) {
         editor((e) => ({ ...e, deleting: { ...e.deleting, pending: false, error: toolMessage(err) } }));

@@ -121,13 +121,21 @@ body {
   height: 100%;
   overflow: hidden;
 }
-/* `--scale` steps type up into the room a QR code leaves; `--fit` (main.ts) steps it down until
-   long copy fits. */
+/* `--scale` steps type up into the room a QR code leaves. `--fit` and `--cap-fit` (main.ts) scale the copy and the
+   caption down until each fits its region, with no floor: small text beats hidden or covered text in an emergency. */
 :root {
   --scale: 1;
   --fit: 1;
-  --ease: cubic-bezier(0.2, 0.9, 0.3, 1);
-  --out: 0.5s;
+  --cap-fit: 1;
+  /* The QR code's tile: 6.65 px a module at 1080p for a link of up to 213 bytes (QR version 10), as the Announcement's
+     30vmin code that scans from 2 m (#230). */
+  --qr: 40vmin;
+  /* Its caption's box, three lines at full size, and the code's whole region: the tile and the caption under it. */
+  --cap: 10.2vmin;
+  --qr-h: calc(var(--qr) + 1.48vmin + var(--cap));
+  --d-in: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --d-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --out: 0.3s;
 }
 :root[data-qr='off'] {
   --scale: 1.12;
@@ -180,17 +188,27 @@ body {
   min-height: 0;
   overflow: hidden;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  /* Three regions that nothing can grow or push (review of #448, round 3): the copy, who issued it and when it ends (the
+     meta line), and the code with its caption, of a fixed size. Every track is fixed, flexible or at least 0, so no
+     content sizes the grid; text that does not fit its region scales down instead (main.ts). */
+  grid-template-columns: minmax(0, 1fr) var(--qr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, auto);
   grid-template-areas:
-    'headline qr'
-    'instructions qr'
+    'copy qr'
     'meta qr';
   gap: 3.7vmin 7.4vmin;
   padding: 7.4vmin 8.9vmin 6.67vmin;
 }
+/* The headline and what to do: a region, its text from the top. */
+.copy {
+  grid-area: copy;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3.7vmin;
+}
 .headline {
-  grid-area: headline;
   font-family: 'alert-display', sans-serif;
   font-weight: 700;
   font-size: calc(11.1vmin * var(--scale) * var(--fit));
@@ -199,19 +217,25 @@ body {
   overflow-wrap: anywhere;
 }
 .instructions {
-  grid-area: instructions;
   max-width: 111vmin;
   font-size: calc(4.26vmin * var(--scale) * var(--fit));
   line-height: 1.4;
   text-wrap: pretty;
   overflow-wrap: anywhere;
 }
+/* Who issued it and when it ends: a region, its text at the bottom, scaled with the copy. */
 .meta {
   grid-area: meta;
-  align-self: end;
-  font-size: 2.96vmin;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: flex-end;
+  font-size: calc(2.96vmin * var(--fit));
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+.meta p {
+  min-width: 0;
 }
 .issued + .ends::before {
   content: '·';
@@ -220,15 +244,16 @@ body {
 .qr {
   grid-area: qr;
   align-self: end;
+  width: var(--qr);
+  height: var(--qr-h);
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 1.48vmin;
 }
 /* The code draws its own white tile and quiet zone (`qrSvg`). */
 .tile {
-  width: 23vmin;
-  height: 23vmin;
+  width: var(--qr);
+  height: var(--qr);
   border-radius: 1.48vmin;
   overflow: hidden;
 }
@@ -237,17 +262,62 @@ body {
   width: 100%;
   height: 100%;
 }
+/* The caption's own region under the code, as wide as it: text that does not fit scales down (`--cap-fit`, main.ts).
+   At the meta line's size, its text at the region's foot, so its last line is the meta line's. */
 .qr figcaption {
-  font-size: 2.6vmin;
+  height: var(--cap);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  text-align: center;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+  font-size: calc(2.96vmin * var(--cap-fit));
+  line-height: 1.4;
+}
+/* A block of its own, whose box is its lines' (main.ts measures it). */
+.qr figcaption span {
+  display: block;
 }
 :root[data-qr='off'] .body {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: 'headline' 'instructions' 'meta';
+  grid-template-areas: 'copy' 'meta';
+}
+/* Ink stays near its own box (review of #448, final check): marks stacked above or below a character paint past its
+   line, though the line fits its region, so each text box clips its paint a little past its edges, less than half the gap
+   to the next box (3.7vmin between rows and columns, 1.48vmin between the code and its caption). An accent keeps its ink;
+   no stack of marks reaches the next box, or the code. Layout is untouched: the regions are measured as before. */
+.instructions,
+.meta p {
+  overflow: clip;
+  overflow-clip-margin: 1.8vmin;
+}
+/* The headline's line is tight (1.02), so a script's marks stand well past it (Thai tone marks, Arabic and Hebrew points;
+   review of #448, round 5). Below, towards what to do, it keeps room for them in its own box, which the fit counts, and
+   clips 1.8vmin past that; above, where only the body's padding is (7.4vmin), and at the sides, it clips further out. */
+.headline {
+  padding-bottom: 0.25em;
+  clip-path: inset(-6vmin -3vmin -1.8vmin -3vmin);
+}
+.qr figcaption {
+  overflow: clip;
+  overflow-clip-margin: 0.7vmin;
+}
+.tile {
+  contain: paint;
+}
+/* While main.ts measures the text: laid out as it plays, not where the intros' transforms hold it. */
+:root[data-measuring] *,
+:root[data-measuring] *::before,
+:root[data-measuring] *::after {
+  /* biome-ignore-start lint/complexity/noImportantStyles: measuring must see no animation's transform. */
+  animation: none !important;
+  /* biome-ignore-end lint/complexity/noImportantStyles: measuring */
 }
 
-/* Motion. Emergency and warning arrive hard: the band drops in and the copy rises after it.
-   Advisory and notice fade in. Each element's outro is its intro reversed, ending as the play does
-   (`--sf-duration`). Only transform and opacity move. */
+/* Motion (D's, docs/template-spec.md): emergency and warning arrive hard and quick, the band dropping in and the
+   copy rising after it; advisory and notice fade in. Each element leaves on its own 300 ms lift, ending as the play
+   does (`--sf-duration`). Travel is at most 1.5vmin, with no overshoot; only transform and opacity move. */
 .band,
 .icon,
 .label,
@@ -257,22 +327,22 @@ body {
 .qr {
   will-change: transform, opacity;
   animation:
-    var(--m) var(--len) var(--ease) var(--d) both,
-    var(--m) var(--out) var(--ease) calc(var(--sf-duration, 60s) - var(--out)) reverse forwards;
+    var(--len) var(--d-in) var(--d) both var(--m),
+    var(--out) var(--d-out) calc(var(--sf-duration, 60s) - var(--out)) forwards alert-leave;
 }
 .band {
   --m: alert-drop;
-  --len: 0.45s;
+  --len: 0.4s;
   --d: 0s;
 }
 .icon {
   --m: alert-pop;
-  --len: 0.5s;
+  --len: 0.4s;
   --d: 0.3s;
 }
 .label {
   --m: alert-slide;
-  --len: 0.5s;
+  --len: 0.45s;
   --d: 0.35s;
 }
 .headline {
@@ -288,35 +358,32 @@ body {
 .meta,
 .qr {
   --m: alert-fade;
-  --len: 0.6s;
+  --len: 0.5s;
   --d: 0.8s;
-}
-:root:is([data-severity='advisory'], [data-severity='notice']) {
-  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 :root:is([data-severity='advisory'], [data-severity='notice']) .band {
   --m: alert-fade;
-  --len: 0.9s;
+  --len: 0.65s;
 }
 :root:is([data-severity='advisory'], [data-severity='notice']) .icon,
 :root:is([data-severity='advisory'], [data-severity='notice']) .label {
   --m: alert-fade;
-  --len: 0.9s;
+  --len: 0.65s;
   --d: 0.2s;
 }
 :root:is([data-severity='advisory'], [data-severity='notice']) .headline {
   --m: alert-soft;
-  --len: 0.9s;
+  --len: 0.65s;
   --d: 0.35s;
 }
 :root:is([data-severity='advisory'], [data-severity='notice']) .instructions {
   --m: alert-soft;
-  --len: 0.9s;
+  --len: 0.65s;
   --d: 0.5s;
 }
 :root:is([data-severity='advisory'], [data-severity='notice']) .meta,
 :root:is([data-severity='advisory'], [data-severity='notice']) .qr {
-  --len: 0.9s;
+  --len: 0.65s;
   --d: 0.7s;
 }
 /* Portrait: the band taller, the copy full width, and who issued it and when it ends beside the
@@ -332,14 +399,18 @@ body {
 }
 :root[data-orientation='portrait'] .body {
   grid-template-areas:
-    'headline headline'
-    'instructions instructions'
+    'copy copy'
     'meta qr';
+  grid-template-rows: minmax(0, 1fr) var(--qr-h);
   gap: 4.44vmin 3.7vmin;
   padding: 8.15vmin 6.67vmin 7.4vmin;
 }
 :root[data-orientation='portrait'][data-qr='off'] .body {
-  grid-template-areas: 'headline' 'instructions' 'meta';
+  grid-template-areas: 'copy' 'meta';
+  grid-template-rows: minmax(0, 1fr) minmax(0, auto);
+}
+:root[data-orientation='portrait'] .copy {
+  gap: 4.44vmin;
 }
 :root[data-orientation='portrait'] .headline {
   font-size: calc(11.5vmin * var(--scale) * var(--fit));
@@ -377,33 +448,26 @@ body {
 }
 @keyframes alert-drop {
   from {
-    transform: translateY(-100%);
+    opacity: 0;
+    transform: translateY(-1.5vmin);
   }
 }
 @keyframes alert-pop {
-  0% {
+  from {
     opacity: 0;
-    transform: scale(0);
-  }
-  70% {
-    opacity: 1;
-    transform: scale(1.15);
-  }
-  100% {
-    opacity: 1;
-    transform: none;
+    transform: scale(0.94);
   }
 }
 @keyframes alert-slide {
   from {
     opacity: 0;
-    transform: translateX(-3.7vmin);
+    transform: translateX(-1.5vmin);
   }
 }
 @keyframes alert-rise {
   from {
     opacity: 0;
-    transform: translateY(3.7vmin);
+    transform: translateY(1.5vmin);
   }
 }
 @keyframes alert-soft {
@@ -415,6 +479,12 @@ body {
 @keyframes alert-fade {
   from {
     opacity: 0;
+  }
+}
+@keyframes alert-leave {
+  to {
+    opacity: 0;
+    transform: translateY(-0.6vmin);
   }
 }
 @keyframes alert-glow {

@@ -1,7 +1,7 @@
 /**
  * Where a spot's live data comes from (issue #79): the spot editor's Source section. People choose
  * the source, never the values: a place and units for a weather template, a news feed, a calendar.
- * Choosing one finds or makes the org's data source (`create_data_source`) and binds every field
+ * Choosing one finds or makes the org's data source (`save_data_source`) and binds every field
  * the template's source declares (`live.fields`) to it, in the draft the editor saves
  * (src/state/spot-editor.ts). A source another spot uses is left as it is. A template with several
  * named sources (#193) has a picker for each, with state of its own.
@@ -15,15 +15,15 @@
  * the stage to play until the source's first poll.
  */
 import { type LiveSourceDef, readPath, type TableFeed, type TemplateManifest } from '@signforge/contract';
-import { bindAll, type PlaceView, type TableFormat, weatherSource, type WeatherUnits } from '~/lib/live-data';
+import { bindAll, type PlaceView, type TableFormat, weatherSource, weatherToKeep, weatherToReuse, type WeatherUnits } from '~/lib/live-data';
 import type { SpotView } from '~/lib/spots';
-import { callTool, toolMessage } from '~/lib/tools';
+import { callTool, Refusal, toolMessage } from '~/lib/tools';
 import { dataSourceKeys, dataSourceQuery, dataSourcesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
 /** How long typing a place pauses before it is looked up. */
 const SEARCH_DELAY_MS = 300;
-/** A new calendar's look-ahead, as `create_data_source` defaults it. */
+/** A new calendar's look-ahead, as `save_data_source` defaults it. */
 const DEFAULT_HORIZON_DAYS = 30;
 
 /** One source picker's state. */
@@ -194,7 +194,7 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
    */
   async function create(orgId: string, input: Record<string, unknown> & { id?: string }): Promise<string> {
     try {
-      return (await callTool('create_data_source', { ...input, idempotencyKey: crypto.randomUUID() })).dataSource.id;
+      return (await callTool('save_data_source', { ...input, idempotencyKey: crypto.randomUUID() })).dataSource.id;
     } finally {
       void queryClient.invalidateQueries({ queryKey: dataSourceKeys.all(orgId), exact: true });
     }
@@ -232,7 +232,26 @@ export const createSpotSourceSlice: SliceCreator<SpotSourceSlice> = (set, get, {
       attempt(t, async () => {
         const wanted = await weatherSource(t.live, place, units);
         const { dataSources } = await queryClient.query(dataSourcesQuery(t.orgId));
-        const id = dataSources.some((d) => d.id === wanted.id) ? wanted.id : await create(t.orgId, { ...wanted, format: 'json' });
+        const ids = dataSources.map((d) => d.id);
+        const make = async () => {
+          try {
+            return await create(t.orgId, { ...wanted, format: 'json' });
+          } catch (err) {
+            // The org at its ten (#541): the spot stays on the same place's source it reads, if any, until one is free.
+            // Any other refusal is shown.
+            const atCap = err instanceof Refusal && err.code === 'conflict' && typeof err.details === 'object' && err.details !== null && 'max' in err.details;
+            const current = atCap
+              ? weatherToKeep(
+                  wanted.id,
+                  Object.keys(t.live.fields).map((f) => t.spot.bindings?.[f]?.dataSourceId),
+                  ids,
+                )
+              : undefined;
+            if (current === undefined) throw err;
+            return current;
+          }
+        };
+        const id = weatherToReuse(t.live, wanted.id, ids) ?? (await make());
         const data: Record<string, unknown> = {};
         const { place: placeField, units: unitFields } = t.live;
         const placeDef = placeField ? t.manifest.fields[placeField] : undefined;

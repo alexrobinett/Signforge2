@@ -4,6 +4,7 @@
  * hex field, the contrast of every pair with its verdict in words and a fix, fonts with samples,
  * the corner shape and the two logos. Each field calls back with the change; the store keeps it.
  */
+import { choiceVariants } from '~/components/ui/choice';
 import { BRAND_SHAPES, sessionBlobPath, type BrandColor, type BrandColors, type BrandShape } from '@signforge/contract';
 import { FONTS, fontById, HEX_COLOR } from '@signforge/compiler';
 import { WandSparklesIcon } from 'lucide-react';
@@ -49,7 +50,7 @@ export function KitTile({ name, colors, displayFontId, className }: { name: stri
       </span>
       <span className="flex gap-1">
         {(['primary', 'accent', 'surface', 'text'] as const).map((c) => (
-          <span key={c} className="h-[18px] w-7 ring-1 ring-black/10" style={{ background: colors[c] }} />
+          <span key={c} className="h-[18px] w-7 ring-1 ring-border" style={{ background: colors[c] }} />
         ))}
       </span>
     </div>
@@ -126,7 +127,7 @@ export function ColourFields({
                 onChange={(e) => onChange(name, e.target.value.trim())}
                 aria-invalid={bad || undefined}
                 aria-describedby={`${id}-use${bad ? ` ${id}-bad` : ''}`}
-                className="font-mono text-[13px]"
+                className="font-mono text-meta"
               />
               {bad && (
                 <p id={`${id}-bad`} className="col-start-2 col-end-4 text-sm font-medium text-destructive">
@@ -149,9 +150,9 @@ export function ColourFields({
                 .map((p) => {
                   const fix = p.verdict === 'Pass' ? undefined : pairFix(shown, p.fg, p.bg);
                   return (
-                    <p key={p.label} className="col-start-2 col-end-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+                    <p key={p.label} className="col-start-2 col-end-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta">
                       <span>{p.label}</span>
-                      <span className={cn('font-mono font-semibold', p.verdict === 'Pass' ? 'text-status-online-foreground' : 'text-destructive')}>
+                      <span className={cn('font-semibold tabular-nums', p.verdict === 'Pass' ? 'text-status-online-foreground' : 'text-destructive')}>
                         {p.ratio} {p.verdict}
                       </span>
                       {fix && !disabled && (
@@ -181,7 +182,7 @@ export function ColourFields({
       <p role="status" className="sr-only">
         {failing.length ? `Below 4.5:1: ${failing.join(', ')}.` : 'Every pair reaches 4.5:1.'}
       </p>
-      <p className="text-[13px] text-muted-foreground">A pair below 4.5:1 is a warning: the kit still publishes, but its text is hard to read across a room.</p>
+      <p className="text-meta text-muted-foreground">A pair below 4.5:1 is a warning: the kit still publishes, but its text is hard to read across a room.</p>
     </div>
   );
 }
@@ -209,7 +210,7 @@ export function FontField({
       </label>
       <span
         aria-hidden
-        className={cn('text-[26px] leading-tight', role === 'display' ? 'font-extrabold' : 'font-normal')}
+        className={cn('text-2xl leading-tight', role === 'display' ? 'font-extrabold' : 'font-normal')}
         style={{ fontFamily: fontStack(value) }}
       >
         {SAMPLE[role]}
@@ -235,10 +236,7 @@ export function ShapeField({ value, disabled, onChange }: { value: BrandShape; d
       <legend className="mb-2 font-medium">Corners</legend>
       <div className="flex flex-wrap gap-2">
         {BRAND_SHAPES.map((s) => (
-          <label
-            key={s}
-            className="flex h-10 items-center gap-2 rounded-lg border px-3 text-sm has-checked:border-primary has-checked:bg-accent has-checked:text-accent-foreground has-focus-visible:ring-[3px] has-focus-visible:ring-ring/50"
-          >
+          <label key={s} className={choiceVariants({ className: 'flex h-10 items-center gap-2 rounded-lg px-3 text-sm' })}>
             <input type="radio" name="kit-shape" checked={value === s} disabled={disabled} onChange={() => onChange(s)} className="sr-only" />
             <span aria-hidden className="size-4 border-2 border-current" style={{ borderRadius: SHAPE_RADIUS[s] }} />
             {SHAPE_WORD[s]}
@@ -313,7 +311,7 @@ export function LogoFields({
           );
         })}
       </div>
-      <p className="text-[13px] text-muted-foreground">
+      <p className="text-meta text-muted-foreground">
         An SVG or PNG from the library. Templates show the dark one on dark grounds, and the light one, if you add it, on light grounds.
       </p>
       <AssetPicker

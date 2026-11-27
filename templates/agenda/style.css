@@ -1,3 +1,100 @@
+/*! Inter (latin subset, from @fontsource 5.3.0) is licensed under the SIL Open Font License, Version 1.1,
+   which asks that every copy carry its copyright notice and the licence:
+
+   Inter: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
+
+   This Font Software is licensed under the SIL Open Font License, Version 1.1.
+   This license is copied below, and is also available with a FAQ at:
+   http://scripts.sil.org/OFL
+
+
+   -----------------------------------------------------------
+   SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+   -----------------------------------------------------------
+
+   PREAMBLE
+   The goals of the Open Font License (OFL) are to stimulate worldwide
+   development of collaborative font projects, to support the font creation
+   efforts of academic and linguistic communities, and to provide a free and
+   open framework in which fonts may be shared and improved in partnership
+   with others.
+
+   The OFL allows the licensed fonts to be used, studied, modified and
+   redistributed freely as long as they are not sold by themselves. The
+   fonts, including any derivative works, can be bundled, embedded,
+   redistributed and/or sold with any software provided that any reserved
+   names are not used by derivative works. The fonts and derivatives,
+   however, cannot be released under any other type of license. The
+   requirement for fonts to remain under this license does not apply
+   to any document created using the fonts or their derivatives.
+
+   DEFINITIONS
+   "Font Software" refers to the set of files released by the Copyright
+   Holder(s) under this license and clearly marked as such. This may
+   include source files, build scripts and documentation.
+
+   "Reserved Font Name" refers to any names specified as such after the
+   copyright statement(s).
+
+   "Original Version" refers to the collection of Font Software components as
+   distributed by the Copyright Holder(s).
+
+   "Modified Version" refers to any derivative made by adding to, deleting,
+   or substituting -- in part or in whole -- any of the components of the
+   Original Version, by changing formats or by porting the Font Software to a
+   new environment.
+
+   "Author" refers to any designer, engineer, programmer, technical
+   writer or other person who contributed to the Font Software.
+
+   PERMISSION & CONDITIONS
+   Permission is hereby granted, free of charge, to any person obtaining
+   a copy of the Font Software, to use, study, copy, merge, embed, modify,
+   redistribute, and sell modified and unmodified copies of the Font
+   Software, subject to the following conditions:
+
+   1) Neither the Font Software nor any of its individual components,
+   in Original or Modified Versions, may be sold by itself.
+
+   2) Original or Modified Versions of the Font Software may be bundled,
+   redistributed and/or sold with any software, provided that each copy
+   contains the above copyright notice and this license. These can be
+   included either as stand-alone text files, human-readable headers or
+   in the appropriate machine-readable metadata fields within text or
+   binary files as long as those fields can be easily viewed by the user.
+
+   3) No Modified Version of the Font Software may use the Reserved Font
+   Name(s) unless explicit written permission is granted by the corresponding
+   Copyright Holder. This restriction only applies to the primary font name as
+   presented to the users.
+
+   4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+   Software shall not be used to promote, endorse or advertise any
+   Modified Version, except to acknowledge the contribution(s) of the
+   Copyright Holder(s) and the Author(s) or with their explicit written
+   permission.
+
+   5) The Font Software, modified or unmodified, in part or in whole,
+   must be distributed entirely under this license, and must not be
+   distributed under any other license. The requirement for fonts to
+   remain under this license does not apply to any document created
+   using the Font Software.
+
+   TERMINATION
+   This license becomes null and void if any of the above conditions are
+   not met.
+
+   DISCLAIMER
+   THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+   OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+   COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+   DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+   OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
 @font-face {
   font-family: 'Inter';
   src: url('./node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2');
@@ -24,7 +121,6 @@ body {
 :root {
   --accent: var(--sf-accent, #ffb547);
   --bg: var(--sf-bg, #0d1117);
-  --surface: var(--sf-surface, #161c27);
   --text: var(--sf-text, #fff);
   --muted: var(--sf-muted, color-mix(in srgb, var(--text) 60%, transparent));
 }
@@ -34,27 +130,29 @@ body {
 }
 .stage {
   --u: 1vmin;
-  --out: calc(var(--sf-duration, 10s) - 0.6s);
+  --d-in: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --d-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --out: calc(var(--sf-duration, 10s) - 0.3s);
   position: fixed;
   inset: 0;
   overflow: hidden;
   padding: calc(var(--u) * 7) calc(var(--u) * 8);
   display: flex;
   flex-direction: column;
-  background: linear-gradient(160deg, var(--surface) 0%, var(--bg) 55%);
+  background: var(--bg);
 }
 header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
+  align-items: baseline;
   gap: 4vmin;
-  margin-bottom: calc(var(--u) * 4);
+  margin-bottom: calc(var(--u) * 1);
   padding-bottom: calc(var(--u) * 2.4);
-  border-bottom: 0.3vmin solid color-mix(in srgb, var(--accent) 60%, transparent);
+  border-bottom: max(1px, 0.1vmin) solid color-mix(in srgb, var(--text) 18%, transparent);
   will-change: transform, opacity;
   animation:
-    rise-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
   animation-delay: 0s, var(--out);
 }
 h1 {
@@ -64,25 +162,25 @@ h1 {
   letter-spacing: -0.02em;
   line-height: 1;
 }
-.subtitle {
-  font-size: calc(var(--u) * 3);
+.subtitle,
+.today {
+  font-size: calc(var(--u) * 3.4);
+  font-weight: 500;
   color: var(--muted);
+}
+.subtitle {
   margin-top: calc(var(--u) * 1.2);
 }
 .subtitle:empty {
   display: none;
 }
 .today {
-  font-size: calc(var(--u) * 3.2);
-  font-weight: 600;
-  color: var(--accent-text);
   white-space: nowrap;
 }
 .events {
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: calc(var(--u) * 2.2);
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -90,22 +188,19 @@ h1 {
 .event {
   flex: none;
 }
+/* Ruled rows on a flat ground. */
 .event {
+  position: relative;
   display: flex;
   align-items: center;
   gap: calc(var(--u) * 3.4);
-  padding: calc(var(--u) * 1.6) calc(var(--u) * 2.4);
-  border-radius: var(--sf-radius, calc(var(--u) * 2)); /* The kit's surface, tinted with its text colour so a card stands out on a light kit too. */
-  background: color-mix(in srgb, var(--sf-surface, rgba(255, 255, 255, 0.045)) 90%, var(--sf-text, transparent));
+  padding: calc(var(--u) * 1.6) 0 calc(var(--u) * 1.6) calc(var(--u) * 2.4);
+  border-bottom: max(1px, 0.1vmin) solid color-mix(in srgb, var(--text) 12%, transparent);
   will-change: transform, opacity;
   animation:
-    slide-in 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
-  animation-delay: calc(0.25s + var(--i) * 0.12s), var(--out);
-}
-.event.now {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  box-shadow: inset 0.5vmin 0 0 var(--accent);
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
+  animation-delay: calc(0.25s + var(--i) * 0.11s), var(--out);
 }
 .day {
   flex: none;
@@ -116,11 +211,9 @@ h1 {
 .dow,
 .mon {
   display: block;
-  font-size: calc(var(--u) * 2.2);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--day-text);
+  font-size: calc(var(--u) * 2.8);
+  font-weight: 600;
+  color: var(--muted);
 }
 .num {
   display: block;
@@ -132,13 +225,13 @@ h1 {
   min-width: 0;
 }
 .when {
-  font-size: calc(var(--u) * 2.6);
-  font-weight: 600;
-  color: color-mix(in srgb, var(--text) 65%, transparent);
+  font-size: calc(var(--u) * 3);
+  font-weight: 500;
+  color: var(--muted);
 }
 /* Up to two lines, then an ellipsis. */
 .name {
-  font-size: calc(var(--u) * 4.4);
+  font-size: calc(var(--u) * 4.6);
   font-weight: 700;
   line-height: 1.15;
   display: -webkit-box;
@@ -148,7 +241,7 @@ h1 {
   overflow-wrap: anywhere;
 }
 .where {
-  font-size: calc(var(--u) * 2.6);
+  font-size: calc(var(--u) * 3);
   color: var(--muted);
 }
 .where:empty {
@@ -168,8 +261,8 @@ h1 {
   color: var(--muted);
   will-change: transform, opacity;
   animation:
-    rise-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
   animation-delay: 0.25s, var(--out);
 }
 .empty[hidden] {
@@ -180,11 +273,11 @@ h1 {
   align-items: flex-start;
 }
 /* Portrait has twice the height: taller rows and larger type rather than a list in the top third. */
-[data-orientation='portrait'] .events {
-  gap: calc(var(--u) * 3.4);
+[data-orientation='portrait'] h1 {
+  font-size: calc(var(--u) * 8);
 }
 [data-orientation='portrait'] .event {
-  padding: calc(var(--u) * 3.4) calc(var(--u) * 3.4);
+  padding: calc(var(--u) * 3.4) 0 calc(var(--u) * 3.4) calc(var(--u) * 3.4);
   gap: calc(var(--u) * 4);
 }
 [data-orientation='portrait'] .day {
@@ -205,20 +298,32 @@ h1 {
   font-size: calc(var(--u) * 5.4);
   margin: calc(var(--u) * 0.6) 0;
 }
+/* The accent marks only what is on now: a bar at its edge and its time. */
+.event.now::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: calc(var(--u) * 2.4);
+  bottom: calc(var(--u) * 2.4);
+  width: 0.6vmin;
+  background: var(--accent);
+}
+.event.now .when {
+  color: var(--accent-text);
+}
+/* A second event on a day already shown keeps the day's column, blank: one heading a day. */
+.event.same-day .day {
+  visibility: hidden;
+}
 @keyframes rise-in {
   from {
-    transform: translateY(4vh);
     opacity: 0;
-  }
-}
-@keyframes slide-in {
-  from {
-    transform: translateX(-6vw);
-    opacity: 0;
+    transform: translateY(1.5vmin);
   }
 }
 @keyframes fade-out {
   to {
     opacity: 0;
+    transform: translateY(-0.6vmin);
   }
 }

@@ -62,6 +62,19 @@ export class PlayLedger {
   }
 
   /**
+   * Take back a play `record` counted, while its hour is still open. One already in a batch stays:
+   * the server may have stored it.
+   */
+  retract(at: number, spot: string, ms: number): void {
+    const hour = hourOf(at);
+    const c = this.s.open.find((x) => x.hour === hour && x.spot === spot);
+    if (!c) return;
+    c.plays--;
+    c.ms = Math.max(0, c.ms - ms);
+    if (c.plays <= 0) this.s.open = this.s.open.filter((x) => x !== c);
+  }
+
+  /**
    * What the next sync sends: the unacknowledged batch again, or a new one of the hours ended by
    * `now` (at most `max` counts), or no counts under the last seq.
    */

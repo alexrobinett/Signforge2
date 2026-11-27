@@ -11,14 +11,9 @@
  * `publish_finished` rule names (`finishRollouts`).
  */
 import { findAlertWork, findUnfinishedRollouts, orgMembers, scoped } from '@signforge/db';
-import { ALERT_RETRY_MS, type AlertEvent, orgSettings, tally, UNREACHABLE_AFTER_MS, type Audience } from '@signforge/tools';
+import { ALERT_RETRY_MS, type AlertEvent, AUDIENCE_ROLES, grantClient, orgSettings, tally, UNREACHABLE_AFTER_MS } from '@signforge/tools';
+import { agentName } from './deliveries';
 import type { EmailMessage, EmailSender } from './email';
-
-const AUDIENCE_ROLES: Record<Audience, readonly string[]> = {
-  owners: ['owner'],
-  editors: ['owner', 'editor'],
-  everyone: ['owner', 'editor', 'viewer'],
-};
 
 interface OrgContext {
   recipients: string[];
@@ -27,14 +22,14 @@ interface OrgContext {
   time: (ms: number) => string;
 }
 
-/** The alerts these checks send, by the org setting's rule name. */
-type CheckedAlert = 'screen_offline' | 'publish_finished';
+/** The alerts sent here, by the org setting's rule name. */
+type CheckedAlert = 'screen_offline' | 'publish_finished' | 'agent_refused';
 
 async function orgContext(db: D1Database, orgId: string, kind: CheckedAlert): Promise<OrgContext> {
   const org = scoped(db, orgId);
   const [settings, members, set] = await Promise.all([orgSettings(org), orgMembers(db, orgId), org.alertChannels.list()]);
   const rule = settings.alerts[kind];
-  const roles = AUDIENCE_ROLES[rule.who];
+  const roles: readonly string[] = AUDIENCE_ROLES[rule.who];
   const format = new Intl.DateTimeFormat(settings.locale ?? 'en-US', {
     timeZone: settings.timezone ?? 'UTC',
     month: 'short',
@@ -196,4 +191,49 @@ export async function finishRollouts(env: Pick<Env, 'DB' | 'CMS_ORIGIN'>, email:
         `Who gets these is in Settings, Notifications.`,
     });
   }
+}
+
+/**
+ * An agent refused `forbidden` again and again within the hour (M4-08): an `agent.refused` event
+ * for the channels and an email to whom the org's `agent_refused` rule names. The grant's object
+ * says once an hour that it is due (`refused`), and the event's id is the grant's and the hour's,
+ * so a channel is sent it once however the calls race. The client is named as a page names it.
+ */
+export async function alertAgentRefused(
+  env: Pick<Env, 'DB' | 'CMS_ORIGIN'>,
+  email: EmailSender,
+  refused: { orgId: string; grantId: string; tool: string; needs: string | null; refusals: number; hour: number },
+  now: number,
+): Promise<void> {
+  const org = scoped(env.DB, refused.orgId);
+  const [[connected], name] = await Promise.all([org.agentGrants.connected({ grantId: refused.grantId }), org.name()]);
+  // Revoked since: nobody to tell about it.
+  if (!connected) return;
+  const { grant } = connected;
+  const client = grantClient(connected);
+  const { recipients, channels } = await orgContext(env.DB, refused.orgId, 'agent_refused');
+  const url = env.CMS_ORIGIN ? `${env.CMS_ORIGIN}/settings/api/${grant.id}` : null;
+  await org.alertDeliveries.queue(
+    alertOf(now, channels, {
+      type: 'agent.refused',
+      id: `evt_agent_refused_${grant.id}_${refused.hour}`,
+      occurredAt: iso(now),
+      org: { id: refused.orgId, name },
+      data: {
+        grant: { id: grant.id, url, client: { id: client.id, name: client.name } },
+        refusals: refused.refusals,
+        tool: refused.tool,
+        needs: refused.needs,
+      },
+    }),
+    now,
+  );
+  const who = agentName(client);
+  await sendAll(email, recipients, {
+    subject: `${who} was refused ${refused.refusals} times this hour`,
+    text:
+      `${who} in ${name} was refused ${refused.refusals} times this hour, most recently calling ${refused.tool}` +
+      `${refused.needs ? `, which needs ${refused.needs}` : ''}. It may be misconfigured or misled.\n\n` +
+      `${url ? `See it, change its scopes or disconnect it: ${url}\n\n` : ''}Who gets these is in Settings, Notifications.`,
+  });
 }

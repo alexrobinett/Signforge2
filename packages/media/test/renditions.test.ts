@@ -159,3 +159,30 @@ describe('makeRenditions', () => {
     expect(message).toBe('MediaError: the file is not an image this browser can read');
   }, 30_000);
 });
+
+describe('scaledPhoto', () => {
+  it("turns a phone photo upright and scales its longer edge down to the model's, as a JPEG", async () => {
+    const made = await page.evaluate(
+      async (b64) => {
+        const file = new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], 'IMG_0042.jpg', { type: 'image/jpeg' });
+        return (globalThis as any).SFMedia.scaledPhoto(file, 1568);
+      },
+      (await rotatedPhoto()).toString('base64'),
+    );
+    expect(made.mediaType).toBe('image/jpeg');
+    const bytes = Buffer.from(made.data, 'base64');
+    expect(readImageInfo(new Uint8Array(bytes))).toEqual({ type: 'image/jpeg', width: 1568, height: 882, orientation: 1 });
+    expect(await upright(bytes, 1568, 882)).toEqual([true, true, true, true]);
+  }, 30_000);
+
+  it('refuses a file that is not a photo, by its bytes', async () => {
+    const refused = await page.evaluate(async () => {
+      const file = new File([new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>')], 'flyer.jpg', { type: 'image/jpeg' });
+      return (globalThis as any).SFMedia.scaledPhoto(file, 1568).then(
+        () => null,
+        (e: Error) => e.message,
+      );
+    });
+    expect(refused).toMatch(/not a JPEG, PNG or WebP/);
+  });
+});

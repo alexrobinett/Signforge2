@@ -15,5 +15,8 @@ export const fakeServices: Pick<Required<ToolServices>, ServiceName> = {
   // A test that registers an org template passes a check that answers.
   templateCheck: () => Promise.reject(new Error('this test has no runtime check')),
   connectors,
+  aiProviders: { seal: async (_key, apiKey) => `sealed:${apiKey}`, test: async () => ({ ok: true, models: ['model-a'] }) },
   rateLimit: async () => true,
+  // No call recorded: a test that reads calls passes its own log.
+  agentCalls: { usage: async () => [], recent: async () => [], lastRefusal: async () => null },
 };

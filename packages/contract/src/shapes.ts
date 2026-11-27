@@ -17,8 +17,11 @@ export const SUPPORTED_PROTOCOLS: readonly number[] = [1, 2];
  *      refuses such a template, so the server tells it to reload, as for 4.
  *   7  a template's `live` may name several sources (`sources`, #193). A player that knows only 5
  *      and 6 refuses such a template, so the server tells it to reload, as for 4.
+ *   8  a `list` field's `item` may declare an `image` property, carrying a `NewsImage` (#196). A
+ *      player that knows only 6 and 7 refuses such a template, so the server tells it to reload,
+ *      as for 4.
  */
-export const MANIFEST_SCHEMA = 7;
+export const MANIFEST_SCHEMA = 8;
 /** Manifest schemas this player can play: the current one and the one before it. */
 export const SUPPORTED_MANIFEST_SCHEMAS: readonly number[] = [MANIFEST_SCHEMA - 1, MANIFEST_SCHEMA];
 
@@ -57,13 +60,20 @@ export type Sha256 = string;
 // ---------------------------------------------------------------- templates
 
 export type ScalarFieldDef =
-  | { type: 'text'; label: string; default?: string; maxLength?: number }
+  /**
+   * Text. `maxMarks` bounds the combining marks (accents, vowel signs, tone marks) on any one character, a grapheme
+   * cluster: Zalgo text stacks dozens, whose ink stands far past its line, over whatever is near (#230).
+   */
+  | { type: 'text'; label: string; default?: string; maxLength?: number; maxMarks?: number }
   | { type: 'number'; label: string; default?: number; min?: number; max?: number /** Counted from `min`, or from 0 without one. */; step?: number }
   | { type: 'boolean'; label: string; default?: boolean }
   | { type: 'color'; label: string; default?: string }
   | { type: 'select'; label: string; options: string[]; default?: string }
-  /** A web address people type, such as a QR code's: `https:` only, at most `MAX_URL_BYTES`, or empty for none. */
-  | { type: 'url'; label: string; default?: string; maxLength?: number }
+  /**
+   * A web address people type, such as a QR code's: `https:` only, at most `MAX_URL_BYTES`, or empty for none. `maxBytes`
+   * bounds its UTF-8 bytes, which is what a QR code holds: some characters use more than one byte (#230).
+   */
+  | { type: 'url'; label: string; default?: string; maxLength?: number; maxBytes?: number }
   /** A calendar day, `YYYY-MM-DD`; `min` and `max` are days too. */
   | { type: 'date'; label: string; default?: string; min?: string; max?: string }
   /**
@@ -81,11 +91,33 @@ export type ScalarFieldDef =
  */
 export const MAX_URL_BYTES = 2048;
 
+/** Field types a list row (`FieldDef` of type `list`) may declare: any scalar, or an optional image (`NewsImage`). */
+export type ListItemFieldDef = ScalarFieldDef | { type: 'image'; label: string };
+
+/** The most a template may say it draws an image across, in CSS px of a 1080p screen, either way. */
+export const MAX_IMAGE_BOX = 4096;
+
+/**
+ * The most a rendition chosen by an image field's `portraitBox` may be drawn larger than it is: the News
+ * template's rule for photos, past which they look soft (docs/template-spec.md).
+ */
+export const PORTRAIT_BOX_UPSCALE = 1.25;
+
 export type FieldDef =
   | ScalarFieldDef
-  | { type: 'image'; label: string }
-  /** Repeating rows, such as menu items or calendar events. Each row is an object of scalar fields. */
-  | { type: 'list'; label: string; item: Record<string, ScalarFieldDef>; maxItems?: number; default?: Record<string, unknown>[] };
+  | {
+      type: 'image';
+      label: string;
+      /**
+       * The largest box the template draws this image in on a portrait screen (1080x1920), at any moment of the
+       * spot, transforms included, in CSS px. With it, a portrait screen gets the landscape rendition when that has
+       * fewer pixels and covers this box drawn at most `PORTRAIT_BOX_UPSCALE` times its size, as a photo in a frame
+       * does; without it, the portrait rendition, which covers the whole screen (#224).
+       */
+      portraitBox?: { w: number; h: number };
+    }
+  /** Repeating rows, such as menu items, calendar events or news stories. Each row holds scalar fields and optional image fields. */
+  | { type: 'list'; label: string; item: Record<string, ListItemFieldDef>; maxItems?: number; default?: Record<string, unknown>[] };
 
 /** `template.json`, written by the template author. */
 export interface TemplateManifest {
@@ -295,7 +327,9 @@ export const FORBIDDEN_TEMPLATE_CODE: { pattern: RegExp; reason: string }[] = [
   // The player's policy runs only the bundle's own scripts (Template containment in docs/architecture.md).
   {
     // An `on…=` attribute in markup, in a file or in a string, or set with setAttribute; not a property such as `img.onload = f`.
-    pattern: /<[a-z][^>]*\son[a-z]+\s*=|\bsetAttribute\(\s*["'`]on[a-z]/i,
+    // Tried only from a `>` or the start, to the first `<letter` after it: a later `<` before the next `>` sees no more
+    // of the text, so trying each one again would make a long run without `>` cost its length squared.
+    pattern: /(?:^|>)[^<>]*(?:<(?![a-z])[^<>]*)*<[a-z][^>]*\son[a-z]+\s*=|\bsetAttribute\(\s*["'`]on[a-z]/i,
     reason: 'inline event handlers do not run in a template; use addEventListener',
   },
   { pattern: /\bjavascript:/i, reason: '`javascript:` URLs do not run in a template' },
@@ -377,20 +411,33 @@ const COLOUR_FUNCTION = /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/gi;
 /** Properties where a bare word may be a colour; anywhere else `white` could be a name. */
 const COLOUR_PROPERTY = /color|background|border|outline|shadow|fill|stroke|text-decoration|column-rule|^--/i;
 
+/** Just past the `)` that balances the `(` at `open` in `text`, or the end of `text` when none does. */
+function callEnd(text: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')' && --depth === 0) return i + 1;
+  }
+  return text.length;
+}
+
 /** `text` with every `name(...)` call (balanced) replaced by spaces, so offsets stay put. */
 function blankCalls(text: string, name: RegExp): string {
-  let out = text;
-  for (const m of [...text.matchAll(name)]) {
-    let depth = 0;
-    let i = m.index! + m[0].length - 1;
-    for (; i < text.length; i++) {
-      if (text[i] === '(') depth++;
-      else if (text[i] === ')' && --depth === 0) break;
-    }
-    out = out.slice(0, m.index!) + ' '.repeat(i + 1 - m.index!) + out.slice(i + 1);
+  let out = '';
+  for (const m of text.matchAll(name)) {
+    // A call inside one already blanked closes inside it too; scanning it again would be quadratic.
+    if (m.index < out.length) continue;
+    out += text.slice(out.length, m.index) + ' '.repeat(callEnd(text, m.index + m[0].length - 1) - m.index);
   }
-  return out;
+  return out + text.slice(out.length);
 }
+
+/**
+ * The brand colour lint's limits: an author needs the first few warnings, and a stylesheet of nested or unclosed calls
+ * would otherwise make a report its length squared (#446). Past `warnings`, one more says how many were left out.
+ */
+const COLOUR_LINT = { warnings: 20, quote: 80 };
+const clip = (text: string) => (text.length > COLOUR_LINT.quote ? `${text.slice(0, COLOUR_LINT.quote - 1)}…` : text);
 
 /**
  * The brand colour lint: colours in a template's CSS should come from `var(--sf-*)` or be built on
@@ -402,6 +449,7 @@ function blankCalls(text: string, name: RegExp): string {
  */
 export function brandColourWarnings(sources: Record<string, string>): string[] {
   const warnings: string[] = [];
+  let more = 0;
   for (const [name, text] of Object.entries(sources)) {
     let css: string;
     if (name.endsWith('.css')) css = text;
@@ -410,29 +458,60 @@ export function brandColourWarnings(sources: Record<string, string>): string[] {
       const blank = (t: string) => t.replace(/[^\n]/g, ' ');
       css = '';
       let at = 0;
-      for (const m of text.matchAll(/(<style[^>]*>)([\s\S]*?)<\/style>/gi)) {
-        css += blank(text.slice(at, m.index! + m[1]!.length)) + m[2];
-        at = m.index! + m[1]!.length + m[2]!.length;
+      // An element opens at the first `>` after `<style` and closes at the next `</style>`. Once one cannot close,
+      // no later one can, so the scan stops there rather than trying each `<style` to the end.
+      const opening = /<style/gi;
+      const closing = /<\/style>/gi;
+      for (let open = opening.exec(text); open; open = opening.exec(text)) {
+        const body = text.indexOf('>', opening.lastIndex) + 1;
+        if (body === 0) break;
+        closing.lastIndex = body;
+        const close = closing.exec(text);
+        if (!close) break;
+        css += blank(text.slice(at, body)) + text.slice(body, close.index);
+        at = close.index;
+        opening.lastIndex = closing.lastIndex;
       }
       css += blank(text.slice(at));
     } else continue;
-    css = css.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
-    for (const d of css.matchAll(/([-\w]+)\s*:\s*([^;{}]+)(?=[;}])/g)) {
+    // A comment closes by the last `*/` or not at all, so the rest is left alone rather than searched from each `/*`.
+    const commentsEnd = css.lastIndexOf('*/') + 2;
+    css = css.slice(0, commentsEnd).replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' ')) + css.slice(commentsEnd);
+    // A declaration ends at `;` or `}` and holds none of `;{}`, so each piece between them has at most one: the first
+    // `name:` in it. Matching piece by piece keeps a piece with none from being searched again from each character.
+    let line = 1;
+    let counted = 0;
+    let from = 0;
+    for (const stop of css.matchAll(/[;{}]/g)) {
+      const piece = css.slice(from, stop.index);
+      const offset = from;
+      from = stop.index + 1;
+      if (stop[0] === '{') continue;
+      const d = /(?<![-\w])([-\w]+)\s*:\s*([\s\S]+)/.exec(piece);
+      if (!d) continue;
       const prop = d[1]!;
       const value = blankCalls(blankCalls(d[2]!, /\bvar\(/gi), /\burl\(/gi);
       const found: { at: number; text: string }[] = [];
-      for (const m of value.matchAll(/#[0-9a-f]{3,8}\b/gi)) found.push({ at: m.index!, text: m[0] });
+      for (const m of value.matchAll(/#[0-9a-f]{3,8}\b/gi)) found.push({ at: m.index, text: m[0] });
       const calls = blankCalls(value, COLOUR_FUNCTION);
+      // Each call to its own `)`; one nested in it is part of its text, not another literal.
+      let end = 0;
       for (const m of value.matchAll(COLOUR_FUNCTION)) {
-        const end = calls.slice(m.index!).search(/\S/);
-        found.push({ at: m.index!, text: d[2]!.slice(m.index!, end < 0 ? undefined : m.index! + end).trim() });
+        if (m.index < end) continue;
+        end = callEnd(value, m.index + m[0].length - 1);
+        found.push({ at: m.index, text: d[2]!.slice(m.index, end).trim() });
       }
-      if (COLOUR_PROPERTY.test(prop)) for (const m of calls.matchAll(NAMED_COLOURS)) found.push({ at: m.index!, text: m[0] });
-      const line = css.slice(0, d.index!).split('\n').length;
-      for (const f of found.sort((a, b) => a.at - b.at))
-        warnings.push(`${name}:${line}: literal colour ${f.text} in ${prop}; use var(--sf-*) with it as the fallback`);
+      if (COLOUR_PROPERTY.test(prop)) for (const m of calls.matchAll(NAMED_COLOURS)) found.push({ at: m.index, text: m[0] });
+      line += css.slice(counted, offset + d.index).split('\n').length - 1;
+      counted = offset + d.index;
+      for (const f of found.sort((a, b) => a.at - b.at)) {
+        if (warnings.length < COLOUR_LINT.warnings)
+          warnings.push(`${name}:${line}: literal colour ${clip(f.text)} in ${clip(prop)}; use var(--sf-*) with it as the fallback`);
+        else more += 1;
+      }
     }
   }
+  if (more) warnings.push(`and ${more} more literal colour${more === 1 ? '' : 's'}`);
   return warnings;
 }
 
@@ -475,8 +554,10 @@ export interface FrameTheme {
 export interface InitPayload {
   data: Record<string, unknown>;
   /**
-   * Image fields, by field name, and under `sampleAsset(field)` the sample of a field's image when
-   * its file has one (`ManifestFile.sample`). The SDK turns each into an object URL.
+   * Image fields, by field name; under `sampleAsset(field)` the sample of a field's image when
+   * its file has one (`ManifestFile.sample`); and under `rowAsset(field, index, prop)` (and
+   * `rowAsset(field, index, prop, 'thumb')`) a list row's image blobs when held. The SDK turns
+   * each into an object URL.
    */
   assets: Record<string, Blob>;
   /** How long this play lasts. The template fits its outro to it. */
@@ -490,6 +571,13 @@ export interface InitPayload {
   clock: FrameClock;
   /** Protocol 2. */
   theme?: FrameTheme;
+  /**
+   * Protocol 2: the bound fields playing their static fallback in `data` (#225), because their source is missing, its
+   * snapshot is stale (`DataSnapshot.staleS`), or its value did not fit. A bound field not named here plays live data;
+   * a field with no binding is never named. Absent from players before #225: read it as none. It holds for the whole
+   * play: `data` is resolved once, at `init`, so a source that goes stale mid-play changes nothing until the next one.
+   */
+  fallback?: string[];
 }
 
 export type HostMessage =
@@ -537,7 +625,7 @@ export interface BrandKit {
 // A data source is a feed the server polls. Screens never call the feed themselves: from
 // the API they get snapshots on each sync (`SyncResponse.snapshots`); static content has them at
 // `data/<id>.json` beside the manifest. A screen keeps the last good one on disk and reads bound
-// fields from it each time a spot starts, while it is fresher than `SNAPSHOT_STALE_MS`.
+// fields from it each time a spot starts, while it is fresher than its `staleS`.
 
 export interface DataSource {
   id: string;
@@ -553,9 +641,12 @@ export interface DataSource {
 export const MAX_SNAPSHOT_BYTES = 65_536;
 
 /**
- * A snapshot the server has not confirmed (`checkedAt`) for this long is stale: a screen plays the
- * spot's static fallback rather than old data. The poller backs off to 6 hours on failure, so a
- * source gets several tries before its screens fall back.
+ * A snapshot the server has not confirmed (`checkedAt`) for this long is stale, unless it says sooner
+ * (`DataSnapshot.staleS`): a screen plays the spot's static fallback rather than old data. The poller backs off to 6
+ * hours on failure, so a source gets several tries before its screens fall back. A snapshot with no `checkedAt` a
+ * screen can read is stale. A screen whose clock it does not trust (its corrected time before the player's build or its
+ * last sync, such as a reboot that lost the time: docs/architecture.md, Player, Clock) cannot tell a snapshot's age: one with a shorter `staleS` is stale then, and any other is judged by
+ * this day as before, so a screen restarted with no network keeps its menu.
  */
 export const SNAPSHOT_STALE_MS = 24 * 3_600_000;
 
@@ -573,6 +664,13 @@ export interface DataSnapshot {
   /** When the server last saw the feed still say this. Staleness counts from it. */
   checkedAt: string;
   data: unknown;
+  /**
+   * How long, in seconds, this snapshot stays current on a screen with no newer `checkedAt` (#624): past it, the screen
+   * plays the spots' fallback, which they can say is not current (`InitPayload.fallback`). The server sets it from the
+   * source as it is now, its kind and its poll interval, so a change to either reaches screens on their next sync with
+   * no publish: a calendar's is minutes. Absent, `SNAPSHOT_STALE_MS`; at most that, at least a minute.
+   */
+  staleS?: number;
 }
 
 /**
@@ -606,9 +704,16 @@ export interface NewsFeed {
    * bind it whatever the feed.
    */
   language: string;
-  /** Newest first. */
-  items: { title: string; published: string; source: string; image?: NewsImage }[];
+  /**
+   * Newest first. `summary` is the story's description (RSS `description`, Atom `summary` or else
+   * `content`) as plain text, at most `NEWS_SUMMARY_MAX` characters, cut on a word with "…"; absent
+   * when the feed has none or it only repeats the title. Players and templates before it ignore it.
+   */
+  items: { title: string; published: string; source: string; summary?: string; image?: NewsImage }[];
 }
+
+/** The longest `NewsFeed` item `summary`, in characters: two or three lines under a lead headline. */
+export const NEWS_SUMMARY_MAX = 240;
 
 /**
  * A story's photo as a screen gets it: the server's checked copy of the image the feed names,
@@ -674,6 +779,19 @@ export interface Binding {
   path: string;
   /** A list field filled from a `TableFeed`'s rows. From manifest schema 4. */
   table?: TableMapping;
+}
+
+/**
+ * A spot draft's fields that still hold its template's sample copy, untouched (#360): what New spot
+ * started it with (a text's default, a list's default rows), never worked out from values later.
+ * `texts` names the text fields; `lists` gives each list field, row by row, the cells not edited yet
+ * (a row is sample while any are). A saved edit of a field, or binding it to a source, takes it
+ * out; a spot made any other way, or before #360, has none. It never reaches a screen: a publish
+ * that would put a spot with any live is refused (`sample_text`) unless a person allows it.
+ */
+export interface SampleFields {
+  texts: string[];
+  lists: Record<string, string[][]>;
 }
 
 // ------------------------------------------------------------ screen manifest
@@ -857,6 +975,19 @@ export interface DisplayStatus {
   /** What the supervisor reported for each power method, e.g. `{ signal: 'ok', cec: 'not acknowledged' }`. */
   methods?: Record<string, string>;
   override?: DisplayOverride;
+  /** The video output as the device supervisor last read it, on a screen that has one (#511). */
+  output?: DisplayOutput;
+}
+
+/**
+ * The panel's video mode, which the supervisor reads every minute while the panel is on and sets
+ * back to 1920x1080 at 60 Hz when it is not (a Pi 4 cannot animate at 4K; a hotplug can bring it back).
+ */
+export interface DisplayOutput {
+  /** `<width>x<height>@<Hz>`, the Hz rounded: `1920x1080@60` when right. */
+  mode: string;
+  /** How often the supervisor has set it back since it started. */
+  resets: number;
 }
 
 /**
@@ -884,6 +1015,15 @@ export const MAX_SYNC_PLAY_COUNTS = 500;
  */
 export const MAX_SYNC_SOURCES = 256;
 
+/** The most held feed-image blob hashes a screen may report in `SyncRequest.blobs`. */
+export const MAX_SYNC_BLOBS = 256;
+
+/**
+ * The most missing feed-image blob hashes one `SyncResponse.blobs` asks a screen to fetch (one
+ * full 10-story news source's lead files and thumbnails); any more arrive on the next sync.
+ */
+export const MAX_SYNC_RESPONSE_BLOBS = 20;
+
 /**
  * The largest `POST /v1/device/sync` body the server reads, in bytes; a larger one is refused (413)
  * before it is parsed. A sync holds at most MAX_SYNC_PLAY_COUNTS counts (about 50 kB). A player
@@ -906,7 +1046,11 @@ export interface SyncRequest {
    * is never ignored as a repeat. Never derived from the clock, which may be wrong.
    */
   epoch: string;
-  player: { version: string; manifestSchemas: readonly number[]; protocols: readonly number[] };
+  /**
+   * `release`: the player release this build is (`PlayerReleaseManifest.version`, #628), which the build's own
+   * `version` string does not say. Absent from a build before #628, or one not made by the release workflow.
+   */
+  player: { version: string; release?: number; manifestSchemas: readonly number[]; protocols: readonly number[] };
   /**
    * `active`: the manifest playing. `filesMissing`: files not yet held, of the manifest being synced and, while
    * falling back, of the last good one.
@@ -926,6 +1070,13 @@ export interface SyncRequest {
   snapshots: Record<string, number>;
   /** Live values and snapshots refused since the player started, by source id: a broken feed shows here. */
   dataRejected?: Record<string, number>;
+  /** Feed image blob hashes the screen already holds (from its held snapshots), at most `MAX_SYNC_BLOBS`. */
+  blobs?: Sha256[];
+  /**
+   * The player release the device supervisor last rolled back (#628), as its `/alive` reply says: sent on each sync
+   * until a newer release passes.
+   */
+  failedRelease?: FailedPlayerRelease;
 }
 
 export interface SyncResponse {
@@ -948,7 +1099,12 @@ export interface SyncResponse {
    * screen moves its copy's `checkedAt` on only if it holds that `version`, so an unchanged feed
    * does not go stale and the data is not sent again.
    */
-  checked?: Record<string, { version: number; checkedAt: string }>;
+  checked?: Record<string, { version: number; checkedAt: string; staleS?: number }>;
+  /**
+   * Feed image blob hashes referenced by the screen's snapshots that it did not report holding in
+   * `SyncRequest.blobs`, at most `MAX_SYNC_RESPONSE_BLOBS`. Fetched from `/v1/device/blobs/:sha256`.
+   */
+  blobs?: Sha256[];
   /** Short-lived ticket for `GET /v1/device/ws?ticket=`. */
   socketTicket: string;
   commands: DeviceCommand[];
@@ -966,6 +1122,128 @@ export type DeviceCommand =
 
 /** The longest an `identify` command shows the screen's name. */
 export const MAX_IDENTIFY_SECONDS = 60;
+
+// ------------------------------------------------------------ player releases
+// A player build reaches a screen through its device supervisor (#628): CI packs `dist/player` as a
+// tarball, writes a release manifest and signs it with Ed25519, and registers it on the `canary`
+// channel; a person promotes it to `stable`. The supervisor asks the API for its screen's channel's
+// release (`GET /v1/device/player-release`), and installs it only when the signature verifies
+// against the public key it ships with, the version is above the one installed, the release plays
+// the schema the server compiles, the tarball's hash matches and every file's does. It switches to
+// it, and rolls back when the new player does not beat `/alive` with its release.
+//
+// The signature is Ed25519 over the UTF-8 bytes of `PlayerReleaseOffer.release.manifest` exactly, with no trailing
+// newline, in standard base64 with padding. A fixed test vector, with a key pair for tests only, is in
+// packages/contract/test/player-release/, with a real tarball the manifest describes.
+//
+// The tarball is a gzip-compressed tar (ustar, pax or GNU; their extended headers are not members). Its members are only
+// regular files and directories, each named by a release path with at most one leading `./`, and `./` itself as a
+// directory. Every regular file is listed in `files` once, with its hash, and every listed file is there; a directory is
+// a parent of a listed file. The supervisor refuses the whole release for anything else: a link, a device or FIFO, an
+// absolute path, a `..`, a member named twice, a file not listed, or a directory no listed file is in. A path whose
+// first segment is `content` (`RESERVED_RELEASE_PATH`) is reserved: the supervisor links the content the player is sent
+// there, so no release carries it.
+//
+// The channel is server state and is not signed: a compromised API could offer a canary release to a stable screen. The
+// owner accepted that risk (#628, Security).
+
+/** A release's channel: canary screens (the demo Pi, the N100) get it first; every other screen follows `stable`. */
+export const PLAYER_CHANNELS = ['canary', 'stable'] as const;
+export type PlayerChannel = (typeof PLAYER_CHANNELS)[number];
+
+/** The release manifest's format. A supervisor refuses a format it does not know. */
+export const PLAYER_RELEASE_FORMAT = 1;
+/** The most bytes a release manifest's text may be, as UTF-8. */
+export const MAX_RELEASE_MANIFEST_BYTES = 1_048_576;
+/** The most files a release may hold. */
+export const MAX_RELEASE_FILES = 1000;
+/** The most bytes a release's tarball may be, and the most its files may add up to. */
+export const MAX_RELEASE_BYTES = 64 * 1_048_576;
+/** The longest a path inside a release may be. */
+export const MAX_RELEASE_PATH_LENGTH = 1024;
+/** One segment of a path inside a release: letters, digits, `.`, `_` and `-`, never `.` or `..` alone. */
+export const RELEASE_PATH_SEGMENT = /^[A-Za-z0-9._-]{1,255}$/;
+/** The first path segment no release may use: where the supervisor links the content the player is sent. */
+export const RESERVED_RELEASE_PATH = 'content';
+/** An Ed25519 signature, 64 bytes, in standard base64 with padding: 88 characters. */
+export const RELEASE_SIGNATURE = /^[A-Za-z0-9+/]{86}==$/;
+
+/**
+ * One file of a release: its path inside the tarball, relative, `/`-separated `RELEASE_PATH_SEGMENT`s, at most
+ * `MAX_RELEASE_PATH_LENGTH` long, not under `RESERVED_RELEASE_PATH`; and its sha256. No two files share a path, and no
+ * file's path is a directory of another's (`a` beside `a/b`).
+ */
+export interface PlayerReleaseFile {
+  path: string;
+  sha256: Sha256;
+}
+
+/**
+ * A player release, as CI writes and signs it. Its fields `manifestSchemas` and `protocols` are what the build plays,
+ * as a player reports them (`PlayerPlays`), so `canPlay` reads a release as it reads a player.
+ */
+export interface PlayerReleaseManifest {
+  /** `PLAYER_RELEASE_FORMAT`. */
+  format: typeof PLAYER_RELEASE_FORMAT;
+  /**
+   * The least supervisor that may install it: each supervisor knows its own level (a whole number, from 1), and refuses
+   * a release that asks for more. Supervisors update by hand, so a release that needs a newer one says so here.
+   */
+  minSupervisor: number;
+  /** A build number that only goes up: a screen never installs one at or below the one it runs. */
+  version: number;
+  /** The tarball's sha256, which `GET /v1/device/player-release/:sha256` serves. */
+  sha256: Sha256;
+  /** The tarball's size in bytes, from 1 to `MAX_RELEASE_BYTES`. */
+  size: number;
+  files: PlayerReleaseFile[];
+  manifestSchemas: readonly number[];
+  protocols: readonly number[];
+  createdAt: string;
+}
+
+/**
+ * `GET /v1/device/player-release`: the release on the screen's channel, or none. `manifest` is the exact JSON text CI
+ * signed, at most `MAX_RELEASE_MANIFEST_BYTES`; `signature` its Ed25519 signature (`RELEASE_SIGNATURE`): the
+ * supervisor verifies those bytes before it parses them.
+ */
+export interface PlayerReleaseOffer {
+  /** The manifest schema this server compiles (`MANIFEST_SCHEMA`): a release that does not play it is not installed. */
+  manifestSchema: number;
+  /** The screen's channel: a canary installs a release at once, a stable screen while its panel is off or an hour on. */
+  channel: PlayerChannel;
+  release: { manifest: string; signature: string } | null;
+}
+
+/**
+ * `POST /alive` on the device supervisor: the player's beat, with its version and, from a build the release workflow
+ * made, its release number, which the health gate after an install waits for. A build rolled back to may predate it.
+ */
+export interface SupervisorAliveRequest {
+  version: string;
+  release?: number;
+}
+
+/**
+ * Why the supervisor rolled a release back: its player never beat `/alive` with its release within the gate's first
+ * window (`not-alive`), stopped beating before the gate closed (`stopped`), or a reason a later supervisor gives
+ * (`other`). The list is open: a player maps a reason it does not know to `other`, rather than drop the report.
+ */
+export const FAILED_RELEASE_REASONS = ['not-alive', 'stopped', 'other'] as const;
+
+/** A release the supervisor rolled back and will not install again. */
+export interface FailedPlayerRelease {
+  version: number;
+  reason: (typeof FAILED_RELEASE_REASONS)[number];
+}
+
+/**
+ * The supervisor's answer to `/alive`: the last release it rolled back, on every beat until a newer one passes its gate.
+ * The player sends it on each sync (`SyncRequest.failedRelease`); the server keeps one per version.
+ */
+export interface SupervisorAliveResponse {
+  failedRelease?: FailedPlayerRelease;
+}
 
 /** Server to screen, over the socket. Kept rare: the socket exists to nudge, not to carry data. */
 export type ServerSocketMessage = { type: 'manifest'; id: string } | { type: 'command'; command: DeviceCommand } | { type: 'revoked' };

@@ -27,6 +27,19 @@ describe('playback loop', () => {
       .toBe(true);
   });
 
+  // The skipped page's load was left pending, and the slot's next play waited on it for good (#515).
+  it('plays on after a URL spot whose page never answers', async () => {
+    const content = h.content([
+      { id: 'a', durationMs: 800 },
+      { id: 'slow', url: 'https://slow.test/', durationMs: 800 },
+      { id: 'b', durationMs: 800 },
+    ]);
+    const p = await h.openPlayer((s) => s.publish(content), {}, { before: (page) => page.context().route(/^https:\/\/slow\.test\//, () => undefined) });
+    const s = await p.until((s) => s.log.length >= 3);
+    expect(spotsPlayed(s).slice(0, 3)).toEqual(['a', 'b', 'a']);
+    expect(s.lastError).toBe(`slow: not ready within 2000 ms`);
+  });
+
   it('titles a URL spot frame with the spot name (#69)', async () => {
     const content = h.content([{ id: 'lunch-menu', url: 'https://menu.test/', durationMs: 4000 }]);
     const p = await h.openPlayer((s) => s.publish(content));
@@ -98,15 +111,44 @@ describe('playback loop', () => {
 
   // A paused video that has never played presents no frame, so a frame callback never came: every
   // video prepare waited out a 600 ms timer (about 950 ms in all on the Pi, against a 500 ms budget).
+  // The clock jumps to where `v`'s prepare starts (3 s before `a` ends) and stays paused there: no
+  // timer fires after that, so `v` is ready only if canplaythrough alone makes it so.
   it('has a video spot ready once it can play through, without waiting for a frame callback', async () => {
     const video = readFileSync(join(import.meta.dirname, 'fixtures/clip.webm'));
     const content = h.content([
+      { id: 'a', durationMs: 60_000 },
       { id: 'v', video, durationMs: 1500 },
-      { id: 'a', durationMs: 1500 },
     ]);
-    const p = await h.openPlayer((s) => s.publish(content));
-    const s = await p.until((s) => s.prepares.filter((x) => x.spot === 'v').length >= 2);
+    const p = await h.openPlayer((s) => s.publish(content), {}, { clockAt: new Date('2026-11-23T12:00:00Z') });
+    const playing = await p.until((s) => s.log.length >= 1);
+    await p.page.clock.pauseAt(Date.parse(playing.log[0]!.startedAt) + 57_001);
+    const s = await p.until((s) => s.prepares.some((x) => x.spot === 'v'));
     expect(s.skipped).toBe(0);
-    for (const x of s.prepares.filter((x) => x.spot === 'v')) expect(x.ms).toBeLessThan(500);
+  });
+});
+
+// Every way the bundle worker can fail falls back to the page in silence, so nothing else fails if the built worker
+// stops loading (#570). Its own script, as the build emits it, must load and say it is ready.
+describe('the built bundle worker', () => {
+  it('loads and says it is ready', async () => {
+    // Its URL as the page starts it, kept should the page end it later.
+    const started: string[] = [];
+    const p = await h.openPlayer(
+      (s) => s.publish(h.content([{ id: 'a', durationMs: 800 }])),
+      {},
+      { before: async (page) => page.on('worker', (w) => started.push(w.url())) },
+    );
+    await expect.poll(() => started.some((u) => /bundle-worker/.test(u))).toBe(true);
+    const url = started.find((u) => /bundle-worker/.test(u))!;
+    const said = await p.page.evaluate(
+      (u) =>
+        new Promise((resolve, reject) => {
+          const w = new Worker(u, { type: 'module' });
+          w.onmessage = (e) => resolve(e.data);
+          w.onerror = () => reject(new Error('the bundle worker failed to load'));
+        }),
+      url,
+    );
+    expect(said).toEqual({ ready: true });
   });
 });

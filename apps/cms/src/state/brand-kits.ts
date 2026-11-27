@@ -6,21 +6,22 @@
  * An edit changes the draft here; 40 ms later each preview's spot is compiled in the browser with
  * the draft kit laid over its preview input (`withDraftKit`) and posted to its player, so a colour
  * re-themes the spots without a round trip. Kits have no drafts on the server: Save sends the whole
- * draft to `update_brand_kit` with the version it was read at, and screens get it at their next
+ * draft to `save_brand_kit` with the version it was read at, and screens get it at their next
  * publish. Each kit's edit is a versioned draft here (./versioned-draft.ts), so moving to another
  * kit loses nothing.
  * Kit and assignment changes invalidate the kit list, whose `reach` they change.
  */
 import { DEFAULT_BRAND_COLORS } from '@signforge/compiler';
 import { PREVIEW_PROTOCOL, type BrandColor, type ScreenManifest } from '@signforge/contract';
-import { duplicateInput, kitDraftOf, pairFix, shownColors, updateInput, withDraftKit, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
+import { toast } from 'sonner';
+import { draftColors, duplicateInput, kitDraftOf, pairFix, shownColors, updateInput, withDraftKit, type BrandKitView, type KitDraft } from '~/lib/brand-kits';
 import { orgOnScreen } from '~/lib/live';
 import { playerMessage } from '~/lib/preview';
 import { compilePreview, draftOf, versionsById, type SpotPreview } from '~/lib/spots';
 import { callTool, toolMessage } from '~/lib/tools';
 import { assetsQuery, brandKitsQuery, spotPreviewQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
-import { createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
+import { AUTOSAVE_MS, autosave, createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
 
 const PREVIEW_DELAY_MS = 40;
 
@@ -65,13 +66,15 @@ interface BrandKitsState {
 
 export interface BrandKitsSlice {
   brandKits: BrandKitsState;
-  /** Changes the kit's draft in `orgId`, starting from the kit as the Query cache holds it at this moment. */
-  editKit: (orgId: string, kitId: string, change: (d: KitDraft) => KitDraft) => void;
+  /**
+   * Changes the kit's draft in `orgId`, starting from the kit as the Query cache holds it at this moment. A choice
+   * (a font, the corners, a logo, a fix) says so in a toast with Undo, as the editors' do; `undo` puts it back.
+   */
+  editKit: (orgId: string, kitId: string, change: (d: KitDraft) => KitDraft, undo?: { said: string; change: (d: KitDraft) => KitDraft }) => void;
   /** Gives the foreground of a failing pair its fix: a derived on-colour, or text moved until it reads. */
   fixKitPair: (orgId: string, kitId: string, fg: BrandColor, bg: BrandColor) => void;
-  discardKitDraft: (kitId: string) => void;
-  /** Saves the kit's draft, unless a kit action, a save or a new kit is on its way. */
-  saveKit: (kitId: string) => Promise<void>;
+  /** Saves the kit's edit now: after a save that failed (no answer, a refusal), Try again. */
+  retryKitSave: (kitId: string) => Promise<void>;
   /** After a refused save: reads the kits again and drops the kit's draft. */
   reloadKit: (orgId: string, kitId: string) => Promise<void>;
   pickLogo: (which: 'dark' | 'light' | null) => void;
@@ -126,7 +129,7 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
     state: { read: () => get().brandKits.drafts, write: (change) => kits((k) => ({ ...k, drafts: change(k.drafts) })) },
     async save({ key: kitId, draft }) {
       // A kit's draft always starts from the kit, with its version (editKit): only a create has none.
-      const version = (await callTool('update_brand_kit', updateInput(kitId, draft.edit, draft.version!))).brandKit.version;
+      const version = (await callTool('save_brand_kit', updateInput(kitId, draft.edit, draft.version!))).brandKit.version;
       // Still saving until the page has the kit as saved, which the next edit builds on.
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: brandKitsQuery(draft.orgId).queryKey, exact: true }),
@@ -135,9 +138,20 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       ]);
       return { version };
     },
+    // A kit the server would refuse as it is (no name, a colour not yet a colour) is marked, not sent, as an editor's is.
+    invalid: ({ edit }) => !edit.name.trim() || draftColors(edit) === null,
     makeId: () => crypto.randomUUID(),
     currentOrg: () => orgOnScreen(router),
     clock: realClock,
+  });
+  /** The kit action or new kit on its way, if any. */
+  let acting: Promise<unknown> = Promise.resolve();
+  // Saved as the editors save (#366): a second after the last edit. Kit actions run one at a time (a save during
+  // Duplicate would leave the copy without it): one due while an action runs waits for it, and is still waited for
+  // by an org switch.
+  const saveSoon = autosave(realClock, AUTOSAVE_MS, async (kitId) => {
+    while (get().brandKits.pending !== null || get().brandKits.newKit.pending) await acting;
+    await drafts.save(kitId);
   });
   const links = new Map<string, PreviewLink>();
   const cachedKit = (orgId: string, kitId: string) => queryClient.getQueryData(brandKitsQuery(orgId).queryKey)?.brandKits.find((k) => k.id === kitId);
@@ -265,31 +279,39 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
    * Runs one kit action for `kitId`'s page or row, unless one is running, marking it pending and
    * showing its refusal there, then reads the kits again. Every way out releases it.
    */
-  async function act(orgId: string, kitId: string, at: string, work: () => Promise<unknown>): Promise<boolean> {
-    if (kitActionRunning(get())) return false;
+  function act(orgId: string, kitId: string, at: string, work: () => Promise<unknown>): Promise<boolean> {
+    if (kitActionRunning(get())) return Promise.resolve(false);
     kits((k) => ({ ...k, pending: at, actionError: null }));
-    try {
-      await work();
-      await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
-      return true;
-    } catch (err) {
-      kits((k) => ({ ...k, actionError: { kitId, text: toolMessage(err) } }));
-      return false;
-    } finally {
-      kits((k) => ({ ...k, pending: null }));
-    }
+    const done = (async () => {
+      try {
+        await work();
+        await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
+        return true;
+      } catch (err) {
+        kits((k) => ({ ...k, actionError: { kitId, text: toolMessage(err) } }));
+        return false;
+      } finally {
+        kits((k) => ({ ...k, pending: null }));
+      }
+    })();
+    acting = done;
+    return done;
   }
 
   return {
     brandKits: initial,
 
-    editKit(orgId, kitId, change) {
+    editKit(orgId, kitId, change, undo) {
       const kit = cachedKit(orgId, kitId);
       // Not read, or deleted: there is nothing to change.
       if (!kit) return;
+      // Another kit's edit, still waiting out its second: it is saved now, not left behind, as an editor's is.
+      for (const [id, d] of Object.entries(get().brandKits.drafts)) if (id !== kitId && d.status === 'unsaved') void drafts.save(id);
       // A new draft builds on the kit as the page holds it now; a later read of the kits does not move it.
       drafts.edit(kitId, { orgId, record: kitId, version: kit.version, edit: kitDraftOf(kit) }, change);
       redrawAll();
+      saveSoon(kitId);
+      if (undo) toast(undo.said, { action: { label: 'Undo', onClick: () => get().editKit(orgId, kitId, undo.change) } });
     },
 
     fixKitPair(orgId, kitId, fg, bg) {
@@ -297,16 +319,14 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       if (!kit) return;
       const draft = kitEditing(get().brandKits, kit) ?? kitDraftOf(kit);
       const value = fg === 'onPrimary' || fg === 'onAccent' ? null : pairFix(shownColors(draft, kit.colors), fg, bg).hex;
-      get().editKit(orgId, kitId, (d) => ({ ...d, colors: { ...d.colors, [fg]: value } }));
+      const was = draft.colors[fg];
+      get().editKit(orgId, kitId, (d) => ({ ...d, colors: { ...d.colors, [fg]: value } }), {
+        said: 'Contrast fixed',
+        change: (d) => ({ ...d, colors: { ...d.colors, [fg]: was } }),
+      });
     },
 
-    discardKitDraft(kitId) {
-      drafts.drop(kitId);
-      redrawAll();
-    },
-
-    async saveKit(kitId) {
-      if (kitActionRunning(get())) return;
+    async retryKitSave(kitId) {
       await drafts.save(kitId);
     },
 
@@ -326,32 +346,41 @@ export const createBrandKitsSlice: SliceCreator<BrandKitsSlice> = (set, get, { r
       const key = get().brandKits.newKit.key ?? crypto.randomUUID();
       kits((k) => ({ ...k, newKit: { ...k.newKit, key, pending: true, error: null } }));
       const from = where();
-      try {
-        const out = await callTool('create_brand_kit', { name: get().brandKits.newKit.name.trim(), colors: NEW_KIT_COLORS, idempotencyKey: key });
-        await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
-        if (stillAt(from, orgId)) await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId: out.brandKit.id } });
-        kits((k) => ({ ...k, newKit: newKit() }));
-      } catch (err) {
-        kits((k) => ({ ...k, newKit: { ...k.newKit, pending: false, error: toolMessage(err) } }));
-      }
+      acting = (async () => {
+        try {
+          const out = await callTool('save_brand_kit', { name: get().brandKits.newKit.name.trim(), colors: NEW_KIT_COLORS, idempotencyKey: key });
+          await queryClient.invalidateQueries({ queryKey: brandKitsQuery(orgId).queryKey, exact: true });
+          if (stillAt(from, orgId)) await router.navigate({ to: '/brand-kits/$kitId', params: { kitId: out.brandKit.id } });
+          kits((k) => ({ ...k, newKit: newKit() }));
+        } catch (err) {
+          kits((k) => ({ ...k, newKit: { ...k.newKit, pending: false, error: toolMessage(err) } }));
+        }
+      })();
+      await acting;
     },
 
     async duplicateKit(orgId, kit) {
+      // An edit still waiting out its second is saved first, and the copy is of the kit as saved; refused, the copy is
+      // not made, and the refusal is said where the kit's are.
+      if (get().brandKits.drafts[kit.id]?.status === 'unsaved') {
+        if ((await drafts.save(kit.id))?.status !== 'saved') return;
+        kit = cachedKit(orgId, kit.id) ?? kit;
+      }
       const of = `${kit.id}:${kit.version}`;
       const key = duplicateKeys.get(of) ?? crypto.randomUUID();
       duplicateKeys.set(of, key);
       let kitId: string | undefined;
       const from = where();
       const done = await act(orgId, kit.id, `duplicate:${kit.id}`, async () => {
-        kitId = (await callTool('create_brand_kit', duplicateInput(kit, key))).brandKit.id;
+        kitId = (await callTool('save_brand_kit', duplicateInput(kit, key))).brandKit.id;
       });
       if (!done || !kitId) return;
       duplicateKeys.delete(of);
-      if (stillAt(from, orgId)) await router.navigate({ to: '/settings/brand-kits/$kitId', params: { kitId } });
+      if (stillAt(from, orgId)) await router.navigate({ to: '/brand-kits/$kitId', params: { kitId } });
     },
 
     async makeDefaultKit(orgId, brandKitId) {
-      await act(orgId, brandKitId, `default:${brandKitId}`, () => callTool('set_default_brand_kit', { brandKitId }));
+      await act(orgId, brandKitId, `default:${brandKitId}`, () => callTool('save_brand_kit', { brandKitId, makeDefault: true }));
     },
 
     async assignKit(orgId, kit, chosen, target) {

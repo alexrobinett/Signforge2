@@ -26,14 +26,12 @@ import {
 } from '@signforge/contract';
 import type { Template, TemplateVersion } from '@signforge/db';
 import { z } from 'zod';
-import { id } from './fields';
-import { page, pageInput, type SortKey } from './paging';
+import { page, type SortKey } from './paging';
 import { baseBlobKey, orgBlobKey } from './r2';
+import { clearOfSweep } from './assets';
 import { defineSharedTool, defineTool, notFound, ToolError, type DataScope } from './tool';
-import { outputs, TEMPLATE_STATUSES, type TemplateVersionView, type TemplateView } from './outputs';
-
-const SHA256 = /^[0-9a-f]{64}$/;
-const sha = (what: string) => z.string().regex(SHA256, `not a ${what} hash (64 lowercase hex characters)`);
+import { outputs, type TemplateVersionView, type TemplateView } from './outputs';
+import { inputs } from './inputs';
 
 export type StoredCheckReport = TemplateCheckReport & { checkedAt: number; sourcesSha256: string };
 
@@ -75,7 +73,7 @@ const listTemplates = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ status: z.enum(TEMPLATE_STATUSES).optional().describe('Only versions with this status'), ...pageInput }),
+  input: inputs.list_templates,
   output: outputs.list_templates,
   example: {},
   handler: async ({ org, input }) => {
@@ -98,7 +96,7 @@ const getTemplate = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ templateId: id('template') }),
+  input: inputs.get_template,
   output: outputs.get_template,
   example: { templateId: 'tpl_example' },
   handler: async ({ org, input }) => {
@@ -120,11 +118,7 @@ const registerTemplateVersion = defineSharedTool({
   mutates: true,
   // Only an org's new version uses them; /admin passes them for base templates too.
   needs: ['templateCheck', 'rateLimit'],
-  input: z.object({
-    manifest: z.record(z.string(), z.unknown()).describe("The built template's template.json, with the protocol the build added"),
-    bundleId: sha('bundle').describe("SHA-256 of the built HTML file, uploaded to the owner's prefix"),
-    sourcesId: sha('sources').describe("SHA-256 of the author's sources, uploaded as a JSON object of file name to text"),
-  }),
+  input: inputs.register_template_version,
   output: outputs.register_template_version,
   example: {
     manifest: {
@@ -141,7 +135,7 @@ const registerTemplateVersion = defineSharedTool({
     bundleId: '0'.repeat(64),
     sourcesId: '1'.repeat(64),
   },
-  target: (_input, output) => ({ kind: 'template_version', id: output.version.id }),
+  target: (_input, output) => (output ? { kind: 'template_version', id: output.version.id } : undefined),
   handler: async ({ org, blobs, input, write, services: { templateCheck, rateLimit } }) => {
     const [bundle, sourcesObj] = await Promise.all([blobs.get(blobKey(org, input.bundleId)), blobs.get(blobKey(org, input.sourcesId))]);
     if (!bundle) throw new ToolError('not_found', `bundle ${input.bundleId} has not been uploaded`);
@@ -189,6 +183,17 @@ const registerTemplateVersion = defineSharedTool({
         return { template: templateView(existing, [prior]), version: versionView(prior), changed: false };
       }
     }
+    // An org's bundle and sources are content-addressed in its own prefix, as uploads are: not while a sweep deletes them.
+    // After the version already registered returns, which writes nothing (review of #429, round 2).
+    if ('storage' in org) {
+      await clearOfSweep(org, write, [input.bundleId, input.sourcesId]);
+      // Read above, and held across the runtime check below, which takes seconds: refused if the sweep has deleted
+      // either, from here or at the commit (review of #434, 2).
+      const now = Date.now();
+      const deleted = await org.storage.deleted([input.bundleId, input.sourcesId], now);
+      if (deleted.length) throw new ToolError('conflict', 'the storage clean-up deleted files this version names: upload them again', { deleted });
+      write({ row: undefined, writes: org.storage.stage.notDeleted([input.bundleId, input.sourcesId], now) });
+    }
 
     let runtime: TemplateRuntimeReport | undefined;
     if (org.orgId !== null) {
@@ -228,14 +233,14 @@ const registerTemplateVersion = defineSharedTool({
 const setTemplateVersionStatus = defineSharedTool({
   name: 'set_template_version_status',
   description:
-    'Approve a template version, so spots may use it, or retire it, so no new spot does. Spots already using a retired version keep playing it. Base templates belong to the platform; an org can change only its own. Setting the status it already has changes nothing. Returns { version, changed }.',
+    'Approve a template version, so spots may use it, or retire it, so no new spot does. Spots already using a retired version keep playing it. Base templates belong to the platform; an org can change only its own. Setting the status it already has changes nothing. People only: an agent is refused. Returns { version, changed }.',
   scope: 'content:publish',
   minRole: 'owner',
   mutates: true,
-  input: z.object({
-    templateVersionId: id('template version'),
-    status: z.enum(['approved', 'retired']),
-  }),
+  // Approving code that runs on every screen showing it is a person's review (#122): an agent could otherwise approve the
+  // version it registered.
+  people: true,
+  input: inputs.set_template_version_status,
   output: outputs.set_template_version_status,
   example: { templateVersionId: 'tpv_example', status: 'approved' },
   target: (input) => ({ kind: 'template_version', id: input.templateVersionId }),

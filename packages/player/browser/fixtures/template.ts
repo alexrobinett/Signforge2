@@ -8,11 +8,13 @@
  * refused, as a template that does not handle a failed load would.
  * It shows `label` and lists the titles of `items` in `#box` the way a news template would, trusting
  * the shape (so `items: {}` throws), marks whether it received asset `file` and the size of the
- * sample beside it, runs a CSS animation the SDK must hold until play, and marks `play`.
+ * sample beside it, runs a CSS animation the SDK must hold until play, and marks `play`, how many
+ * inits the frame took and the viewport the last one gave; a test can hold or fail its next init.
  */
 import { Sha256 } from '@signforge/player-core/sha256';
 import { defineTemplate } from '@signforge/template-sdk';
 import { sampleAsset } from '@signforge/template-sdk/backdrop';
+import { bindRow } from '@signforge/template-sdk/rows';
 import { attribute, childPage, childScript } from './child';
 
 const forever = () => new Promise<never>(() => {});
@@ -118,6 +120,18 @@ const navigates = new Set(['navigate', 'navigate-data', 'navigate-top', 'refresh
 defineTemplate({
   async prepare(ctx) {
     document.body.dataset.prepared = '1';
+    // The window outlives a reset, so this counts every init the frame took, and a test sets
+    // `sfHold` (a promise this prepare waits on) or `sfFailNext` (throw once) on it between inits.
+    const w = window as unknown as { sfInits?: number; sfHold?: Promise<void>; sfFailNext?: boolean };
+    document.body.dataset.inits = String((w.sfInits = (w.sfInits ?? 0) + 1));
+    document.body.dataset.viewport = `${ctx.viewport.width}x${ctx.viewport.height} ${ctx.orientation}`;
+    // The bound fields the player says play their fallback (#225).
+    document.body.dataset.fallback = [...ctx.fallback].join(',');
+    if (w.sfFailNext) {
+      w.sfFailNext = false;
+      throw new Error('fixture refit failed');
+    }
+    await w.sfHold;
     document.body.dataset.visibleInPrepare = getComputedStyle(document.getElementById('label')!).visibility;
     document.body.dataset.asset = ctx.assets.file ? '1' : '';
     const sample = ctx.assets[sampleAsset('file')];
@@ -140,8 +154,20 @@ defineTemplate({
       await after(200);
       throw new Error(`${mode} was refused`);
     }
-    const items = (ctx.data.items ?? []) as { title: string }[];
+    const items = (ctx.data.items ?? []) as { title: string; image?: { file: string; thumb: string } }[];
     document.getElementById('box')!.textContent = items.map((i) => i.title).join(', ');
+    if (items.length) {
+      const ul = document.createElement('ul');
+      ul.id = 'rows';
+      items.forEach((item, i) => {
+        const li = document.createElement('li');
+        li.dataset.hasImage = item.image ? '1' : '0';
+        li.innerHTML = '<span data-sf="title"></span><img class="lead" data-sf-src="image"><img class="thumb" data-sf-src="image:thumb">';
+        bindRow(li, ctx, 'items', i);
+        ul.appendChild(li);
+      });
+      document.body.appendChild(ul);
+    }
   },
   play() {
     document.body.dataset.playing = '1';

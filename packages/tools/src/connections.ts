@@ -10,10 +10,10 @@
 import type { OrgScope, Staged } from '@signforge/db';
 import { z } from 'zod';
 import { sha256Hex } from './dispatch';
-import { id } from './fields';
-import { page, pageInput } from './paging';
+import { page } from './paging';
 import { type Connectors, defineTool, notFound, ToolError } from './tool';
 import { type connectionOutput, outputs } from './outputs';
+import { inputs } from './inputs';
 
 /** How long an authorization waits for its callback. */
 const AUTHORIZATION_MS = 10 * 60_000;
@@ -58,7 +58,7 @@ const listConnections = defineTool({
   minRole: 'viewer',
   mutates: false,
   needs: ['connectors'],
-  input: z.object({ ...pageInput }),
+  input: inputs.list_connections,
   output: outputs.list_connections,
   example: {},
   handler: async ({ org, input, services: { connectors } }) => {
@@ -74,25 +74,15 @@ const startConnection = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  // An account at a provider is a person's choice, and the provider sends a browser back to finish it.
+  people: true,
   needs: ['connectors'],
-  input: z.object({
-    provider: z
-      .string()
-      .regex(/^[a-z][a-z0-9-]{0,31}$/, 'not a provider name')
-      .describe('The provider, such as google'),
-    connectionId: id('connection').optional().describe('A connection to authorize again in place, keeping its id and its data sources'),
-  }),
+  input: inputs.start_connection,
   output: outputs.start_connection,
   example: { provider: 'google' },
   target: (input, output) =>
-    input.connectionId ? { kind: 'connection', id: input.connectionId } : { kind: 'connection_authorization', id: output.authorizationId },
+    input.connectionId ? { kind: 'connection', id: input.connectionId } : output && { kind: 'connection_authorization', id: output.authorizationId },
   handler: async ({ org, actor, input, write, services: { connectors } }) => {
-    // The provider sends a browser back, and the callback finishes as its session's user: an agent's authorization could never be finished.
-    if (actor.kind !== 'user')
-      throw new ToolError(
-        'forbidden',
-        'Only a person signed in to the CMS can connect an account: the provider sends their browser back to SignForge, which finishes it as them. Ask them to connect it on the Integrations page',
-      );
     if (!connectors.providers.includes(input.provider))
       throw new ToolError(
         'invalid_input',
@@ -129,15 +119,14 @@ const finishConnection = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
+  // An account at a provider is a person's choice, and the provider sends a browser back to finish it.
+  people: true,
   needs: ['connectors'],
-  input: z.object({
-    oauthState: z.string().min(16).max(256).describe('The state the provider sent back'),
-    code: z.string().min(1).max(2048).describe("The provider's authorization code"),
-  }),
+  input: inputs.finish_connection,
   output: outputs.finish_connection,
   example: { oauthState: 'example-state-from-the-callback', code: 'example-code' },
   // No output when the provider refused the code: the authorization was used up, with nothing to name.
-  target: (_input, output: { connection: { id: string } } | undefined) => (output ? { kind: 'connection', id: output.connection.id } : undefined),
+  target: (_input, output) => (output ? { kind: 'connection', id: output.connection.id } : undefined),
   handler: async ({ org, actor, input, write, onDiscard, services: { connectors } }) => {
     const pending = await org.connections.authorizations.byState(await sha256Hex(input.oauthState), Date.now());
     if (!pending || pending.actorKind !== actor.kind || pending.actorId !== actor.id) throw new ToolError('not_found', NOT_PENDING);
@@ -189,7 +178,7 @@ const disconnect = defineTool({
   minRole: 'editor',
   mutates: true,
   needs: ['connectors'],
-  input: z.object({ connectionId: id('connection') }),
+  input: inputs.disconnect,
   output: outputs.disconnect,
   example: { connectionId: 'con_example' },
   target: (input) => ({ kind: 'connection', id: input.connectionId }),

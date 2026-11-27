@@ -10,16 +10,24 @@ import { createUiSlice } from '../src/state/ui';
 
 const orgs = vi.hoisted(() => ({ switchOrganization: vi.fn(async () => {}), createOrganization: vi.fn() }));
 vi.mock('~/lib/orgs', () => orgs);
+vi.mock('~/server/screens.functions', () => ({ getScreenStatus: vi.fn(), getScreens: vi.fn() }));
+vi.mock('~/server/nav-counts.functions', () => ({ getNavCounts: vi.fn(async () => ({ spots: 0, playlists: 0, schedule: 0 })) }));
 
-const router = { invalidate: vi.fn(async () => {}), navigate: vi.fn(async () => {}) };
+const router = { invalidate: vi.fn(async () => {}), navigate: vi.fn(async () => {}), state: { matches: [] } };
 const deps = { router, queryClient: {} } as never;
-/** The slices these commands touch, with the settings slice's one action they call. */
+/** The slices these commands touch, with the settings slice's, the agent drawer's and the sidebar Publish's one action they call. */
+const forgetAgentDrawer = vi.fn();
+const cancelPublishAll = vi.fn();
+const dropSampleCheck = vi.fn();
 const appStore = () =>
   createStore<any>()((set, get) => ({
     ...createUiSlice(set, get, deps),
     ...createOrgsSlice(set, get, deps),
     ...createCommandMenuSlice(set, get, deps),
     forgetOrgSettings: () => {},
+    forgetAgentDrawer,
+    cancelPublishAll,
+    dropSampleCheck,
   }));
 
 describe('orgCommands', () => {
@@ -130,5 +138,71 @@ describe('creating an org and switching, one at a time (re-check of #208)', () =
     await creating;
     await store.getState().switchOrg({ id: 'org_b', name: 'Harbor East' }, 'switcher');
     expect(orgs.switchOrganization).toHaveBeenCalledWith(router, 'org_b');
+  });
+});
+
+describe('switching org', () => {
+  it("forgets the agent drawer's conversation, and its turn on its way, before the switch: none of it goes to the next org (review of #327)", async () => {
+    const store = appStore();
+    forgetAgentDrawer.mockClear();
+    orgs.switchOrganization.mockClear();
+    orgs.switchOrganization.mockImplementationOnce(async () => {
+      // By the time the switch starts, the drawer has forgotten.
+      expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
+    });
+    await store.getState().switchOrg({ id: 'org_c', name: 'Harbor West' }, 'switcher');
+    expect(orgs.switchOrganization).toHaveBeenCalledTimes(1);
+    expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the sidebar's Publish question before the switch: what it read is the last org's (review of #395)", async () => {
+    const store = appStore();
+    cancelPublishAll.mockClear();
+    orgs.switchOrganization.mockImplementationOnce(async () => {
+      expect(cancelPublishAll).toHaveBeenCalledTimes(1);
+    });
+    await store.getState().switchOrg({ id: 'org_c', name: 'Harbor West' }, 'switcher');
+    expect(cancelPublishAll).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('creating an org', () => {
+  it("forgets the agent drawer's conversation before the new org becomes active (re-check of #327)", async () => {
+    const store = appStore();
+    forgetAgentDrawer.mockClear();
+    orgs.createOrganization.mockClear();
+    orgs.createOrganization.mockImplementationOnce(async () => {
+      expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
+    });
+    store.getState().editOrgName('dialog', 'Harbor North');
+    await store.getState().createOrg('dialog');
+    expect(orgs.createOrganization).toHaveBeenCalledTimes(1);
+    expect(forgetAgentDrawer).toHaveBeenCalledTimes(1);
+  });
+
+  it("a switch asked for while one runs changes nothing: the drawer's conversation and Publish are kept (#335)", async () => {
+    let finish = () => {};
+    orgs.switchOrganization.mockImplementationOnce(() => new Promise<void>((r) => (finish = r)));
+    const store = appStore();
+    const first = store.getState().switchOrg({ id: 'org_b', name: 'Harbor East' }, 'switcher');
+    forgetAgentDrawer.mockClear();
+    cancelPublishAll.mockClear();
+    await store.getState().switchOrg({ id: 'org_c', name: 'Pier West' }, 'switcher');
+    expect(forgetAgentDrawer).not.toHaveBeenCalled();
+    expect(cancelPublishAll).not.toHaveBeenCalled();
+    finish();
+    await first;
+    expect(orgs.switchOrganization).not.toHaveBeenCalledWith(router, 'org_c');
+  });
+
+  it('lets go of a sample-text question waiting on a publish when the org is left, by a switch or a new org (#479, review of #472)', async () => {
+    const store = appStore();
+    dropSampleCheck.mockClear();
+    await store.getState().switchOrg({ id: 'org_b', name: 'Harbor East' }, 'switcher');
+    expect(dropSampleCheck).toHaveBeenCalledTimes(1);
+    orgs.createOrganization.mockResolvedValueOnce(undefined);
+    store.getState().editOrgName('dialog', 'Pier West');
+    await store.getState().createOrg('dialog');
+    expect(dropSampleCheck).toHaveBeenCalledTimes(2);
   });
 });

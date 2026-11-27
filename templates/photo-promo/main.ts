@@ -10,22 +10,26 @@ defineTemplate({
     const kit = ctx.root.style;
     const primary = kit.getPropertyValue('--sf-primary');
     if (primary) kit.setProperty('--sf-on-primary', readableOn(primary, kit.getPropertyValue('--sf-on-primary')));
-    // The eyebrow is the accent over the photo, seen through a shade of the background: measured
-    // there, it is the accent where that reads, else black or white. A photo with light and dark
+    // The eyebrow is the text colour over the photo, seen through a shade of the background: measured
+    // there, it is the text colour where that reads, else black or white. A photo with light and dark
     // under it can leave none reading, and the eyebrow then sits on a fill of the background.
     const css = getComputedStyle(ctx.root);
     const bg = css.getPropertyValue('--bg');
-    const accent = css.getPropertyValue('--accent');
+    const ink = css.getPropertyValue('--text');
     const eyebrow = document.querySelector<HTMLElement>('.eyebrow')!;
     // Unpainted until prepare returns: a frame that paints the photo has it decoded for the screen
     // first, and the SDK's decode before ready then waits behind that one (on the Pi, 80 ms more).
     const img = document.querySelector<HTMLImageElement>('.photo img')!;
     img.style.visibility = 'hidden';
+    const page = document.body;
     const { pixels, lightest } = await backdrop(ctx, eyebrow, img, bg);
+    // New data while the backdrop was measured: the SDK put a fresh copy of the loaded body in place
+    // and inits again. Rejecting stops this prepare there, and the SDK drops a superseded prepare's error.
+    if (document.body !== page) throw new Error('new data replaced this prepare');
     img.style.visibility = '';
-    const over = readableOver(pixels, accent, { large: true, lightest });
+    const over = readableOver(pixels, ink, { large: true, lightest });
     if (!over) eyebrow.classList.add('scrim');
-    kit.setProperty('--accent-text', over ?? readableOn(bg, accent, { large: true }));
+    kit.setProperty('--eyebrow-ink', over ?? readableOn(bg, ink, { large: true }));
   },
 });
 

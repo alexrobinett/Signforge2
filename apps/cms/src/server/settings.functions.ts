@@ -36,6 +36,18 @@ export const getNotifications = createServerFn({ method: 'GET' }).handler(() =>
   }, null),
 );
 
+/** Settings, AI model (#261): the org's own model provider, if it has one, and members' names for who saved its key. */
+export const getAiSettings = createServerFn({ method: 'GET' }).handler(() =>
+  inOrg(async () => {
+    const [{ provider }, { members }] = await Promise.all([
+      tool('get_ai_provider', {}),
+      read<{ members: Member[] }>('/api/auth/organization/list-members?limit=200'),
+    ]);
+    const names: Record<string, string> = Object.fromEntries(members.map((m) => [m.userId, m.user.name || m.user.email]));
+    return { provider, names };
+  }, null),
+);
+
 /** The members, and for an owner the invitations waiting: Better Auth lets only owners list them. */
 export const getMembers = createServerFn({ method: 'GET' }).handler(async () => {
   const [{ members }, session] = await Promise.all([

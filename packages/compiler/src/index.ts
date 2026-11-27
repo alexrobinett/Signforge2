@@ -20,22 +20,18 @@ import {
   validateSpotData,
   type DataSource,
   type Playlist,
-  type ScheduleEntry,
   type ScreenManifest,
   type Sha256,
   type Spot,
   type TemplateManifest,
 } from '@signforge/contract';
 import { chooseBrandKit, DEFAULT_BRAND_COLORS, isBrandColor, tokenName, type BrandChoice } from './brand';
+import { entryProblems, screenSchedule, type TargetedEntry } from './schedule';
 
 export * from './brand';
 export { brandFont, FONTS, fontById, fontFilePath, isCatalogueFontFile, MAX_FONT_FAMILY_BYTES, type CatalogueFont } from './fonts';
 
-/** A schedule entry as the org stores it: its target level plus which group or screen it targets. */
-export type TargetedEntry = ScheduleEntry & {
-  /** The group or screen id for `group` and `screen` entries; unused for `org`. */
-  targetId?: string;
-};
+export { entryProblems, reaches, screenSchedule, targetIdOf, type ScheduleScreen, type TargetedEntry } from './schedule';
 
 export interface CompileInput {
   screen: ScreenManifest['screen'];
@@ -87,7 +83,13 @@ function withDefaults(spot: Extract<Spot, { kind: 'template' }>, t: TemplateMani
   for (const [name, def] of Object.entries(t.fields)) {
     if (def.type === 'list') {
       const rows = (spot.data[name] ?? def.default ?? []) as Record<string, unknown>[];
-      data[name] = rows.map((row) => Object.fromEntries(Object.entries(def.item).map(([k, d]) => [k, resolve(d, row[k] ?? d.default, colors)])));
+      data[name] = rows.map((row) =>
+        Object.fromEntries(
+          Object.entries(def.item).flatMap(([k, d]) =>
+            d.type === 'image' ? (row[k] !== undefined ? [[k, row[k]]] : []) : [[k, resolve(d, row[k] ?? d.default, colors)]],
+          ),
+        ),
+      );
     } else if (def.type !== 'image') data[name] = resolve(def, spot.data[name] ?? def.default, colors);
   }
   return { ...spot, data };
@@ -102,7 +104,7 @@ function tokenProblems(t: TemplateManifest, data: Record<string, unknown>): stri
   };
   for (const [name, def] of Object.entries(t.fields)) {
     if (def.type === 'list') {
-      for (const [k, d] of Object.entries(def.item)) check(`${name}.${k}`, d, d.default, 'defaults to');
+      for (const [k, d] of Object.entries(def.item)) if (d.type !== 'image') check(`${name}.${k}`, d, d.default, 'defaults to');
       const rows = Array.isArray(data[name]) ? (data[name] as unknown[]) : [];
       rows.forEach((row, i) => {
         if (row && typeof row === 'object')
@@ -130,21 +132,11 @@ export function spotProblems(spot: Spot, templates: CompileInput['templates']): 
   return out;
 }
 
-/** Why an entry cannot be placed on any screen. */
-function entryProblems(e: TargetedEntry): string[] {
-  if (!['org', 'group', 'screen'].includes(e.target)) return ['target must be org, group or screen'];
-  if (e.target !== 'org' && !e.targetId) return [`a ${e.target} entry needs a targetId`];
-  return [];
-}
-
 export async function compileScreen(input: CompileInput, opts: CompileOptions): Promise<CompileResult> {
   // Entries are checked first: one that cannot be placed cannot be said to miss this screen.
   const problems = input.schedule.flatMap((e) => entryProblems(e).map((p) => `schedule entry ${e.id}: ${p}`));
 
-  const targets = (e: TargetedEntry) =>
-    e.target === 'org' || (e.target === 'group' && input.groups.includes(e.targetId ?? '')) || (e.target === 'screen' && e.targetId === input.screen.id);
-  // The screen ranks entries by level itself; it never learns which other groups or screens exist.
-  const schedule = input.schedule.filter(targets).map(({ targetId: _t, ...e }) => e);
+  const schedule = screenSchedule(input.schedule, { id: input.screen.id, groups: input.groups });
 
   // Only what this screen's schedule can reach: smaller downloads, and no screen holds another's content.
   const reachable = new Set([input.defaultPlaylist, ...schedule.map((e) => e.playlist)]);

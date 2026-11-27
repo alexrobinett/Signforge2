@@ -1,13 +1,21 @@
 {
   "name": "@signforge/template-info-frame",
-  "version": "1.0.0",
+  "version": "1.4.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p . && tsc -p test",
+    "test": "vitest run"
   },
   "dependencies": {
     "@signforge/template-looks": "workspace:*",
     "@signforge/template-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@signforge/contract": "workspace:*",
+    "@signforge/template-test": "workspace:*",
+    "@types/node": "^26.6.6",
+    "playwright": "1.65.1",
+    "vitest": "^5.1.0"
   }
 }

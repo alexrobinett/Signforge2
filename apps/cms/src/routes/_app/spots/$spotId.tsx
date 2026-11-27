@@ -3,18 +3,31 @@
  * from the template's fields (or the image, video or web page settings); every change goes to the
  * stage at once and to the spot's draft a moment later (src/state/spot-editor.ts). A template
  * with live fields gets a Source section instead of those fields (src/components/spots/source-section.tsx).
+ * A spot the agent just filled (#263) opens with its marks and a banner (src/components/spots/fill-marks.tsx).
+ * Fill from a flyer updates a template spot (#264): its review takes the form's place, with the stage
+ * first on a phone, until it is kept or let go (src/components/spots/fill-review.tsx).
+ * Delete (#242) asks first; a spot a playlist plays is refused, and the dialog links those playlists.
  * The stage's orientation, scale, brand kit and data are in the URL:
  * `?o=portrait&scale=actual&kit=<id>&data=fallback`.
  */
+import { useDeferredValue } from 'react';
+import { startData } from '@signforge/compiler/draft';
 import { liveSources, safeUrl, sessionBlobPath } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { createFileRoute, notFound } from '@tanstack/react-router';
+import { createFileRoute, Link, notFound } from '@tanstack/react-router';
+import { SparklesIcon } from 'lucide-react';
 import { AssetPicker } from '~/components/assets/asset-picker';
-import { EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
+import { EditorDeleteQuestion, EditorFields, EditorMoreMenu, EditorHeader, EditorSection, PublishButton, SaveAlert, saveWord } from '~/components/editor';
+import { ProposalPanel } from '~/components/proposal';
 import { FieldForm } from '~/components/spots/field-form';
-import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
+import { FillBanner, UpdateBanner } from '~/components/spots/fill-marks';
+import { FillReview, FillSpotDialog } from '~/components/spots/fill-review';
+import { EDITOR, EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
 import { SourceSection } from '~/components/spots/source-section';
+import { AlertDialogCancel, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
+import { templateThumbnail } from '~/lib/template-thumbnail';
+import { cn } from '~/lib/utils';
 import { Input } from '~/components/ui/input';
 import { NativeSelect } from '~/components/ui/select';
 import { useCanManage, useCanPublish, useOrgId } from '~/lib/live';
@@ -26,8 +39,10 @@ import { spotShown } from '~/state/spot-editor';
 
 export const Route = createFileRoute('/_app/spots/$spotId')({
   validateSearch: stageSearch,
-  loaderDeps: ({ search }) => ({ o: search.o, kit: search.kit }),
-  loader: async ({ context: { queryClient }, params, deps, parentMatchPromise }) => {
+  // Entering reads the stage's preview in the loader, so the skeleton shows while it comes (#376); the
+  // orientation or kit changed on the page is read by its query, deferred, keeping the editor and its focus.
+  loader: async ({ context: { queryClient }, params, location, parentMatchPromise }) => {
+    const deps = stageSearch(location.search);
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     if (!orgId) return;
     const [spot, { templates }] = await Promise.all([
@@ -55,6 +70,8 @@ function SpotEditor() {
   const orgId = useOrgId();
   const { spotId } = Route.useParams();
   const search = Route.useSearch();
+  // The preview read for the orientation and kit shown: deferred, so a change keeps the stage until its own arrives.
+  const previewSearch = useDeferredValue(search);
   const navigate = Route.useNavigate();
   const canManage = useCanManage();
   const canPublish = useCanPublish();
@@ -62,9 +79,10 @@ function SpotEditor() {
   const { templates } = useSuspenseQuery(templatesQuery(orgId)).data;
   const { assets } = useSuspenseQuery(assetsQuery(orgId)).data;
   const { brandKits } = useSuspenseQuery(brandKitsQuery(orgId)).data;
-  const orientation = search.o ?? 'landscape';
+  // The stage draws the deferred orientation and kit, with the preview read for them: never one without the other.
+  const orientation = previewSearch.o ?? 'landscape';
   const templateVersionId = spot?.templateVersionId ?? undefined;
-  const preview = useSuspenseQuery(spotPreviewQuery(orgId, { orientation, templateVersionId, brandKitId: search.kit })).data;
+  const preview = useSuspenseQuery(spotPreviewQuery(orgId, { orientation, templateVersionId, brandKitId: previewSearch.kit })).data;
 
   const saved = useAppStore((s) => s.spotEditor.drafts[spotId]);
   const mine = saved?.orgId === orgId ? saved : undefined;
@@ -76,11 +94,25 @@ function SpotEditor() {
   const stale = mine?.stale ?? false;
   const picking = useAppStore((s) => s.spotEditor.picking === 'assetId');
   const edit = useAppStore((s) => s.editSpot);
-  const save = useAppStore((s) => s.saveSpotDraft);
   const reload = useAppStore((s) => s.reloadSpot);
+  const save = useAppStore((s) => s.saveSpotDraft);
   const pick = useAppStore((s) => s.pickImageFor);
   const publishing = useAppStore((s) => s.publishing.pending);
   const publish = useAppStore((s) => s.publishSpot);
+  const checkAll = useAppStore((s) => s.checkAllFields);
+  const filled = useAppStore((s) => s.agent.filled[spotId]);
+  const clearMark = useAppStore((s) => s.clearFillMark);
+  const finishFill = useAppStore((s) => s.finishFill);
+  const undoFill = useAppStore((s) => s.undoFill);
+  const fillWithAnother = useAppStore((s) => s.fillWithAnother);
+  const takePhoto = useAppStore((s) => s.usePhotoFor);
+  const reviewing = useAppStore((s) => s.agent.reviews[spotId] !== undefined);
+  const openFill = useAppStore((s) => s.openSpotFill);
+  const undoUpdate = useAppStore((s) => s.undoUpdate);
+  const reviewAlsoOn = useAppStore((s) => s.reviewAlsoOn);
+  const deleting = useAppStore((s) => s.spotEditor.deleting);
+  const askDelete = useAppStore((s) => s.askDeleteSpot);
+  const deleteSpot = useAppStore((s) => s.deleteSpot);
 
   if (!spot) return null;
   const draft = editing ?? draftOf(spot);
@@ -94,21 +126,76 @@ function SpotEditor() {
   const setSearch = (next: Partial<StageSearch>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
 
   return (
-    <div className="flex min-h-[calc(100dvh-8rem)] flex-col overflow-hidden rounded-xl border">
+    // Clipped, not hidden: an overflow-hidden box is a scroll container, so the review's action bar would stick to it, not the page.
+    <div className={EDITOR}>
       <EditorHeader
         back={{ to: '/spots', label: 'Spots' }}
         title={draft.name || spot.name}
         about={`${what} · ${saveWord(status, savedAt)} · ${publishWord(spot)}`}
       >
-        {canManage && <SaveDraftButton status={status} stale={stale} onSave={() => void save(spotId)} />}
-        {canPublish && <PublishButton pending={publishing} disabled={stale} onPublish={() => void publish(orgId, spotId)} />}
+        {canManage && spot.kind === 'template' && version && !reviewing && (
+          <Button type="button" variant="outline" onClick={() => openFill(spotId)}>
+            <SparklesIcon aria-hidden />
+            Fill from a flyer
+          </Button>
+        )}
+        {canPublish && (
+          <PublishButton
+            pending={publishing}
+            disabled={stale}
+            onPublish={() => {
+              checkAll(spotId);
+              void publish(orgId, spotId);
+            }}
+          />
+        )}
+        {canManage && <EditorMoreMenu onDelete={() => askDelete(true)} />}
       </EditorHeader>
-      <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, spotId)} />
-      <div className="flex flex-1 flex-wrap items-stretch">
+      <SaveAlert error={saveError} stale={stale} onReload={() => void reload(orgId, spotId)} onRetry={() => void save(spotId)} />
+      {/* An agent's edit is its proposal (#116): who, what it changes, Keep or Reject. */}
+      <ProposalPanel
+        orgId={orgId}
+        kind="spot"
+        id={spotId}
+        version={spot.version}
+        fieldLabels={Object.fromEntries(Object.entries(version?.manifest.fields ?? {}).map(([k, f]) => [k, f.label]))}
+        unsaved={status !== 'saved'}
+        canDecide={canManage}
+      />
+      {version && <FillSpotDialog orgId={orgId} spotId={spotId} fields={version.manifest.fields} />}
+      {filled?.kind === 'update' && (
+        <UpdateBanner
+          changed={filled.changed ?? 0}
+          undoable={Object.keys(filled.before ?? {}).length > 0}
+          alsoOn={filled.alsoOn ?? []}
+          onReview={(other) => {
+            const o = filled.alsoOn?.find((x) => x.spotId === other);
+            if (o) void reviewAlsoOn(orgId, spotId, o);
+          }}
+          onUndo={() => undoUpdate(orgId, spotId)}
+          onDone={() => finishFill(spotId)}
+        />
+      )}
+      {filled?.kind === 'new' && version && (
+        <FillBanner
+          marks={filled.marks}
+          from={filled.photo ? 'photo' : 'link'}
+          onUndo={() => undoFill(orgId, spotId, { name: version.manifest.name, data: startData(version.manifest.fields) })}
+          onAnother={() => void fillWithAnother(orgId, spotId)}
+          onDone={() => finishFill(spotId)}
+        />
+      )}
+      <div className={EDITOR_ROW}>
+        {reviewing && version && (
+          <div className={cn(EDITOR_FORM, 'px-4 pt-5 sm:px-6')}>
+            <FillReview spotId={spotId} fields={version.manifest.fields} />
+          </div>
+        )}
         <form
+          hidden={reviewing && version !== undefined}
           aria-label="Spot fields"
           onSubmit={(e) => e.preventDefault()}
-          className="flex max-w-full flex-[1_1_360px] flex-col gap-6 border-r bg-card px-4 pt-5 pb-8 sm:px-6"
+          className={cn(EDITOR_FORM, 'gap-6 px-4 pt-5 pb-8 sm:px-6')}
         >
           <EditorFields disabled={!canManage}>
             <div className="flex flex-col gap-1.5">
@@ -140,7 +227,22 @@ function SpotEditor() {
             {spot.kind === 'template' &&
               (version ? (
                 <EditorSection title="Content">
-                  <FieldForm fields={typedFields(version.manifest, draft.bindings)} draft={draft} assets={assets} onChange={change} />
+                  <FieldForm
+                    spotId={spotId}
+                    fields={version.manifest.fields}
+                    shown={typedFields(version.manifest, draft.bindings)}
+                    draft={draft}
+                    assets={assets}
+                    marks={filled?.marks}
+                    sampleFields={spot.sampleFields}
+                    flyer={
+                      filled?.photo
+                        ? { onUse: (field) => void takePhoto(orgId, spotId, field), uploading: filled.uploading, error: filled.uploadError }
+                        : undefined
+                    }
+                    onChange={change}
+                    onEdited={(field) => clearMark(spotId, field)}
+                  />
                 </EditorSection>
               ) : (
                 <p className="text-sm text-muted-foreground">This spot's template is not available to this organization.</p>
@@ -148,7 +250,7 @@ function SpotEditor() {
             {(spot.kind === 'image' || spot.kind === 'video') && (
               <EditorSection title={spot.kind === 'image' ? 'Image' : 'Video'}>
                 <div className="flex items-center gap-3">
-                  <div className="grid h-14 w-24 shrink-0 place-items-center overflow-hidden rounded-md bg-[#0e0f12]">
+                  <div className="grid h-14 w-24 shrink-0 place-items-center overflow-hidden rounded-md bg-stage">
                     {image && <img src={sessionBlobPath(image.sha256)} alt="" className="size-full object-cover" />}
                   </div>
                   <span className="min-w-0 flex-1 truncate text-sm">{image?.name ?? 'Not in the library'}</span>
@@ -206,7 +308,7 @@ function SpotEditor() {
                     step="any"
                     value={seconds(draft.durationMs)}
                     onChange={(e) => set({ durationMs: Number.isNaN(e.target.valueAsNumber) ? 0 : Math.round(e.target.valueAsNumber * 1000) })}
-                    className="w-24 text-center font-mono"
+                    className="w-24 text-center tabular-nums"
                     aria-invalid={durationBad || undefined}
                     aria-describedby="spot-duration-help"
                   />
@@ -221,17 +323,48 @@ function SpotEditor() {
             </EditorSection>
           </EditorFields>
         </form>
-        <div className="flex min-w-0 flex-[999_1_560px] flex-col">
+        {/* While a review is open, a phone shows the stage playing the change first, the review under it. */}
+        <div className={cn(STAGE_COLUMN, reviewing && 'max-sm:order-first')}>
           <PlayerStage
-            target={{ orgId, spotId, orientation, templateVersionId, brandKitId: search.kit }}
+            target={{ orgId, spotId, orientation, templateVersionId, brandKitId: previewSearch.kit }}
             kits={brandKits}
             kitId={preview.brandKitId}
             search={search}
             onSearch={setSearch}
             bound={Object.keys(draft.bindings).length > 0}
+            thumbnail={version && templateThumbnail(version.key)}
           />
         </div>
       </div>
+      <EditorDeleteQuestion open={deleting.open} onOpenChange={askDelete}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {spot.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Its draft and its published version are deleted; its images and data sources stay. A spot a playlist plays, in its draft or on screens, cannot be
+            deleted.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div role="alert" className="flex flex-col gap-1 text-sm font-medium text-destructive empty:hidden">
+          {deleting.error && <p>{deleting.error}</p>}
+          {deleting.playlists.length > 0 && (
+            <ul className="list-disc pl-5">
+              {deleting.playlists.map((p) => (
+                <li key={p.id}>
+                  <Link to="/playlists/$playlistId" params={{ playlistId: p.id }} onClick={() => askDelete(false)} className="underline underline-offset-4">
+                    {p.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <Button variant="destructive" disabled={deleting.pending} onClick={() => void deleteSpot(orgId, spot.id)}>
+            {deleting.pending ? 'Deleting…' : 'Delete'}
+          </Button>
+        </AlertDialogFooter>
+      </EditorDeleteQuestion>
     </div>
   );
 }

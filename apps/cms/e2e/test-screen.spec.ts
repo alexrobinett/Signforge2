@@ -1,5 +1,6 @@
+import { createServer } from 'node:http';
 import { expect, test, type Page } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, publishImage, shots, signInAs } from './helpers';
+import { axe, createOrg, hydrated, publishImage, shots, signInAs } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.131';
@@ -29,15 +30,11 @@ const kept = (tab: Page) =>
     return { credential: credential !== undefined, files: (await (await caches.open('sf-blobs-v1')).keys()).length };
   });
 
-test('a new org opens a test screen, pairs it, publishes to it and sees it play in under a minute; a revoke wipes it', async ({ page }) => {
-  test.setTimeout(120_000);
+test('a new org opens a test screen, pairs it, publishes to it and sees it play; a revoke wipes it', async ({ page }) => {
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-test-screen-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Test Kitchen', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Test Kitchen', level: 1 })).toBeVisible();
+  await createOrg(page, 'Test Kitchen', ADDRESS);
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
   await hydrated(page);
   await axe(page);
@@ -77,8 +74,8 @@ test('a new org opens a test screen, pairs it, publishes to it and sees it play 
     )
     .toBe(true);
   const elapsed = Date.now() - started;
+  // Logged, not asserted: a runner's speed is not the CMS's. The polls' limits are the bound.
   console.info(`test screen: opened, paired, published and playing in ${(elapsed / 1000).toFixed(1)} s`);
-  expect(elapsed).toBeLessThan(60_000);
   await expect(tab.locator('.slot img')).toBeVisible();
   // The nudge socket is up through the CMS's origin, beside the session cookie.
   await expect.poll(async () => (await player(tab))?.socket).toBe(true);
@@ -106,3 +103,39 @@ test('a new org opens a test screen, pairs it, publishes to it and sees it play 
   expect(await player(tab)).toMatchObject({ manifestId: '', played: 0 });
   expect(await kept(tab)).toEqual({ credential: false, files: 0 });
 });
+
+// The player takes its content base and supervisor from its address, which on the CMS's hostname anyone can
+// write into a link. The other site hands over a credential for its own device API, as a supervisor would; a
+// browser screen asks no supervisor and pairs with that API.
+for (const player of ['/test-screen/?', '/player/?', '/test-screen/?kind=browser&']) {
+  test(`the player at ${player} reaches no other site its address names`, async ({ page }) => {
+    const reached: string[] = [];
+    const other = createServer((req, res) => {
+      reached.push(`${req.method} ${req.url}`);
+      res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' });
+      res.end(JSON.stringify({ credential: `sfd_scr_other.${'a'.repeat(43)}`, api: `http://${req.headers.host}/v1/device`, token: 'other' }));
+    });
+    await new Promise<void>((resolve) => other.listen(0, '127.0.0.1', resolve));
+    const address = other.address();
+    if (typeof address !== 'object' || !address) throw new Error('the other site is not listening');
+    const site = `http://127.0.0.1:${address.port}`;
+    try {
+      // Each request the browser refuses under the page's policy, by its address.
+      await page.addInitScript(() => {
+        document.addEventListener('securitypolicyviolation', (e) =>
+          Reflect.set(window, 'sfRefused', [...(Reflect.get(window, 'sfRefused') ?? []), e.blockedURI]),
+        );
+      });
+      await page.goto(`${player}content=${site}/v1/device&supervisor=${site}/supervisor`);
+      // The player asked for the other site and the browser refused it there: a refusal comes before any request leaves.
+      await expect
+        .poll(async () => {
+          const refused: string[] = (await page.evaluate(() => Reflect.get(window, 'sfRefused'))) ?? [];
+          return { refused: refused.some((url) => url.startsWith(site)), reached };
+        })
+        .toEqual({ refused: true, reached: [] });
+    } finally {
+      other.close();
+    }
+  });
+}

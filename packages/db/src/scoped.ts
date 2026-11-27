@@ -28,15 +28,18 @@ import {
   or,
   sql,
   type SQL,
+  type SQLWrapper,
 } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import { alias, type SQLiteColumn, type SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { assertId, newId } from './ids';
 import * as s from './schema';
-import { contentJson } from './drafts';
+import { contentJson, published } from './drafts';
 import { type AttemptResult, settleStatement } from './deliveries';
-import { FEED_IMAGE_DELETE_GRACE_MS, FEED_IMAGE_TTL_MS, unreferencedFeedImage } from './retention';
-import { commit, fullRow, guard, StaleVersionError, staged, strip, updateSet, type Staged, type Write } from './writes';
+import { AGENT_GRANT_IDLE_MS } from './agent-grants';
+import { feedPhotos, type PollPhotos, pollSave, sourceEdited } from './feed-photos';
+import { storage } from './storage';
+import { commit, fullRow, StaleVersionError, staged, staleGuard, strip, updateSet, type Staged, type Write } from './writes';
 
 type Db = DrizzleD1Database<Record<string, never>>;
 type AlertChannel = typeof s.alertChannels.$inferSelect;
@@ -44,6 +47,9 @@ type AlertChannelKind = AlertChannel['kind'];
 /** What a channel's owner sets; the rest is the repository's. */
 type AlertChannelValues = Omit<AlertChannel, 'orgId' | 'kind' | 'rowVersion' | 'createdAt' | 'updatedAt'>;
 type AlertDelivery = typeof s.alertDeliveries.$inferSelect;
+type AiProvider = typeof s.orgAiProviders.$inferSelect;
+/** What an owner sets on the org's AI provider; the rest is the repository's. */
+type AiProviderValues = Partial<Omit<AiProvider, 'orgId' | 'rowVersion' | 'createdAt' | 'updatedAt'>>;
 /** An alert to queue: the event as a webhook receives it, the channels it goes to, and when to stop retrying it. */
 export interface QueuedAlert {
   event: { id: string; type: string; json: string };
@@ -52,6 +58,7 @@ export interface QueuedAlert {
 }
 /** The most labels a screen has, and the most label keys an org's screens use between them. */
 export const LABEL_LIMITS = { perScreen: 32, keys: 100 } as const;
+type PublishRequestRow = typeof s.publishRequests.$inferSelect;
 type TenantTable = SQLiteTable & { id: SQLiteColumn; orgId: SQLiteColumn };
 
 /** Writing a row that refers to something the org cannot see. */
@@ -67,7 +74,7 @@ export class NotInOrgError extends Error {
  * version and the org's publish revision move on by themselves, a draft's incarnation is fixed at
  * insert, and a draft's published version is written only by `stage.publish` (./drafts.ts).
  */
-type Guarded = 'orgId' | 'id' | 'createdAt' | 'rowVersion' | 'incarnation' | 'publishRevision' | 'publishedJson' | 'publishedAt';
+type Guarded = 'orgId' | 'id' | 'createdAt' | 'rowVersion' | 'incarnation' | 'publishRevision' | 'publishedJson' | 'publishedAt' | 'publishedVersion';
 export type NewRow<T extends SQLiteTable> = Omit<T['$inferInsert'], Guarded> & { id?: string };
 export type RowPatch<T extends SQLiteTable> = Partial<Omit<T['$inferInsert'], Guarded>>;
 
@@ -78,6 +85,13 @@ interface AuditPage {
   actorKind?: (typeof s.auditLog.$inferSelect)['actorKind'];
   actorId?: string;
   action?: string;
+  /**
+   * With `action`: also rows of these other actions whose detail holds `detailHas` (a publish or an approval that made the
+   * default, for `set_default_playlist`) and whose recorded input has, or lacks, each key of `inputHas` (a save with or
+   * without its id, for the create or update it replaced), and at least one key of `inputHasAny` (a screen's update that
+   * changed a setting, for the tool it replaced).
+   */
+  alsoAction?: { actions: readonly string[]; detailHas?: string; inputHas?: Readonly<Record<string, boolean>>; inputHasAny?: readonly string[] };
   targetKind?: string;
   targetId?: string;
   from?: number;
@@ -105,17 +119,21 @@ function chunk<T>(rows: T[], columns: number): T[][] {
 type Ids = 'content' | 'server';
 
 /**
- * A first statement for a batch that fails it unless `holds` is true when it runs, so a change made
- * from an old read writes nothing: `commit` then throws `StaleVersionError` with `id` and the
- * version `stale` reads now. Every version check inside a batch is one of these.
+ * The org's brand state as `brandKits.state` reads it, from rows already read: what the compiler used
+ * (`loadOrg`), so a publish guards exactly those (`brandKits.stage.unchanged`). Kits by id, then the
+ * assignments by target and group or screen id, as the SQL orders them.
  */
-function staleGuard(db: Db, orgId: string, id: string, version: number, holds: SQL, stale: () => Promise<number | undefined>): Write {
-  // json() of text that is not JSON raises an error, which aborts the batch.
-  const check = db
-    .select({ ok: sql`json(CASE WHEN ${holds} THEN '1' ELSE 'stale version' END)` })
-    .from(s.organization)
-    .where(eq(s.organization.id, orgId));
-  return guard(check, { id, version, stale });
+export function brandStateOf(kits: readonly { id: string; rowVersion: number }[], assignments: readonly (typeof s.brandAssignments.$inferSelect)[]): string {
+  const by = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  const k = [...kits].sort((a, b) => by(a.id, b.id)).map((x) => `${x.id}:${x.rowVersion}`);
+  const key = (a: (typeof assignments)[number]) => [a.target, a.groupId ?? '', a.screenId ?? ''] as const;
+  const as = [...assignments]
+    .sort((a, b) => {
+      const [x, y] = [key(a), key(b)];
+      return by(x[0], y[0]) || by(x[1], y[1]) || by(x[2], y[2]);
+    })
+    .map((a) => `${a.target}:${a.groupId ?? ''}:${a.screenId ?? ''}:${a.brandKitId}`);
+  return `${k.join(',')}|${as.join(',')}`;
 }
 
 /**
@@ -284,6 +302,20 @@ function drafts<T extends DraftTable>(db: Db, orgId: string, table: T, prefix: s
   };
   return {
     ...rows,
+    /**
+     * How many of the org's drafts have changes screens do not have, in one SQL count (#361): never
+     * published, or edited since, by version, not by time (an edit in the publish's millisecond
+     * counts). An edit put back as it was still counts, which `draftChanged` would not, so it is for
+     * a count shown, never for what to publish.
+     */
+    countUnpublished: async (): Promise<number> => {
+      const found = await db
+        .select({ n: sql<number>`count(*)`.mapWith(Number) })
+        .from(t)
+        .where(and(eq(t.orgId, orgId), or(isNull(t.publishedVersion), gt(t.rowVersion, t.publishedVersion))))
+        .get();
+      return found?.n ?? 0;
+    },
     stage: {
       ...rows.stage,
       insert: async (values: NewRow<T>): Promise<Staged<Row>> => {
@@ -294,6 +326,11 @@ function drafts<T extends DraftTable>(db: Db, orgId: string, table: T, prefix: s
         return staged(row as Row, db.insert(t).values({ ...row, rowVersion: firstVersion(id) } as never));
       },
       publish: publisher(db, orgId, table),
+      /**
+       * Nothing written: the batch is refused, as `publish` is, if the draft was edited since it was
+       * read. For a draft a publish pins at its version but need not promote, as it is live as it is.
+       */
+      unchanged: (row: Row): Staged => ({ row: undefined, writes: [versionGuard(db, orgId, t, row.id, row.rowVersion, row.incarnation)] }),
       /** Delete the row, draft and published version, refused like `publish` if it was edited since it was read. */
       remove: (row: Row): Staged => {
         const deleted = rows.stage.delete(row.id);
@@ -312,7 +349,7 @@ function drafts<T extends DraftTable>(db: Db, orgId: string, table: T, prefix: s
 function publisher<T extends DraftTable>(db: Db, orgId: string, table: T) {
   const t = table as unknown as typeof s.spots;
   return (row: T['$inferSelect'], items?: readonly string[]): Staged<T['$inferSelect']> => {
-    const set = { publishedJson: contentJson(row, items), publishedAt: Date.now() };
+    const set = { publishedJson: contentJson(row, items), publishedAt: Date.now(), publishedVersion: row.rowVersion };
     const promoted = staged(
       { ...row, ...set },
       db
@@ -331,11 +368,27 @@ function publisher<T extends DraftTable>(db: Db, orgId: string, table: T) {
  * observed earlier, so a sync built before a socket's `applied` cannot undo it when it arrives
  * after; of two at one time the first stays. A time after the report arrived counts as its
  * arrival, so a clock ahead cannot hold the column. Without a time (a player before gh-44, or an
- * untrusted clock) a report is ordered by arrival, as before: it replaces, and counts as observed then.
+ * untrusted clock) a report is ordered by arrival, as before: it counts as observed then, and
+ * replaces one stored at that time or before. So a write that started before a later report's and
+ * landed after it (a socket report whose D1 write hung past its limit, #519) does not replace it.
  */
 function manifestReport(observedAt: number | undefined, arrivedAt: number) {
   const at = Math.min(observedAt ?? arrivedAt, arrivedAt);
-  return { at, takes: '(? OR reported_manifest_at IS NULL OR ? > reported_manifest_at)', takesArgs: [observedAt === undefined ? 1 : 0, at] };
+  // One fixed operator or the other, never input: by arrival, a report at the same time replaces.
+  const op = observedAt === undefined ? '>=' : '>';
+  return { at, takes: `(reported_manifest_at IS NULL OR ? ${op} reported_manifest_at)`, takesArgs: [at] };
+}
+
+/**
+ * The sources a screen's desired manifest shows photos for, as `stage.setDesiredManifest` recorded them (#486), or
+ * null when not known: never recorded, recorded for another manifest (one made desired by a path that records
+ * none, or a Worker from before it).
+ */
+function photoSourcesOf(json: string | null, manifestId: string): string[] | null {
+  if (!json) return null;
+  // Written by `stage.setDesiredManifest` alone.
+  const recorded: { manifest: string; sources: string[] } = JSON.parse(json);
+  return recorded.manifest === manifestId ? recorded.sources : null;
 }
 
 /** What one screen sync writes (`screens.sync`). Hours are UTC hour starts in ms. */
@@ -343,6 +396,8 @@ export interface SyncWrite {
   at: number;
   playerVersion: string;
   heartbeatJson: string;
+  /** The manifest the heartbeat says it fell back from, if any: `fallback_since` moves only when this changes. */
+  fallbackFrom: string | null;
   /** The manifest the heartbeat says is playing, if any. */
   active?: string;
   /** When the screen observed `active`, on the server's clock; absent if its clock is untrusted. */
@@ -417,9 +472,36 @@ export async function rolloutCounts(db: Db, where: SQL | undefined): Promise<Map
   return out;
 }
 
+/** A draft whose kept draft (#116) is written: the version and incarnation it was read at. */
+interface KeptDraft {
+  id: string;
+  rowVersion: number;
+  incarnation: string | null;
+}
+/** What is kept of a draft: its content as `contentJson` holds it, and a spot's sample-text marks. */
+interface KeptContent {
+  contentJson: string;
+  sampleFieldsJson: string | null;
+}
+
 export function scoped(d1: D1Database, orgId: string) {
   assertId(orgId, 'orgId');
   const db: Db = drizzle(d1);
+  /**
+   * Deletes, for the grants `ours` selects, the provider's access and refresh tokens, consents and unexchanged
+   * authorization codes: verification rows whose JSON value names one (the provider's `{ type: 'authorization_code',
+   * referenceId, ... }`). Other rows (sign-in codes) hold no JSON, so the value is read only where it is valid.
+   */
+  const grantTokenDeletes = (ours: SQLWrapper): Staged =>
+    staged(
+      undefined,
+      db.delete(s.oauthAccessToken).where(inArray(s.oauthAccessToken.referenceId, ours)),
+      db.delete(s.oauthRefreshToken).where(inArray(s.oauthRefreshToken.referenceId, ours)),
+      db.delete(s.oauthConsent).where(inArray(s.oauthConsent.referenceId, ours)),
+      db
+        .delete(s.verification)
+        .where(inArray(sql`CASE WHEN json_valid(${s.verification.value}) THEN json_extract(${s.verification.value}, '$.referenceId') END`, ours)),
+    );
 
   const screens = entity(db, orgId, s.screens, 'scr');
   const screenGroups = entity(db, orgId, s.screenGroups, 'grp');
@@ -431,10 +513,26 @@ export function scoped(d1: D1Database, orgId: string) {
   const spotRows = drafts(db, orgId, s.spots, 'spt');
   const playlists = drafts(db, orgId, s.playlists, 'pls');
   const scheduleEntries = drafts(db, orgId, s.scheduleEntries, 'sch');
+  const ds = s.draftSnapshots;
+  /** A spot's or a playlist's kept draft (#116), by the draft's kind and id. */
+  const keptFor = (kind: 'spot' | 'playlist', id: string) => and(eq(ds.orgId, orgId), kind === 'spot' ? eq(ds.spotId, id) : eq(ds.playlistId, id));
+  const clearKept = (kind: 'spot' | 'playlist', id: string): Staged => staged(undefined, db.delete(ds).where(keptFor(kind, id)));
+  /** A kept draft's row: its content fields alone, then the org and the draft it is kept for, which nothing given can override. */
+  const keptRow = (kind: 'spot' | 'playlist', id: string, holds: 'person' | 'agent', kept: KeptContent) => {
+    const content = { holds, contentJson: kept.contentJson, sampleFieldsJson: kept.sampleFieldsJson, createdAt: Date.now() };
+    return { content, row: { ...content, orgId, spotId: kind === 'spot' ? id : null, playlistId: kind === 'playlist' ? id : null } };
+  };
+  /** The guard that the draft is still the version read: a kept draft is never written without it in the same batch. */
+  const draftAt = (kind: 'spot' | 'playlist', draft: KeptDraft): Write =>
+    versionGuard(db, orgId, (kind === 'spot' ? s.spots : s.playlists) as typeof s.spots, draft.id, draft.rowVersion, draft.incarnation);
   const publishes = entity(db, orgId, s.publishes, 'pub');
+  const pr = s.publishRequests;
+  const publishRequests = entity(db, orgId, pr, 'prq');
   const dataSources = entity(db, orgId, s.dataSources, 'src', 'content');
   const connectionRows = entity(db, orgId, s.connections, 'con');
   const authorizations = entity(db, orgId, s.connectionAuthorizations, 'oas');
+  const grants = entity(db, orgId, s.agentGrants, 'agt');
+  const ag = s.agentGrants;
   const audit = entity(db, orgId, s.auditLog, 'aud');
   const brandKitRows = entity(db, orgId, s.brandKits, 'bk');
 
@@ -482,10 +580,26 @@ export function scoped(d1: D1Database, orgId: string) {
 
   const m = s.screenGroupMembers;
   const sl = s.screenLabels;
+  /**
+   * Nothing written: a guard that refuses the batch (`StaleVersionError`, `id`) unless `holds` is true as it commits,
+   * and reads it again to say so: what keeps a card's press to what it showed (#408, #186).
+   */
+  const holdsGuard = (id: string, holds: SQL): Staged => {
+    const stale = async () => {
+      const held = await db
+        .select({ ok: sql<number>`${holds}` })
+        .from(s.organization)
+        .where(eq(s.organization.id, orgId))
+        .get();
+      return held?.ok ? undefined : 0;
+    };
+    return { row: undefined, writes: [staleGuard(db, orgId, id, 0, holds, stale)] };
+  };
   const os = s.orgSettings;
   const ac = s.alertChannels;
+  const ai = s.orgAiProviders;
   /**
-   * Stage setting `values` on a single-row versioned record (the org's settings, an alert channel),
+   * Stage setting `values` on a single-row versioned record (the org's settings, an alert channel, its AI provider),
    * the row its `key` names (the scope's org, and a channel's kind): made from `fresh` if absent,
    * and its version moved on; a record with no row is at version `absent`. The key comes from
    * `key` alone: `values` never sets it, nor any field `strip` guards, so no write moves the row to
@@ -493,7 +607,7 @@ export function scoped(d1: D1Database, orgId: string) {
    * id `id`) unless it is still that version: now, if it is already another, and again by a guard
    * inside the batch.
    */
-  const upsertVersioned = async <T extends typeof os | typeof ac>(
+  const upsertVersioned = async <T extends typeof os | typeof ac | typeof ai>(
     table: T,
     r: {
       id: string;
@@ -601,6 +715,10 @@ export function scoped(d1: D1Database, orgId: string) {
     for (const id of [v.logoOnDarkAssetId, v.logoOnLightAssetId]) if (id != null && !(await assets.get(id))) throw new NotInOrgError('asset', id);
   };
   const ba = s.brandAssignments;
+  const bk = s.brandKits;
+  /** The org's brand state (`brandKits.state`): every kit and its version, then every assignment, each in a fixed order. */
+  const brandState = sql<string>`COALESCE((SELECT group_concat(${bk.id} || ':' || ${bk.rowVersion}, ',' ORDER BY ${bk.id}) FROM ${bk} WHERE ${bk.orgId} = ${orgId}), '')
+    || '|' || COALESCE((SELECT group_concat(${ba.target} || ':' || COALESCE(${ba.groupId}, '') || ':' || COALESCE(${ba.screenId}, '') || ':' || ${ba.brandKitId}, ',' ORDER BY ${ba.target}, ${ba.groupId}, ${ba.screenId}) FROM ${ba} WHERE ${ba.orgId} = ${orgId}), '')`;
   type BrandTarget = { target: 'org' } | { target: 'group'; groupId: string } | { target: 'screen'; screenId: string };
   const whereTarget = (t: BrandTarget) =>
     t.target === 'org'
@@ -621,24 +739,25 @@ export function scoped(d1: D1Database, orgId: string) {
     ).map((part) => db.insert(pi).values(part));
   const ps = s.publishScreens;
   const snap = s.dataSnapshots;
-  const fi = s.feedImages;
-  const fid = s.feedImageDeletes;
-  const storyCopyDiffers = (index: SQL, file: SQLiteColumn | string | null, thumb: SQLiteColumn | string | null) => sql`(
-    json_extract(${snap.dataJson}, '$.items[' || ${index} || '].image.file') IS NOT ${file}
-    OR json_extract(${snap.dataJson}, '$.items[' || ${index} || '].image.thumb') IS NOT ${thumb}
-  )`;
-  const holdFeedImages = async (sourceId: string, chosen: SQL, now: number, until: number): Promise<string[]> => {
-    const rows = await db.all<{ url: string }>(sql`
-      INSERT INTO ${fi} (org_id, url, source_id, next_check_at, created_at, updated_at)
-      SELECT ${orgId}, url, ${sourceId}, ${until}, ${now}, ${now} FROM (${chosen})
-      WHERE true
-      ON CONFLICT (org_id, url) DO UPDATE SET next_check_at = excluded.next_check_at, updated_at = excluded.updated_at
-      WHERE ${fi.nextCheckAt} <= ${now}
-      RETURNING url`);
-    return rows.map((r) => r.url);
+  const snapshotColumns = {
+    orgId: snap.orgId,
+    dataSourceId: snap.dataSourceId,
+    version: snap.version,
+    fetchedAt: snap.fetchedAt,
+    checkedAt: snap.checkedAt,
+    dataJson: snap.dataJson,
+    format: s.dataSources.format,
+    refreshS: s.dataSources.refreshS,
   };
   const pc = s.playCounts;
   const pcodes = s.pairingCodes;
+  /** The org's member rows with their user's name and address, narrowed by `where`. */
+  const memberRows = (where?: SQL) =>
+    db
+      .select({ id: s.member.id, userId: s.member.userId, name: s.user.name, email: s.user.email, role: s.member.role, createdAt: s.member.createdAt })
+      .from(s.member)
+      .innerJoin(s.user, eq(s.user.id, s.member.userId))
+      .where(and(eq(s.member.organizationId, orgId), where));
 
   return {
     orgId,
@@ -706,8 +825,27 @@ export function scoped(d1: D1Database, orgId: string) {
       },
       stage: {
         ...screens.stage,
-        /** As `setDesiredManifest`, staged. Stages nothing for a screen the org does not have. */
-        setDesiredManifest: (screenId: string, manifestId: string): Staged => {
+        /** Nothing written: the batch is refused (`StaleVersionError`, id `screens`) unless the org's screens are still exactly `ids`. */
+        are: (ids: readonly string[]): Staged => {
+          const sc = s.screens;
+          const want = [...ids].sort().join(',');
+          // Ordered in the aggregate, as `brandState` is: a subquery's ORDER BY does not order group_concat (#408).
+          const now = sql`COALESCE((SELECT group_concat(${sc.id}, ',' ORDER BY ${sc.id}) FROM ${sc} WHERE ${sc.orgId} = ${orgId}), '')`;
+          const stale = async () =>
+            (await screens.list())
+              .map((x) => x.id)
+              .sort()
+              .join(',') === want
+              ? undefined
+              : 0;
+          return { row: undefined, writes: [staleGuard(db, orgId, 'screens', 0, sql`${now} = ${want}`, stale)] };
+        },
+        /**
+         * As `setDesiredManifest`, staged, with the sources the manifest shows photos for (`manifestPhotoSources`,
+         * #486), or null when they could not be worked out (the feed poller then reads the manifest). Stages nothing
+         * for a screen the org does not have.
+         */
+        setDesiredManifest: (screenId: string, manifestId: string, photoSources: readonly string[] | null): Staged => {
           const sc = s.screens;
           return staged(
             undefined,
@@ -716,6 +854,7 @@ export function scoped(d1: D1Database, orgId: string) {
               .set({
                 previousManifestId: sql`CASE WHEN ${sc.desiredManifestId} IS ${manifestId} THEN ${sc.previousManifestId} ELSE ${sc.desiredManifestId} END`,
                 desiredManifestId: manifestId,
+                desiredPhotoSourcesJson: photoSources && JSON.stringify({ manifest: manifestId, sources: photoSources }),
               })
               .where(and(eq(sc.orgId, orgId), eq(sc.id, screenId))),
           );
@@ -781,10 +920,15 @@ export function scoped(d1: D1Database, orgId: string) {
               };
         const update = d1
           .prepare(
-            `UPDATE screens SET last_seen_at = ?, player_version = ?, heartbeat_json = ?${report.sql}
+            // The SET's right sides read the row as it was: the stored heartbeat is the last sync's.
+            // A screen that said the same at the last sync had fallen back by then: a row from before
+            // migration 0046 has no `fallback_since`, and takes that heartbeat's time, not this one's (#474).
+            `UPDATE screens SET last_seen_at = ?, player_version = ?, heartbeat_json = ?,
+               fallback_since = CASE WHEN ? IS NULL THEN NULL
+                 WHEN json_extract(heartbeat_json, '$.manifest.fallbackFrom') IS ? THEN coalesce(fallback_since, json_extract(heartbeat_json, '$.at'), ?) ELSE ? END${report.sql}
              WHERE org_id = ? AND id = ? RETURNING ${mark} AS ack_seq`,
           )
-          .bind(v.at, v.playerVersion, v.heartbeatJson, ...report.args, orgId, screenId, ...markArgs);
+          .bind(v.at, v.playerVersion, v.heartbeatJson, v.fallbackFrom, v.fallbackFrom, v.at, v.at, ...report.args, orgId, screenId, ...markArgs);
         const results = await d1.batch([...inserts, advance, update]);
         const row = results.at(-1)!.results[0] as { ack_seq: number } | undefined;
         if (!row) return undefined;
@@ -801,6 +945,33 @@ export function scoped(d1: D1Database, orgId: string) {
             .orderBy(asc(sl.screenId), asc(sl.key))
             .all(),
         stage: {
+          /**
+           * Nothing written: the batch is refused (`StaleVersionError`, id `labels`) unless what a smart group's rule reads
+           * is as read (#186, review of #608): the labels of its `keys` (`rows`, those read), and, when it names a system
+           * label or has a `missing` term (a screen claimed meanwhile has no labels, so it matches), the screens and the
+           * settings system labels come from (`screens`). A label of another key edited meanwhile changes nothing the rule
+           * reads, and does not refuse it.
+           */
+          are: (
+            keys: readonly string[],
+            rows: readonly { screenId: string; key: string; value: string }[],
+            screens?: readonly { id: string; orientation: string; kind: string; timezone: string; locale: string | null }[],
+          ): Staged => {
+            const join = (lines: string[], by: string) => lines.toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join(by);
+            const labelsNow = sql`COALESCE((SELECT group_concat(${sl.screenId} || char(31) || ${sl.key} || char(31) || ${sl.value}, char(30) ORDER BY ${sl.screenId}, ${sl.key}) FROM ${sl} WHERE ${sl.orgId} = ${orgId} AND ${sl.key} IN (SELECT value FROM json_each(${JSON.stringify(keys)}))), '')`;
+            const labelsWant = join(
+              rows.filter((r) => keys.includes(r.key)).map((r) => `${r.screenId}\u001f${r.key}\u001f${r.value}`),
+              '\u001e',
+            );
+            if (!screens) return holdsGuard('labels', sql`${labelsNow} = ${labelsWant}`);
+            const sc = s.screens;
+            const screensNow = sql`COALESCE((SELECT group_concat(${sc.id} || char(31) || ${sc.orientation} || char(31) || ${sc.kind} || char(31) || ${sc.timezone} || char(31) || COALESCE(${sc.locale}, ''), char(30) ORDER BY ${sc.id}) FROM ${sc} WHERE ${sc.orgId} = ${orgId}), '')`;
+            const screensWant = join(
+              screens.map((x) => `${x.id}\u001f${x.orientation}\u001f${x.kind}\u001f${x.timezone}\u001f${x.locale ?? ''}`),
+              '\u001e',
+            );
+            return holdsGuard('labels', sql`${labelsNow} = ${labelsWant} AND ${screensNow} = ${screensWant}`);
+          },
           /**
            * A merge into each screen's labels: a key in `set` takes that value, a key in `remove`
            * goes, the rest stay. Pass `newScreen` for a screen staged in the same batch (a claim),
@@ -853,17 +1024,47 @@ export function scoped(d1: D1Database, orgId: string) {
             );
             return staged(undefined, ...queries);
           },
+          /**
+           * Each screen its own merge (#188, a CSV import): a key in its `set` takes that value, a key in its `remove`
+           * goes, its other labels stay. Written as one batch, so all of it lands or none, with the same limit check as
+           * `update`. Throws `NotInOrgError` if a screen is not the org's. Three statements however many screens: the
+           * changes go as JSON.
+           */
+          each: async (changes: readonly { screenId: string; set: Readonly<Record<string, string>>; remove: readonly string[] }[]): Promise<Staged> => {
+            const ids = await orgScreens(changes.map((c) => c.screenId));
+            const idsJson = JSON.stringify(ids);
+            const gone = JSON.stringify(changes.flatMap((c) => c.remove.map((k) => [c.screenId, k])));
+            const set = JSON.stringify(changes.flatMap((c) => Object.entries(c.set).map(([k, v]) => [c.screenId, k, v])));
+            const sc = s.screens;
+            const now = Date.now();
+            const crowded = sql`EXISTS (SELECT 1 FROM ${sl} WHERE ${sl.orgId} = ${orgId} AND ${sl.screenId} IN (SELECT value FROM json_each(${idsJson})) GROUP BY ${sl.screenId} HAVING count(*) > ${LABEL_LIMITS.perScreen})`;
+            const keys = sql`(SELECT count(DISTINCT ${sl.key}) FROM ${sl} WHERE ${sl.orgId} = ${orgId})`;
+            return staged(
+              undefined,
+              db
+                .delete(sl)
+                .where(
+                  and(
+                    eq(sl.orgId, orgId),
+                    sql`EXISTS (SELECT 1 FROM json_each(${gone}) AS g WHERE json_extract(g.value, '$[0]') = ${sl.screenId} AND json_extract(g.value, '$[1]') = ${sl.key})`,
+                  ),
+                ),
+              db
+                .insert(sl)
+                // The table's columns in order: org, screen, key, value, created_at. Only the org's screens are joined.
+                .select(
+                  sql`SELECT ${sc.orgId}, ${sc.id}, json_extract(r.value, '$[1]'), json_extract(r.value, '$[2]'), ${now} FROM json_each(${set}) AS r
+                      JOIN ${sc} ON ${sc.orgId} = ${orgId} AND ${sc.id} = json_extract(r.value, '$[0]')`,
+                )
+                .onConflictDoUpdate({ target: [sl.orgId, sl.screenId, sl.key], set: { value: sql`excluded.value` } }),
+              db
+                .select({ ok: sql`json(CASE WHEN ${crowded} OR ${keys} > ${LABEL_LIMITS.keys} THEN 'over a label limit' ELSE '1' END)` })
+                .from(s.organization)
+                .where(eq(s.organization.id, orgId)),
+            );
+          },
         },
       },
-      /** Ids of the groups a screen belongs to. */
-      groupsOf: async (screenId: string) =>
-        (
-          await db
-            .select({ id: m.groupId })
-            .from(m)
-            .where(and(eq(m.orgId, orgId), eq(m.screenId, screenId)))
-            .all()
-        ).map((r) => r.id),
     },
 
     /**
@@ -939,6 +1140,24 @@ export function scoped(d1: D1Database, orgId: string) {
 
     screenGroups: {
       ...screenGroups,
+      /**
+       * Every membership in the org, and every smart group's rule (#186), in one statement: a list group's screens are
+       * its rows, a smart group's the screens its rule matches, read from the labels only when an org has one.
+       */
+      membership: async () => {
+        const g = s.screenGroups;
+        // Every group's own row too, with its name: what a publish records it reached (#187), in the same statement.
+        const rows = await db.all<{ groupId: string; screenId: string | null; selectorJson: string | null; name: string | null }>(sql`
+            SELECT ${m.groupId} AS groupId, ${m.screenId} AS screenId, NULL AS selectorJson, NULL AS name FROM ${m} WHERE ${m.orgId} = ${orgId}
+            UNION ALL
+            SELECT ${g.id}, NULL, ${g.selectorJson}, ${g.name} FROM ${g} WHERE ${g.orgId} = ${orgId}
+            ORDER BY 1, 2`);
+        return {
+          members: rows.flatMap((r) => (r.screenId === null ? [] : [{ groupId: r.groupId, screenId: r.screenId }])),
+          rules: rows.flatMap((r) => (r.selectorJson === null ? [] : [{ id: r.groupId, selectorJson: r.selectorJson }])),
+          groups: rows.flatMap((r) => (r.name === null ? [] : [{ id: r.groupId, name: r.name }])),
+        };
+      },
       /** Every membership in the org, by group then screen. */
       allMembers: () =>
         db.select({ groupId: m.groupId, screenId: m.screenId }).from(m).where(eq(m.orgId, orgId)).orderBy(asc(m.groupId), asc(m.screenId)).all(),
@@ -983,6 +1202,23 @@ export function scoped(d1: D1Database, orgId: string) {
         addMembers: async (group: Group, screenIds: readonly string[], ifVersion?: number): Promise<Staged<Group>> => {
           if (!(await screenGroups.get(group.id))) throw new NotInOrgError('group', group.id);
           return withTouch(group, ifVersion, ...inserts(group.id, await orgScreens(screenIds)));
+        },
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `group`) unless the group's screens are exactly
+         * `screenIds`, so a takeover's card plays on the screens it showed, whoever changed them meanwhile (#408).
+         */
+        membersAre: (groupId: string, screenIds: readonly string[]): Staged => {
+          const want = [...screenIds].sort().join(',');
+          const now = sql`COALESCE((SELECT group_concat(${m.screenId}, ',' ORDER BY ${m.screenId}) FROM ${m} WHERE ${m.orgId} = ${orgId} AND ${m.groupId} = ${groupId}), '')`;
+          return holdsGuard('group', sql`${now} = ${want}`);
+        },
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `group`) unless the group's rule is still
+         * `selectorJson` (#186): with `labels.stage.are`, what holds a smart group's takeover to the screens it showed.
+         */
+        ruleIs: (groupId: string, selectorJson: string): Staged => {
+          const now = sql`(SELECT ${s.screenGroups.selectorJson} FROM ${s.screenGroups} WHERE ${s.screenGroups.orgId} = ${orgId} AND ${s.screenGroups.id} = ${groupId})`;
+          return holdsGuard('group', sql`${now} IS ${selectorJson}`);
         },
         /** Remove screens; ones not in the group are ignored. */
         removeMembers: async (group: Group, screenIds: readonly string[], ifVersion?: number): Promise<Staged<Group>> => {
@@ -1054,6 +1290,22 @@ export function scoped(d1: D1Database, orgId: string) {
             .where(and(eq(s.assetRenditions.orgId, orgId), eq(s.assetRenditions.assetId, assetId)))
             .all(),
       },
+      stage: {
+        ...assets.stage,
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `asset in use`) if, as it runs, a spot's draft or
+         * published version, or a brand kit's logo, names the asset: an asset `delete`'s rule held to its commit (review of #429).
+         * A spot's asset map and published version are matched as text, which can only err towards in use.
+         */
+        unused: (assetId: string): Write => {
+          const sp = s.spots;
+          const bk = s.brandKits;
+          const holds = sql`NOT EXISTS (SELECT 1 FROM ${sp} WHERE ${sp.orgId} = ${orgId} AND (${sp.assetId} = ${assetId}
+            OR instr(coalesce(${sp.assetMapJson}, ''), ${assetId}) > 0 OR instr(coalesce(${sp.publishedJson}, ''), ${assetId}) > 0))
+            AND NOT EXISTS (SELECT 1 FROM ${bk} WHERE ${bk.orgId} = ${orgId} AND (${bk.logoOnDarkAssetId} = ${assetId} OR ${bk.logoOnLightAssetId} = ${assetId}))`;
+          return staleGuard(db, orgId, 'asset in use', 0, holds, async () => 0);
+        },
+      },
     },
 
     templates: {
@@ -1100,6 +1352,20 @@ export function scoped(d1: D1Database, orgId: string) {
 
     spots: {
       ...spotRows,
+      /**
+       * The org's playlists that play the spot (#242): in their draft (`playlist_items`) or in their
+       * published version, which screens may have. A spot is deleted only when none does.
+       */
+      usedBy: async (spotId: string) => {
+        const drafted = await db
+          .select({ playlistId: pi.playlistId })
+          .from(pi)
+          .where(and(eq(pi.orgId, orgId), eq(pi.spotId, spotId)))
+          .all();
+        const inDraft = new Set(drafted.map((r) => r.playlistId));
+        const playlists = await db.select().from(s.playlists).where(eq(s.playlists.orgId, orgId)).orderBy(asc(s.playlists.id)).all();
+        return playlists.filter((p) => inDraft.has(p.id) || (published(p)?.items ?? []).includes(spotId));
+      },
       stage: {
         ...spotRows.stage,
         insert: async (values: NewRow<typeof s.spots>) => {
@@ -1184,6 +1450,61 @@ export function scoped(d1: D1Database, orgId: string) {
       },
     },
 
+    /**
+     * The draft kept beside a spot's or playlist's while an agent's draft is on it (#116,
+     * `draft_snapshots`): the person's draft it was written over, or the agent's a Reject set aside.
+     * One per draft. A publish clears it (`stage.publish`), and it goes with its draft (the foreign
+     * keys cascade).
+     */
+    draftSnapshots: {
+      get: (kind: 'spot' | 'playlist', id: string) => db.select().from(ds).where(keptFor(kind, id)).get(),
+      /** Every draft with one kept beside it, by kind and id: what a publish may have to clear. */
+      kept: async () =>
+        (await db.select({ spotId: ds.spotId, playlistId: ds.playlistId }).from(ds).where(eq(ds.orgId, orgId)).all()).flatMap(
+          (r): { kind: 'spot' | 'playlist'; id: string }[] =>
+            r.spotId ? [{ kind: 'spot', id: r.spotId }] : r.playlistId ? [{ kind: 'playlist', id: r.playlistId }] : [],
+        ),
+      stage: {
+        /**
+         * Keep `kept` beside `draft`, replacing whatever was kept: refused (`StaleVersionError`) unless the
+         * draft is still the version read, as every write of a kept draft is (review of #410).
+         */
+        keep: (kind: 'spot' | 'playlist', draft: KeptDraft, holds: 'person' | 'agent', kept: KeptContent): Staged => {
+          const { content, row } = keptRow(kind, draft.id, holds, kept);
+          const target = kind === 'spot' ? [ds.orgId, ds.spotId] : [ds.orgId, ds.playlistId];
+          return {
+            row: undefined,
+            writes: [draftAt(kind, draft), ...staged(undefined, db.insert(ds).values(row).onConflictDoUpdate({ target, set: content })).writes],
+          };
+        },
+        /**
+         * Keep `kept` as the person's draft an agent writes over `draft` with, unless one is kept already:
+         * no read first. What a Reject set aside (the agent's) is replaced; a person's stays. Held to the
+         * draft's version as read, as `keep` is.
+         */
+        propose: (kind: 'spot' | 'playlist', draft: KeptDraft, kept: KeptContent): Staged => {
+          const { content, row } = keptRow(kind, draft.id, 'person', kept);
+          const target = kind === 'spot' ? [ds.orgId, ds.spotId] : [ds.orgId, ds.playlistId];
+          const insert = db
+            .insert(ds)
+            .values(row)
+            .onConflictDoUpdate({ target, set: content, setWhere: eq(ds.holds, 'agent') });
+          return { row: undefined, writes: [draftAt(kind, draft), ...staged(undefined, insert).writes] };
+        },
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `draft_snapshot`) unless, as it runs,
+         * what is kept beside the draft still holds `holds`. A Reject or Keep decided from a read loses to a
+         * Keep, Reject or publish that committed first (review of #410).
+         */
+        holding: (kind: 'spot' | 'playlist', id: string, holds: 'person' | 'agent'): Staged => {
+          const still = sql`EXISTS (SELECT 1 FROM ${ds} WHERE ${keptFor(kind, id)} AND ${ds.holds} = ${holds})`;
+          const stale = async () => ((await db.select().from(ds).where(keptFor(kind, id)).get())?.holds === holds ? undefined : 0);
+          return { row: undefined, writes: [staleGuard(db, orgId, 'draft_snapshot', 0, still, stale)] };
+        },
+        clear: clearKept,
+      },
+    },
+
     scheduleEntries,
 
     /** Org-wide settings: one row, absent until first set. */
@@ -1212,6 +1533,32 @@ export function scoped(d1: D1Database, orgId: string) {
             auditRetentionDays: null,
           });
           return upsertVersioned(os, { id: 'settings', key: { orgId }, absent: 1, fresh }, values, ifVersion);
+        },
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `default_playlist`) unless, as it
+         * runs, the org's default playlist is `playlistId` (null: it has none). A default chosen or changed
+         * by someone else between a read and the batch fails it.
+         */
+        defaultIs: (playlistId: string | null): Staged => {
+          const holds = sql`COALESCE((SELECT ${os.defaultPlaylistId} FROM ${os} WHERE ${os.orgId} = ${orgId}), '') = ${playlistId ?? ''}`;
+          const stale = async () => {
+            const row = await db.select({ id: os.defaultPlaylistId, version: os.rowVersion }).from(os).where(eq(os.orgId, orgId)).get();
+            return (row?.id ?? null) === playlistId ? undefined : (row?.version ?? 1);
+          };
+          return { row: undefined, writes: [staleGuard(db, orgId, 'default_playlist', 0, holds, stale)] };
+        },
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `settings`) unless editors
+         * still publish when it runs. For an editor's publish, whose right to it is this setting, read
+         * before the batch: one turned off meanwhile fails it.
+         */
+        editorsPublish: (): Staged => {
+          const holds = sql`COALESCE((SELECT ${os.editorsPublish} FROM ${os} WHERE ${os.orgId} = ${orgId}), 1) = 1`;
+          const stale = async () => {
+            const row = await db.select({ version: os.rowVersion, editorsPublish: os.editorsPublish }).from(os).where(eq(os.orgId, orgId)).get();
+            return row && !row.editorsPublish ? row.version : undefined;
+          };
+          return { row: undefined, writes: [staleGuard(db, orgId, 'settings', 0, holds, stale)] };
         },
       },
     },
@@ -1242,13 +1589,15 @@ export function scoped(d1: D1Database, orgId: string) {
        * (by a check that queued the same event, which is queued once). Without `alert`, as `open`.
        */
       clear: async (incidentId: string, now: number, alert?: QueuedAlert): Promise<boolean> => {
+        // Read after the update in the batch: an id missing or another org's queues nothing.
+        const closed = sql`EXISTS (SELECT 1 FROM ${inc} WHERE ${inc.orgId} = ${orgId} AND ${inc.id} = ${incidentId} AND ${inc.clearedAt} = ${now})`;
         const [cleared] = await db.batch([
           db
             .update(inc)
             .set({ clearedAt: now })
             .where(and(eq(inc.orgId, orgId), eq(inc.id, incidentId), isNull(inc.clearedAt)))
             .returning({ id: inc.id }),
-          ...(alert ? queueAlert(alert, now, sql`1`) : []),
+          ...(alert ? queueAlert(alert, now, closed) : []),
         ]);
         return cleared.length === 1;
       },
@@ -1279,6 +1628,56 @@ export function scoped(d1: D1Database, orgId: string) {
         put: (kind: AlertChannelKind, values: AlertChannelValues, ifVersion?: number): Promise<Staged<AlertChannel>> =>
           upsertVersioned(ac, { id: `${kind} channel`, key: { orgId, kind }, absent: 0, fresh: (at) => ({ createdAt: at }) }, values, ifVersion),
         remove: (kind: AlertChannelKind): Staged => staged(undefined, db.delete(ac).where(and(eq(ac.orgId, orgId), eq(ac.kind, kind)))),
+      },
+    },
+
+    /**
+     * The model the org's agent uses with its own key (#261): one row, absent while it uses the
+     * demo model. The key arrives sealed; nothing here opens it.
+     */
+    aiProvider: {
+      get: () => db.select().from(ai).where(eq(ai.orgId, orgId)).get(),
+      stage: {
+        /**
+         * Set the fields given, making the row if absent (a new one needs the provider and its key), and
+         * move its version on; an absent row is at 0. With `ifVersion`, refused (`StaleVersionError`)
+         * unless it is still that version, checked now and again in the batch, as `stage.update` is.
+         * With `ifSealed`, refused the same way unless it still holds that sealed key: a row removed
+         * and saved again starts at version 1 again, so a version alone can name another key.
+         */
+        put: async (values: AiProviderValues, ifVersion?: number, ifSealed?: string): Promise<Staged<AiProvider>> => {
+          const upsert = await upsertVersioned(
+            ai,
+            {
+              id: 'AI provider',
+              key: { orgId },
+              absent: 0,
+              fresh: (at) => ({
+                baseUrl: null,
+                acceptsImages: false,
+                jsonSchemaOutput: false,
+                verifiedAt: null,
+                fastModel: null,
+                capableModel: null,
+                dailyTurnCeiling: null,
+                createdAt: at,
+              }),
+            },
+            values,
+            ifVersion,
+          );
+          if (ifSealed === undefined) return upsert;
+          const holding = async () => {
+            const now = await db.select({ keySealed: ai.keySealed, rowVersion: ai.rowVersion }).from(ai).where(eq(ai.orgId, orgId)).get();
+            return now?.keySealed === ifSealed ? undefined : (now?.rowVersion ?? 0);
+          };
+          const moved = await holding();
+          if (moved !== undefined) throw new StaleVersionError('AI provider', moved);
+          const holds = sql`(SELECT ${ai.keySealed} FROM ${ai} WHERE ${ai.orgId} = ${orgId}) = ${ifSealed}`;
+          return { row: upsert.row, writes: [staleGuard(db, orgId, 'AI provider', upsert.row.rowVersion - 1, holds, holding), ...upsert.writes] };
+        },
+        /** Delete the row, and the sealed key with it. */
+        remove: (): Staged => staged(undefined, db.delete(ai).where(eq(ai.orgId, orgId))),
       },
     },
 
@@ -1316,6 +1715,50 @@ export function scoped(d1: D1Database, orgId: string) {
       settle: async (id: string, attempt: number, now: number, result: AttemptResult) => {
         await settleStatement(db, orgId, id, attempt, now, result).run();
       },
+      /**
+       * One email delivery of `event` per member in `userIds`, each its own row to send and retry (a
+       * delivery addressed to approvers, fanned out when it is sent, M4-09): its event id names the
+       * member, as one delivery per event and channel is kept, so a member already queued is left as it is.
+       * The first `claim` are claimed for the caller to send now, leased for `leaseMs` as a run's claim is
+       * (#396); the rest are due now. Returns the claimed rows it made, as they are.
+       */
+      queueEmails: async (
+        event: QueuedAlert['event'],
+        userIds: readonly string[],
+        now: number,
+        giveUpAt: number,
+        { claim, leaseMs }: { claim: number; leaseMs: number },
+      ): Promise<AlertDelivery[]> => {
+        const [first, ...rest] = userIds.map((toUserId, i) =>
+          db
+            .insert(ad)
+            .values(
+              fullRow(ad, {
+                id: newId('dlv'),
+                orgId,
+                channel: 'email',
+                eventId: `${event.id}:${toUserId}`,
+                eventType: event.type,
+                eventJson: event.json,
+                toUserId,
+                giveUpAt,
+                createdAt: now,
+                updatedAt: now,
+                ...(i < claim ? { attempts: 1, lastAttemptAt: now, nextAttemptAt: now + leaseMs, leasedUntil: now + leaseMs } : { nextAttemptAt: now }),
+              }) as never,
+            )
+            .onConflictDoNothing()
+            .returning(),
+        );
+        if (!first) return [];
+        const made: AlertDelivery[][] = await db.batch([first, ...rest]);
+        return made.flat().filter((d) => d.leasedUntil !== null);
+      },
+      /** Queues `alert` for each of its channels now, on its own (an agent's refusals, M4-08); an event already queued for a channel is left as it is. */
+      queue: async (alert: QueuedAlert, now: number): Promise<void> => {
+        const [first, ...rest] = queueAlert(alert, now, sql`1`);
+        if (first) await db.batch([first, ...rest]);
+      },
       stage: {
         insert: alertDeliveries.stage.insert,
         /**
@@ -1342,8 +1785,21 @@ export function scoped(d1: D1Database, orgId: string) {
      */
     brandKits: {
       ...brandKitRows,
+      /**
+       * What the org's screens would be branded with at the next publish, as one text: each kit's id
+       * and version, and each assignment, the default included. Kits have no draft, so a publish
+       * takes them as they are: a publish request records this, and its approval publishes only while
+       * it is the same (`stage.unchanged`).
+       */
+      state: async (): Promise<string> => (await db.select({ state: brandState }).from(s.organization).where(eq(s.organization.id, orgId)).get())?.state ?? '',
       stage: {
         ...brandKitRows.stage,
+        /** Nothing written: the batch is refused (`StaleVersionError`, id `brand`) unless the org's brand state is still `state`. */
+        unchanged: (state: string): Staged => {
+          const stale = async () =>
+            (await db.select({ state: brandState }).from(s.organization).where(eq(s.organization.id, orgId)).get())?.state === state ? undefined : 0;
+          return { row: undefined, writes: [staleGuard(db, orgId, 'brand', 0, sql`(${brandState}) = ${state}`, stale)] };
+        },
         insert: async (values: NewRow<typeof s.brandKits>) => {
           await checkLogos(values);
           return brandKitRows.stage.insert(values);
@@ -1383,6 +1839,86 @@ export function scoped(d1: D1Database, orgId: string) {
       },
     },
 
+    /** Requests to publish chosen drafts (M4-09), made and decided through the publish request tools. */
+    publishRequests: {
+      get: publishRequests.get,
+      /**
+       * Newest first, `after` the key `[createdAt, id]` of the last row of the page before; with
+       * `pendingAt`, only those still waiting then: not decided, and not past `expires_at`.
+       */
+      list: ({ after, take, pendingAt }: { after?: readonly (string | number)[]; take: number; pendingAt?: number }) => {
+        const [at, id] = after ?? [];
+        const where: SQL[] = [eq(pr.orgId, orgId)];
+        if (pendingAt !== undefined) where.push(eq(pr.status, 'pending'), gt(pr.expiresAt, pendingAt));
+        if (typeof at === 'number' && typeof id === 'string') where.push(or(lt(pr.createdAt, at), and(eq(pr.createdAt, at), lt(pr.id, id)))!);
+        return db
+          .select()
+          .from(pr)
+          .where(and(...where))
+          .orderBy(desc(pr.createdAt), desc(pr.id))
+          .limit(take)
+          .all();
+      },
+      /** `requestedBy`'s requests still waiting at `now`: not decided, and not past `expires_at`. */
+      pendingBy: (requestedBy: string, now: number) =>
+        db
+          .select()
+          .from(pr)
+          .where(and(eq(pr.orgId, orgId), eq(pr.requestedBy, requestedBy), eq(pr.status, 'pending'), gt(pr.expiresAt, now)))
+          .all(),
+      stage: {
+        /**
+         * A new request, made at `now`: its `created_at`, which its expiry is counted from. The batch is
+         * refused (`StaleVersionError`, id `publish_request`) if, as it runs, the asker already has one
+         * waiting with the same pins, or `maxPending` waiting: two asked at once cannot both get past.
+         */
+        insert: (values: NewRow<typeof pr>, now: number, maxPending: number): Staged<PublishRequestRow> => {
+          const row = fullRow(pr, { ...strip(values), id: newId('prq'), orgId, createdAt: now }) as PublishRequestRow;
+          const waiting = sql`FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.requestedBy} = ${row.requestedBy} AND ${pr.status} = 'pending' AND ${pr.expiresAt} > ${now}`;
+          const holds = sql`NOT EXISTS (SELECT 1 ${waiting} AND ${pr.draftsJson} = ${row.draftsJson}) AND (SELECT COUNT(*) ${waiting}) < ${maxPending}`;
+          return { row, writes: [staleGuard(db, orgId, 'publish_request', 0, holds, async () => 0), ...staged(row, db.insert(pr).values(row)).writes] };
+        },
+        /**
+         * Decided: approved (with the publish it made, if any) or declined, by `by` at `now`. The batch
+         * is refused (`StaleVersionError`) unless the request is still the version read and not expired
+         * at `now`, so of two decisions from one read one commits, and one that took past the expiry
+         * commits nothing.
+         */
+        decide: (
+          current: PublishRequestRow,
+          decision: { status: 'approved' | 'declined'; by: string; now: number; publishId?: string | null },
+        ): Staged<PublishRequestRow> => {
+          const changed = publishRequests.stage.update(current, {
+            status: decision.status,
+            decidedBy: decision.by,
+            decidedAt: decision.now,
+            publishId: decision.publishId ?? null,
+          });
+          // Not expired at its decision's time, nor by the database's own clock as the batch runs: a
+          // decision whose batch runs late (a publish that took long) commits nothing past the expiry.
+          const holds = sql`EXISTS (SELECT 1 FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.id} = ${current.id} AND ${pr.rowVersion} = ${current.rowVersion} AND ${pr.expiresAt} > ${decision.now} AND ${pr.expiresAt} > CAST(unixepoch('subsec') * 1000 AS INTEGER))`;
+          // Changed since, or past its expiry by either clock: either way not the request that was read. Asked only once the
+          // guard failed, so never "holds again" by the Worker's clock, which may be behind the database's (#396).
+          const stale = async () => (await publishRequests.get(current.id))?.rowVersion ?? 0;
+          return { row: changed.row, writes: [staleGuard(db, orgId, current.id, current.rowVersion, holds, stale), ...changed.writes] };
+        },
+        /**
+         * A declined request put back to pending, undecided, at `now` (#115's Undo). The batch is refused
+         * (`StaleVersionError`) unless, as it runs, it is still the declined version read and not expired at
+         * `now` nor by the database's clock: one reopened or decided since, or past its expiry, commits nothing.
+         * And, as `insert` holds it, its asker has no other request waiting with the same pins, and fewer than
+         * `maxPending` waiting: a request asked again since the decline is the one that waits.
+         */
+        reopen: (current: PublishRequestRow, now: number, maxPending: number): Staged<PublishRequestRow> => {
+          const changed = publishRequests.stage.update(current, { status: 'pending', decidedBy: null, decidedAt: null, publishId: null });
+          const waiting = sql`FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.requestedBy} = ${current.requestedBy} AND ${pr.status} = 'pending' AND ${pr.expiresAt} > ${now}`;
+          const holds = sql`EXISTS (SELECT 1 FROM ${pr} WHERE ${pr.orgId} = ${orgId} AND ${pr.id} = ${current.id} AND ${pr.rowVersion} = ${current.rowVersion} AND ${pr.status} = 'declined' AND ${pr.expiresAt} > ${now} AND ${pr.expiresAt} > CAST(unixepoch('subsec') * 1000 AS INTEGER)) AND NOT EXISTS (SELECT 1 ${waiting} AND ${pr.draftsJson} = ${current.draftsJson}) AND (SELECT COUNT(*) ${waiting}) < ${maxPending}`;
+          // As `decide`'s: not the request that was read, by the database's clock too (#396).
+          const stale = async () => (await publishRequests.get(current.id))?.rowVersion ?? 0;
+          return { row: changed.row, writes: [staleGuard(db, orgId, current.id, current.rowVersion, holds, stale), ...changed.writes] };
+        },
+      },
+    },
     publishes: {
       ...publishes,
       stage: {
@@ -1439,26 +1975,36 @@ export function scoped(d1: D1Database, orgId: string) {
        */
       finish: async (publishId: string, now: number, reached: number, alert?: QueuedAlert): Promise<boolean> => {
         const p = s.publishes;
+        // Read after the update in the batch: an id missing or another org's queues nothing.
+        const finished = sql`EXISTS (SELECT 1 FROM ${p} WHERE ${p.orgId} = ${orgId} AND ${p.id} = ${publishId} AND ${p.finishedAt} = ${now})`;
         const [marked] = await db.batch([
           db
             .update(p)
             .set({ finishedAt: now, reached })
             .where(and(eq(p.orgId, orgId), eq(p.id, publishId), isNull(p.finishedAt)))
             .returning({ id: p.id }),
-          ...(alert ? queueAlert(alert, now, sql`1`) : []),
+          ...(alert ? queueAlert(alert, now, finished) : []),
         ]);
         return marked.length === 1;
       },
       /**
        * Publishes newest first, `limit` of them from below `beforeRevision`, each with who made it
-       * (a member's name), for a roll back the revision it went back to, and its rollout's
+       * (a member's name, else their address before the @: every member reads this list, so never
+       * the whole address, #253), for a roll back the revision it went back to, and its rollout's
        * `rolloutCounts`, read after the page: a publish's screens commit with it.
        */
-      history: async ({ beforeRevision, limit }: { beforeRevision?: number; limit: number }) => {
+      history: async ({ beforeRevision, limit, targets = false }: { beforeRevision?: number; limit: number; targets?: boolean }) => {
         const p = s.publishes;
         const restored = alias(s.publishes, 'restored');
+        // A publish's record of whom it reached (#187) only when asked (`targets`, one publish's page): a page of them would be large.
+        const { targetsJson, ...columns } = getTableColumns(p);
         const page = await db
-          .select({ ...getTableColumns(p), actorName: s.user.name, restoresRevision: restored.revision })
+          .select({
+            ...columns,
+            targetsJson: targets ? targetsJson : sql<string | null>`NULL`,
+            actorName: sql<string | null>`coalesce(nullif(${s.user.name}, ''), substr(${s.user.email}, 1, instr(${s.user.email}, '@') - 1))`,
+            restoresRevision: restored.revision,
+          })
           .from(p)
           .leftJoin(s.user, and(eq(p.actorKind, 'user'), eq(s.user.id, p.actorId)))
           .leftJoin(restored, and(eq(restored.orgId, p.orgId), eq(restored.id, p.restoresId)))
@@ -1472,6 +2018,33 @@ export function scoped(d1: D1Database, orgId: string) {
         const counts = await rolloutCounts(db, and(eq(p.orgId, orgId), gte(p.revision, oldest.revision), lte(p.revision, newest.revision)));
         return page.map((h) => ({ ...h, rollout: counts.get(h.id) ?? [] }));
       },
+      /**
+       * The latest publish at or before `atOrBefore` that gave `screenId` the manifest `manifestId` (#367): the one a
+       * screen fell back from, made before it said so (a roll back that sent the same manifest later is not it). For
+       * its page to link to; undefined when none did.
+       */
+      ofManifest: (screenId: string, manifestId: string, atOrBefore: number) => {
+        const p = s.publishes;
+        return db
+          .select({ id: p.id, revision: p.revision })
+          .from(ps)
+          .innerJoin(p, and(eq(p.orgId, ps.orgId), eq(p.id, ps.publishId)))
+          .where(and(eq(ps.orgId, orgId), eq(ps.screenId, screenId), eq(ps.manifestId, manifestId), lte(p.createdAt, atOrBefore)))
+          .orderBy(desc(p.revision))
+          .limit(1)
+          .get();
+      },
+      /** The latest publish's record of whom its groups reached, skipping roll backs: what the next publish is compared with (#187). */
+      lastTargets: async () =>
+        (
+          await db
+            .select({ t: s.publishes.targetsJson })
+            .from(s.publishes)
+            .where(and(eq(s.publishes.orgId, orgId), isNotNull(s.publishes.targetsJson)))
+            .orderBy(desc(s.publishes.revision))
+            .limit(1)
+            .get()
+        )?.t ?? null,
       /** A publish's screens, by name, with the manifest each got and what its state is worked out from now. */
       rollout: (publishId: string) =>
         db
@@ -1528,7 +2101,8 @@ export function scoped(d1: D1Database, orgId: string) {
         },
         update: async (current: typeof s.dataSources.$inferSelect, patch: RowPatch<typeof s.dataSources>, ifVersion?: number) => {
           await checkConnection(patch.connectionId);
-          return dataSources.stage.update(current, patch, ifVersion);
+          const clean = strip(patch);
+          return dataSources.stage.update(current, { ...sourceEdited(current, clean), ...clean }, ifVersion);
         },
         /**
          * Delete each of these sources, with its snapshot, made before `madeBefore`, that no spot
@@ -1572,15 +2146,16 @@ export function scoped(d1: D1Database, orgId: string) {
       },
       /**
        * Everything the poller needs once per org: the claimed sources with their latest snapshot
-       * versions, plus published spots (with template manifests) and screen/org locales for bound
-       * field checks — all in one D1 batch.
+       * versions, plus published spots (with template manifests), the screens' desired manifests (an
+       * `sf push`'s as well as a publish's, #481) and screen/org locales for bound field checks — all
+       * in one D1 batch.
        */
       pollInit: async (ids: readonly string[]) => {
-        if (!ids.length) return { rows: [], spots: [], locales: [null as string | null] };
+        if (!ids.length) return { rows: [], spots: [], manifests: [], locales: [null as string | null] };
         const ds = s.dataSources;
         const sp = s.spots;
         const tv = s.templateVersions;
-        const [rows, spots, screenLocales, settings] = await db.batch([
+        const [rows, spots, manifests, screenLocales, settings] = await db.batch([
           db
             .select({ source: ds, snapshotVersion: snap.version })
             .from(ds)
@@ -1591,12 +2166,19 @@ export function scoped(d1: D1Database, orgId: string) {
             .from(sp)
             .leftJoin(tv, sql`${tv.id} = json_extract(${sp.publishedJson}, '$.templateVersionId') AND (${tv.orgId} IS NULL OR ${tv.orgId} = ${sp.orgId})`)
             .where(and(eq(sp.orgId, orgId), isNotNull(sp.publishedJson))),
+          db
+            .select({ screenId: s.screens.id, manifestId: s.screens.desiredManifestId, photoSourcesJson: s.screens.desiredPhotoSourcesJson })
+            .from(s.screens)
+            .where(and(eq(s.screens.orgId, orgId), isNotNull(s.screens.desiredManifestId))),
           db.selectDistinct({ locale: s.screens.locale }).from(s.screens).where(eq(s.screens.orgId, orgId)),
           db.select({ locale: s.orgSettings.locale }).from(s.orgSettings).where(eq(s.orgSettings.orgId, orgId)).limit(1),
         ]);
         return {
           rows: rows.map((r) => ({ source: r.source, snapshotVersion: r.snapshotVersion ?? null })),
           spots: spots.filter((r): r is { id: string; publishedJson: string; manifestJson: string | null } => r.publishedJson !== null),
+          manifests: manifests.flatMap((r) =>
+            r.manifestId === null ? [] : [{ screenId: r.screenId, manifestId: r.manifestId, photoSources: photoSourcesOf(r.photoSourcesJson, r.manifestId) }],
+          ),
           locales: screenLocales.length ? screenLocales.map((r) => r.locale) : [settings[0]?.locale ?? null],
         };
       },
@@ -1610,28 +2192,38 @@ export function scoped(d1: D1Database, orgId: string) {
           .all(),
       snapshot: async (dataSourceId: string) =>
         db
-          .select()
+          .select(snapshotColumns)
           .from(snap)
+          .innerJoin(s.dataSources, and(eq(s.dataSources.orgId, snap.orgId), eq(s.dataSources.id, snap.dataSourceId)))
           .where(and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId)))
           .get(),
-      /** Latest snapshots of several sources. */
+      /** Latest snapshots of several sources, each with its source's format and poll interval as they are now, for its stale age. */
       snapshots: async (dataSourceIds: readonly string[]) =>
-        dataSourceIds.length
-          ? db
-              .select({ dataSourceId: snap.dataSourceId, version: snap.version, fetchedAt: snap.fetchedAt, checkedAt: snap.checkedAt, dataJson: snap.dataJson })
-              .from(snap)
-              .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, [...dataSourceIds])))
-              .all()
-          : [],
+        (
+          await Promise.all(
+            chunk([...dataSourceIds], 1).map((part) =>
+              db
+                .select(snapshotColumns)
+                .from(snap)
+                .innerJoin(s.dataSources, and(eq(s.dataSources.orgId, snap.orgId), eq(s.dataSources.id, snap.dataSourceId)))
+                .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, part)))
+                .all(),
+            ),
+          )
+        ).flat(),
       /** When each source's latest snapshot was last confirmed, without its data (up to 64 kB each). */
       checkedTimes: async (dataSourceIds: readonly string[]) =>
-        dataSourceIds.length
-          ? db
-              .select({ dataSourceId: snap.dataSourceId, checkedAt: snap.checkedAt })
-              .from(snap)
-              .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, [...dataSourceIds])))
-              .all()
-          : [],
+        (
+          await Promise.all(
+            chunk([...dataSourceIds], 1).map((part) =>
+              db
+                .select({ dataSourceId: snap.dataSourceId, checkedAt: snap.checkedAt })
+                .from(snap)
+                .where(and(eq(snap.orgId, orgId), inArray(snap.dataSourceId, part)))
+                .all(),
+            ),
+          )
+        ).flat(),
       putSnapshot: async (dataSourceId: string, v: Snapshot) => {
         if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId);
         const fields = snapshotFields(v);
@@ -1644,83 +2236,52 @@ export function scoped(d1: D1Database, orgId: string) {
       /**
        * What one poll found, in one batch: the source's patch (next poll, failures, validators),
        * and either a changed `snapshot` or, when the feed still says the same, its new `checkedAt`.
-       * Returns false if an RSS source edit made the result stale. Throws `NotInOrgError`
-       * if the source does not belong to this org without an extra read.
+       * A news source's poll also passes `photos` (./feed-photos.ts): its writes and optional photo
+       * holds then stand only if the source is still the row the poll read, and a reread is left due
+       * if not. Returns the photo URLs held for queueing. Throws
+       * `NotInOrgError` if the source does not belong to this org without an extra read.
        */
       savePoll: async (
         dataSourceId: string,
-        poll: {
-          source: RowPatch<typeof s.dataSources> & { nextPollAt: number };
-          snapshot?: Snapshot;
-          checkedAt?: number;
-          photoRead?: { rowVersion: number; generation: number; now: number };
-        },
-      ) => {
+        poll: { source: RowPatch<typeof s.dataSources> & { nextPollAt: number }; snapshot?: Snapshot; checkedAt?: number; photos?: PollPhotos },
+      ): Promise<{ held: string[] }> => {
         const ds = s.dataSources;
         const mine = and(eq(ds.orgId, orgId), eq(ds.id, dataSourceId));
         const mineSnap = and(eq(snap.orgId, orgId), eq(snap.dataSourceId, dataSourceId));
-        // The version advances even when two edits restore the original Photos setting.
-        const sameVersion = poll.photoRead && eq(ds.rowVersion, poll.photoRead.rowVersion);
-        const current = sameVersion && sql`EXISTS (SELECT 1 FROM ${ds} WHERE ${mine} AND ${sameVersion})`;
+        const photos = poll.photos && pollSave(db, orgId, dataSourceId, poll.photos);
         const check = db
           .select({
             ok: sql`json(CASE WHEN EXISTS (SELECT 1 FROM ${ds} WHERE ${ds.orgId} = ${orgId} AND ${ds.id} = ${dataSourceId}) THEN '1' ELSE 'not in org' END)`,
           })
-          .from(s.organization)
-          .where(eq(s.organization.id, orgId));
+          .from(sql`(SELECT 1)`);
         // Not `stage.update`: a poll leaves the row's version alone, so it never makes a person's edit stale.
-        const writes = staged(
-          undefined,
-          check,
-          db
-            .update(ds)
-            .set(updateSet(ds, strip(poll.source)))
-            .where(and(mine, sameVersion)),
-        ).writes;
+        const sourceWrite = db
+          .update(ds)
+          .set(updateSet(ds, strip({ ...poll.source, ...photos?.patch })))
+          .where(and(mine, photos?.sameVersion));
+        type BatchQuery = Parameters<Db['batch']>[0][number];
+        const queries: BatchQuery[] = [check, sourceWrite];
         if (poll.snapshot) {
           const { version, fetchedAt, checkedAt, dataJson } = poll.snapshot;
           const fields = { version, fetchedAt, checkedAt, dataJson };
-          writes.push(
-            ...staged(
-              undefined,
-              db
-                .insert(snap)
-                .select(sql`SELECT ${orgId}, ${dataSourceId}, ${version}, ${fetchedAt}, ${checkedAt}, ${dataJson} WHERE ${current ?? sql`1`}`)
-                .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: fields }),
-            ).writes,
+          queries.push(
+            db
+              .insert(snap)
+              .select(sql`SELECT ${orgId}, ${dataSourceId}, ${version}, ${fetchedAt}, ${checkedAt}, ${dataJson} WHERE ${photos?.current ?? sql`1`}`)
+              .onConflictDoUpdate({ target: [snap.orgId, snap.dataSourceId], set: fields }),
           );
         } else if (poll.checkedAt !== undefined) {
-          writes.push(...staged(undefined, db.update(snap).set({ checkedAt: poll.checkedAt }).where(and(mineSnap, current))).writes);
+          queries.push(db.update(snap).set({ checkedAt: poll.checkedAt }).where(and(mineSnap, photos?.current)));
         }
-        if (poll.photoRead) {
-          // A first-seen URL can change before a delivery knows this source uses it.
-          const changedCopy = poll.source.photoUrlsJson
-            ? sql`EXISTS (
-                SELECT 1 FROM json_each(${ds.photoUrlsJson}, '$.stories') AS story
-                JOIN ${fi} ON ${fi.orgId} = ${orgId} AND ${fi.url} = story.value
-                JOIN ${snap} ON ${mineSnap}
-                WHERE ${fi.fileSha256} IS NOT NULL AND ${fi.thumbSha256} IS NOT NULL
-                AND ${storyCopyDiffers(sql`story.key`, fi.fileSha256, fi.thumbSha256)}
-              )`
-            : undefined;
-          writes.push(
-            ...staged(
-              undefined,
-              db
-                .update(ds)
-                .set({ etag: null, lastModified: null, nextPollAt: sql`MIN(${ds.nextPollAt}, ${poll.photoRead.now})` })
-                .where(and(mine, or(ne(ds.rowVersion, poll.photoRead.rowVersion), ne(ds.photoGeneration, poll.photoRead.generation), changedCopy))),
-            ).writes,
-          );
-        }
+        const holdAt = photos?.hold ? queries.push(photos.hold) - 1 : undefined;
+        if (photos?.counted) queries.push(photos.counted);
+        if (photos) queries.push(photos.reread);
         try {
-          const changes = await commit(db, writes);
-          const updated = changes[1];
-          // A version mismatch skips the poll writes and leaves a reread due via the final update.
-          if (!updated && !(poll.photoRead && changes.at(-1))) throw new NotInOrgError('data source', dataSourceId);
-          return Boolean(updated);
+          const [first, ...rest] = queries;
+          const results = await db.batch([first!, ...rest]);
+          const held = holdAt !== undefined ? (results[holdAt] as { url: string }[]).map((r) => r.url) : [];
+          return { held };
         } catch (err) {
-          if (err instanceof NotInOrgError) throw err;
           // biome-ignore lint/style/useErrorCause: the cause is passed in the options argument.
           if (!(await dataSources.get(dataSourceId))) throw new NotInOrgError('data source', dataSourceId, { cause: err });
           throw err;
@@ -1728,247 +2289,10 @@ export function scoped(d1: D1Database, orgId: string) {
       },
     },
 
-    /** The photos the org's news sources name, by URL (`feed_images` in ./schema.ts). Written by the poller, not by tools. */
-    feedImages: {
-      /** Look up any number of photo URLs in this org in a single D1 query. */
-      get: async (urls: readonly string[]) =>
-        urls.length
-          ? db
-              .select()
-              .from(fi)
-              .where(and(eq(fi.orgId, orgId), sql`${fi.url} IN (SELECT value FROM json_each(${JSON.stringify([...urls])}))`))
-              .all()
-          : [],
-      /**
-       * Held until `until`: queued to be fetched, so a poll before then does not queue them again. A
-       * URL new to the org gets its row, with no image yet, made `now` and counted against
-       * `sourceId`'s daily budget (`madeSince`). Returns only URLs newly held by this call.
-       */
-      hold: (urls: readonly string[], { until, now, sourceId }: { until: number; now: number; sourceId: string }) =>
-        urls.length ? holdFeedImages(sourceId, sql`SELECT value AS url FROM json_each(${JSON.stringify(urls)})`, now, until) : Promise.resolve([]),
-      /**
-       * Atomically hold `again` (due rechecks) plus as many of `fresh` as fit within `maxSource`
-       * and `maxOrg` rows made since `since`, in one D1 statement. Returns the exact URLs held.
-       */
-      holdWithinBudget: async (
-        sourceId: string,
-        {
-          again,
-          fresh,
-          until,
-          now,
-          since,
-          maxSource,
-          maxOrg,
-        }: { again: readonly string[]; fresh: readonly string[]; until: number; now: number; since: number; maxSource: number; maxOrg: number },
-      ): Promise<string[]> => {
-        if (!again.length && !fresh.length) return [];
-        const alreadyKnown = sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.url} = jobs.value)`;
-        const chosen = sql`
-          WITH counts AS (
-            SELECT count(*) AS org_n, coalesce(sum(${fi.sourceId} = ${sourceId}), 0) AS src_n
-            FROM ${fi}
-            WHERE ${fi.orgId} = ${orgId} AND ${fi.createdAt} >= ${since}
-          )
-          SELECT jobs.value AS url FROM json_each(${JSON.stringify([...again, ...fresh])}) AS jobs WHERE ${alreadyKnown}
-          UNION ALL
-          SELECT value FROM (
-            SELECT jobs.value FROM json_each(${JSON.stringify(fresh)}) AS jobs
-            WHERE NOT ${alreadyKnown}
-            ORDER BY jobs.key
-            LIMIT (SELECT MAX(0, MIN(${maxSource} - src_n, ${maxOrg} - org_n)) FROM counts)
-          )`;
-        return holdFeedImages(sourceId, chosen, now, until);
-      },
-      /** How many rows were made at or after `since`: the org's, and of those, the ones `sourceId` made. */
-      madeSince: async (since: number, sourceId: string) => {
-        const row = await db
-          .select({ org: sql<number>`count(*)`, source: sql<number>`coalesce(sum(${fi.sourceId} = ${sourceId}), 0)` })
-          .from(fi)
-          .where(and(eq(fi.orgId, orgId), gte(fi.createdAt, since)))
-          .get();
-        return { org: row?.org ?? 0, source: row?.source ?? 0 };
-      },
-      /** Another row in this org that already stored copies for these exact fetched bytes. */
-      bySourceSha: (sourceSha256: string) =>
-        db
-          .select({ fileSha256: fi.fileSha256, thumbSha256: fi.thumbSha256 })
-          .from(fi)
-          .where(and(eq(fi.orgId, orgId), eq(fi.sourceSha256, sourceSha256), isNotNull(fi.fileSha256), isNotNull(fi.thumbSha256)))
-          .limit(1)
-          .get(),
-      /**
-       * Cancel any unleased pending deletes for `shas` before writing or reusing those blobs in
-       * `o/<org>/f/`. Returns `false` if a cleanup run currently holds an active `deleting_until`
-       * lease on any of `shas` (so the consumer retries rather than racing R2 put against delete).
-       */
-      claimForWrite: async (shas: readonly string[], now: number): Promise<boolean> => {
-        const unique = [...new Set(shas)];
-        if (!unique.length) return true;
-        const inList = sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(unique)}))`;
-        const [, active] = await db.batch([
-          db.delete(fid).where(and(eq(fid.orgId, orgId), inList, lte(fid.deletingUntil, now))),
-          db
-            .select({ sha256: fid.sha256 })
-            .from(fid)
-            .where(and(eq(fid.orgId, orgId), inList)),
-        ]);
-        return active.length === 0;
-      },
-      /**
-       * Expire these rows, keeping any whose copy the org's latest snapshots still name (a source
-       * whose polls fail keeps playing its last good one). Deleted rows' hashes are durably queued
-       * in `feed_image_deletes` in the same batch; R2 deletion runs after the grace window via
-       * `claimDeletes` and `finishDeletes`. Returns how many rows were deleted.
-       */
-      forget: async (urls: readonly string[], now: number): Promise<number> => {
-        if (!urls.length) return 0;
-        // The candidate scan may predate a new hold, replacement or snapshot.
-        const expired = and(
-          eq(fi.orgId, orgId),
-          lt(fi.nextCheckAt, now - FEED_IMAGE_TTL_MS),
-          sql`${fi.url} IN (SELECT value FROM json_each(${JSON.stringify(urls)}))`,
-          unreferencedFeedImage,
-        );
-        const [, deleted] = await db.batch([
-          db
-            .insert(fid)
-            .select(sql`SELECT DISTINCT ${orgId}, copy.value, ${now}, 0
-              FROM ${fi}, json_each(json_array(${fi.fileSha256}, ${fi.thumbSha256})) AS copy
-              WHERE ${expired} AND copy.value IS NOT NULL`)
-            .onConflictDoUpdate({ target: [fid.orgId, fid.sha256], set: { queuedAt: sql`MAX(${fid.queuedAt}, excluded.queued_at)` } }),
-          db.delete(fi).where(expired).returning({ url: fi.url }),
-        ]);
-        return deleted.length;
-      },
-      /**
-       * Check pending delete candidates against snapshots and `feed_images` in batched SQL:
-       * - Hashes still referenced by `feed_images` are removed from `feed_image_deletes` (that row owns them).
-       * - Hashes still named by a `data_snapshots` row (and no `feed_images` row) stay in
-       *   `feed_image_deletes` with `queued_at = now` so they wait for the snapshot to move on without
-       *   being lost or starving other deletes.
-       * - Remaining unreferenced hashes are atomically leased (`deleting_until = now + leaseMs`) for
-       *   R2 deletion. Returns the exact hashes claimed.
-       */
-      claimDeletes: async (shas: readonly string[], { now, leaseMs }: { now: number; leaseMs: number }): Promise<string[]> => {
-        const unique = [...new Set(shas)];
-        if (!unique.length) return [];
-        const due = and(
-          eq(fid.orgId, orgId),
-          sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify(unique)}))`,
-          lte(fid.queuedAt, now - FEED_IMAGE_DELETE_GRACE_MS),
-          lte(fid.deletingUntil, now),
-        );
-        const feedRef = sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId}
-          AND (${fi.fileSha256} = ${fid.sha256} OR ${fi.thumbSha256} = ${fid.sha256}))`;
-        const snapshotRef = sql`EXISTS (SELECT 1 FROM ${snap} WHERE ${snap.orgId} = ${orgId} AND instr(${snap.dataJson}, ${fid.sha256}) > 0)`;
-        const claim = db
-          .update(fid)
-          .set({ deletingUntil: now + leaseMs })
-          .where(and(due, sql`NOT ${feedRef}`, sql`NOT ${snapshotRef}`))
-          .returning({ sha256: fid.sha256 });
-        const [claimed] = await db.batch([
-          claim,
-          db.delete(fid).where(and(due, feedRef)),
-          db.update(fid).set({ queuedAt: now, deletingUntil: 0 }).where(and(due, snapshotRef)),
-        ]);
-        return claimed.map((r) => r.sha256);
-      },
-      /** Remove claimed delete records once R2 deletion succeeded. */
-      finishDeletes: async (shas: readonly string[]): Promise<void> => {
-        if (!shas.length) return;
-        await db
-          .delete(fid)
-          .where(and(eq(fid.orgId, orgId), sql`${fid.sha256} IN (SELECT value FROM json_each(${JSON.stringify([...shas])}))`))
-          .run();
-      },
-      /** Pending delete records for this org, ordered by hash. */
-      pendingDeletes: () => db.select().from(fid).where(eq(fid.orgId, orgId)).orderBy(asc(fid.sha256)).all(),
-      /**
-       * What fetching `url` found: on success its hashes and validators (atomically queuing any
-       * replaced hashes into `feed_image_deletes` and invalidating RSS sources that need the copy).
-       * A fetch that did not store a new copy updates metadata only over the row it checked.
-       */
-      save: async (
-        url: string,
-        found: RowPatch<typeof s.feedImages> & { nextCheckAt: number },
-        {
-          now = Date.now(),
-          sourceId,
-          checked,
-        }: { now?: number; sourceId?: string; checked?: Pick<typeof fi.$inferSelect, 'sourceSha256' | 'etag' | 'lastModified' | 'nextCheckAt'> } = {},
-      ) => {
-        const mine = and(
-          eq(fi.orgId, orgId),
-          eq(fi.url, url),
-          checked && sql`${fi.sourceSha256} IS ${checked.sourceSha256}`,
-          checked && sql`${fi.etag} IS ${checked.etag} AND ${fi.lastModified} IS ${checked.lastModified}`,
-          checked && eq(fi.nextCheckAt, checked.nextCheckAt),
-        );
-        const updateRow = db
-          .update(fi)
-          .set(updateSet(fi, strip(found)))
-          .where(mine);
-        const replacesHashes = found.fileSha256 !== undefined || found.thumbSha256 !== undefined;
-        if (!sourceId && !replacesHashes) {
-          await updateRow.run();
-          return;
-        }
-        const file = found.fileSha256 === undefined ? fi.fileSha256 : found.fileSha256;
-        const thumb = found.thumbSha256 === undefined ? fi.thumbSha256 : found.thumbSha256;
-        const ds = s.dataSources;
-        const changed = sql`${fi.fileSha256} IS NOT ${file} OR ${fi.thumbSha256} IS NOT ${thumb}`;
-        const namesPhoto = sql`instr(coalesce(${ds.photoUrlsJson}, ''), ${JSON.stringify(url)}) > 0`;
-        // A flat URL list can't identify the story. One full read upgrades it to snapshot order.
-        const missingCopy = or(
-          and(sql`json_type(${ds.photoUrlsJson}) = 'array'`, namesPhoto),
-          sql`EXISTS (
-            SELECT 1 FROM json_each(${ds.photoUrlsJson}, '$.stories') AS story
-            LEFT JOIN ${snap} ON ${snap.orgId} = ${orgId} AND ${snap.dataSourceId} = ${ds.id}
-            WHERE story.value = ${url} AND ${storyCopyDiffers(sql`story.key`, file, thumb)}
-          )`,
-        );
-        const readAfresh = sourceId
-          ? db
-              .update(ds)
-              .set(updateSet(ds, { etag: null, lastModified: null, photoGeneration: sql`${ds.photoGeneration} + 1` }))
-              .where(
-                and(
-                  eq(ds.orgId, orgId),
-                  eq(ds.format, 'rss'),
-                  eq(ds.photos, true),
-                  or(eq(ds.id, sourceId), namesPhoto),
-                  sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${mine} AND ${file} IS NOT NULL AND ${thumb} IS NOT NULL
-                  AND ((${changed}) OR ((${ds.etag} IS NOT NULL OR ${ds.lastModified} IS NOT NULL) AND ${missingCopy})))`,
-                ),
-              )
-          : undefined;
-        const queueDisplaced = replacesHashes
-          ? db
-              .insert(fid)
-              .select(sql`SELECT DISTINCT ${orgId}, old.value, ${now}, 0
-                FROM ${fi}, json_each(json_array(${fi.fileSha256}, ${fi.thumbSha256})) AS old
-                WHERE ${mine} AND old.value IS NOT NULL AND old.value IS NOT ${file} AND old.value IS NOT ${thumb}`)
-              .onConflictDoUpdate({
-                target: [fid.orgId, fid.sha256],
-                set: { queuedAt: sql`MAX(${fid.queuedAt}, excluded.queued_at)` },
-              })
-          : undefined;
-        const clearActive = replacesHashes
-          ? db.delete(fid).where(
-              and(
-                eq(fid.orgId, orgId),
-                lte(fid.deletingUntil, now),
-                sql`EXISTS (SELECT 1 FROM ${fi} WHERE ${fi.orgId} = ${orgId} AND ${fi.url} = ${url}
-                AND (${fid.sha256} = ${fi.fileSha256} OR ${fid.sha256} = ${fi.thumbSha256}))`,
-              ),
-            )
-          : undefined;
-        // Use the hashes in D1 immediately before the update: another delivery may have stored a copy during this fetch.
-        const statements = [readAfresh, queueDisplaced, updateRow, clearActive].filter((q) => q !== undefined);
-        await commit(db, staged(undefined, ...statements).writes);
-      },
-    },
+    /** The photos the org's news sources name (./feed-photos.ts). Written by the poller and the photos queue, not by tools. */
+    feedPhotos: feedPhotos(db, orgId),
+    /** What it stores that nothing needs any more (#235, ./storage.ts). */
+    storage: storage(db, orgId),
 
     connections: {
       ...connectionRows,
@@ -2016,6 +2340,173 @@ export function scoped(d1: D1Database, orgId: string) {
       },
     },
 
+    /**
+     * The org's agent grants (M4-04): what an agent's OAuth client may do here, as one member. The
+     * provider's tokens carry a grant's id as their reference id (`agentGrantForToken`).
+     */
+    agentGrants: {
+      ...grants,
+      /** The user's grants here not yet revoked, expired ones included: their tokens are still stored. */
+      unrevokedFor: (userId: string) =>
+        db
+          .select()
+          .from(ag)
+          .where(and(eq(ag.orgId, orgId), eq(ag.userId, userId), isNull(ag.revokedAt)))
+          .orderBy(asc(ag.id))
+          .all(),
+      /**
+       * The grants not revoked, newest first, each with its client's registered redirect URIs (the
+       * provider's `oauthClient`, reached only through a grant here): what Settings › Connected agents (MCP)
+       * lists (M4-07). `userId` keeps one member's; `grantId` one grant.
+       */
+      connected: (filter: { userId?: string; grantId?: string } = {}) =>
+        db
+          .select({ grant: ag, redirectUrisJson: s.oauthClient.redirectUris })
+          .from(ag)
+          .innerJoin(s.oauthClient, eq(s.oauthClient.clientId, ag.clientId))
+          .where(
+            and(
+              eq(ag.orgId, orgId),
+              isNull(ag.revokedAt),
+              filter.userId === undefined ? undefined : eq(ag.userId, filter.userId),
+              filter.grantId === undefined ? undefined : eq(ag.id, filter.grantId),
+            ),
+          )
+          .orderBy(desc(ag.createdAt), asc(ag.id))
+          .all(),
+      /** Used now: its 90 days unused start again. Bookkeeping, not audited; a revoked grant stays revoked. */
+      touch: (grantId: string, now: number) =>
+        db
+          .update(ag)
+          .set({ lastUsedAt: now, expiresAt: now + AGENT_GRANT_IDLE_MS })
+          .where(and(eq(ag.orgId, orgId), eq(ag.id, grantId), isNull(ag.revokedAt)))
+          .run(),
+      stage: {
+        ...grants.stage,
+        /**
+         * Revoked by `by` at `now`, and in the same batch the provider's access and refresh tokens,
+         * consents and unexchanged authorization codes for it deleted, so its client's next refresh is refused too (M4-01's RESULTS,
+         * limitation 3). Only this org's grant's: the deletes find it here first. Already revoked: nothing.
+         */
+        revoke: (grant: typeof ag.$inferSelect, by: string, now: number): Staged<typeof ag.$inferSelect> => {
+          if (grant.revokedAt !== null) return { row: grant, writes: [] };
+          // Guarded by the version read: of two revokes from one read, the second commits nothing.
+          const revoked = grants.stage.update(grant, { revokedAt: now, revokedBy: by }, grant.rowVersion);
+          const ours = db
+            .select({ id: ag.id })
+            .from(ag)
+            .where(and(eq(ag.orgId, orgId), eq(ag.id, grant.id)));
+          return { row: revoked.row, writes: [...revoked.writes, ...grantTokenDeletes(ours).writes] };
+        },
+        /**
+         * Every grant `userId` holds here still connected, revoked by `by` at `now` as their membership ends (#328): one
+         * audit row each (`detailJson`, as `clientId`), their tokens, consents and codes deleted, and each marked, in six
+         * statements however many grants. No version is held: a scope change meanwhile does not keep a grant connected
+         * once its member has gone, and one revoked meanwhile is left as it is, with no second audit row (review of #422).
+         */
+        revokeAllOf: (userId: string, by: string, clientId: string, now: number, detailJson: string): Staged => {
+          const theirs = and(eq(ag.orgId, orgId), eq(ag.userId, userId));
+          const live = and(theirs, isNull(ag.revokedAt));
+          const a = s.auditLog;
+          // Before the grants are marked, so it names exactly those still connected. Its id is the grant's: a grant is revoked once.
+          const audit = db.insert(a).select(
+            db
+              .select({
+                id: sql<string>`'aud_end_' || ${ag.id}`.as('id'),
+                orgId: ag.orgId,
+                at: sql<number>`${now}`.as('at'),
+                actorKind: sql<'user'>`'user'`.as('actor_kind'),
+                actorId: sql<string>`${by}`.as('actor_id'),
+                clientId: sql<string>`${clientId}`.as('client_id'),
+                action: sql<string>`'revoke_agent_grant'`.as('action'),
+                targetKind: sql<string>`'agent_grant'`.as('target_kind'),
+                targetId: ag.id,
+                detailJson: sql<string>`${detailJson}`.as('detail_json'),
+              })
+              .from(ag)
+              .where(live),
+          );
+          const mark = db
+            .update(ag)
+            .set({ revokedAt: now, revokedBy: by, rowVersion: sql`${ag.rowVersion} + 1` })
+            .where(live);
+          return {
+            row: undefined,
+            writes: [
+              ...staged(undefined, audit).writes,
+              ...grantTokenDeletes(db.select({ id: ag.id }).from(ag).where(theirs)).writes,
+              ...staged(undefined, mark).writes,
+            ],
+          };
+        },
+      },
+    },
+
+    /**
+     * The org's members (Better Auth's `member` rows), with each one's name and address. Read only:
+     * members change through Better Auth's organization endpoints, which keep its rules (one of our
+     * roles each) and write the audit row (`membershipAudit` in apps/api). Migration 0036's triggers
+     * refuse a write that would leave the org without an owner (#292).
+     */
+    members: {
+      list: () => memberRows().orderBy(s.member.createdAt, s.member.id).all(),
+      get: (memberId: string) => memberRows(eq(s.member.id, memberId)).get(),
+      /** The user's role here now, or undefined if they are no longer a member. */
+      roleOf: async (userId: string) => (await memberRows(eq(s.member.userId, userId)).get())?.role,
+      stage: {
+        /**
+         * Nothing written: the batch is refused (`StaleVersionError`, id `member`) unless, as it runs,
+         * `userId` is still a member in one of `roles`, and, when `editorsOnlyWhilePublishing`, an editor
+         * only while the org lets editors publish. The right a change was checked for, held to its commit.
+         */
+        stillMay: (userId: string, roles: readonly string[], editorsOnlyWhilePublishing: boolean): Staged => {
+          const m = s.member;
+          const setting = sql`COALESCE((SELECT ${os.editorsPublish} FROM ${os} WHERE ${os.orgId} = ${orgId}), 1) = 1`;
+          const holds = sql`EXISTS (SELECT 1 FROM ${m} WHERE ${m.organizationId} = ${orgId} AND ${m.userId} = ${userId} AND ${inArray(m.role, [...roles])}${
+            editorsOnlyWhilePublishing ? sql` AND (${m.role} <> 'editor' OR ${setting})` : sql``
+          })`;
+          return { row: undefined, writes: [staleGuard(db, orgId, 'member', 0, holds, async () => 0)] };
+        },
+      },
+    },
+    /** The org's invitations (Better Auth's `invitation` rows): read, and cancelled (`stage.cancel`); Better Auth makes them. */
+    invitations: {
+      /** Those still pending, oldest first. One whose `expiresAt` has passed can no longer be accepted. */
+      pending: () =>
+        db
+          .select()
+          .from(s.invitation)
+          .where(and(eq(s.invitation.organizationId, orgId), eq(s.invitation.status, 'pending')))
+          .orderBy(s.invitation.createdAt, s.invitation.id)
+          .all(),
+      get: (invitationId: string) =>
+        db
+          .select()
+          .from(s.invitation)
+          .where(and(eq(s.invitation.organizationId, orgId), eq(s.invitation.id, invitationId)))
+          .get(),
+      stage: {
+        /**
+         * Cancel a pending invitation of this org, as Better Auth's cancel does (`canceled`), for a caller with
+         * no session (an agent over /mcp, #321). The batch is refused (`StaleVersionError`, id the invitation's)
+         * unless, as it runs, the invitation is this org's and still pending: one accepted, rejected or
+         * cancelled meanwhile is left as it is. Only this one write to Better Auth's table: inviting stays its.
+         */
+        cancel: (invitationId: string): Staged => {
+          const iv = s.invitation;
+          // Better Auth's table: its primary key is the id alone, with no org in it, so this predicate is the only thing
+          // keeping the guard and the update to this org's row. Both use it, unchanged.
+          const mine = and(eq(iv.organizationId, orgId), eq(iv.id, invitationId), eq(iv.status, 'pending'));
+          const holds = sql`EXISTS (SELECT 1 FROM ${iv} WHERE ${mine})`;
+          const stale = async () => ((await db.select({ id: iv.id }).from(iv).where(mine).get()) ? undefined : 0);
+          return {
+            row: undefined,
+            writes: [staleGuard(db, orgId, invitationId, 0, holds, stale), ...staged(undefined, db.update(iv).set({ status: 'canceled' }).where(mine)).writes],
+          };
+        },
+      },
+    },
+
     auditLog: {
       /** One statement, not a batch: for a change made outside ours (Better Auth's), which no batch of ours records. */
       append: async (entry: NewRow<typeof s.auditLog>) =>
@@ -2029,12 +2520,15 @@ export function scoped(d1: D1Database, orgId: string) {
       /**
        * An audit row written at most once for `key` in this org (an agent grant's refusals in one
        * window, which several calls may race to record): another call with the key writes nothing.
-       * Its id is made from the org and the key, so no other org's row can stand in for it.
+       * Its id is a hash of the org and the key, so no other org's row can stand in for it, and of
+       * fixed length (49 characters) under the contract's `ID_PATTERN` however long the key is.
        */
       appendOnce: async (key: string, entry: Omit<NewRow<typeof s.auditLog>, 'id'>): Promise<void> => {
+        const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${orgId}\n${key}`)));
+        const hash = [...digest.subarray(0, 20)].map((b) => b.toString(16).padStart(2, '0')).join('');
         await db
           .insert(s.auditLog)
-          .values({ ...strip(entry), id: `aud_once_${orgId}_${key}`, orgId })
+          .values({ ...strip(entry), id: `aud_once_${hash}`, orgId })
           .onConflictDoNothing()
           .run();
       },
@@ -2073,7 +2567,20 @@ export function scoped(d1: D1Database, orgId: string) {
         }
         if (p.actorKind) where.push(eq(a.actorKind, p.actorKind));
         if (p.actorId) where.push(eq(a.actorId, p.actorId));
-        if (p.action) where.push(eq(a.action, p.action));
+        if (p.action) {
+          const also = p.alsoAction;
+          const alsoWhere = also && [
+            inArray(a.action, [...also.actions]),
+            ...(also.detailHas === undefined ? [] : [sql`instr(${a.detailJson}, ${also.detailHas}) > 0`]),
+            ...Object.entries(also.inputHas ?? {}).map(([key, has]) => {
+              const value = sql`json_extract(${a.detailJson}, ${`$.input.${key}`})`;
+              return has ? sql`${value} is not null` : sql`${value} is null`;
+            }),
+            // json_type, not json_extract: a key given as null (hours cleared) is there, and json_extract reads it as absent (#545).
+            ...(also.inputHasAny?.length ? [or(...also.inputHasAny.map((key) => sql`json_type(${a.detailJson}, ${`$.input.${key}`}) is not null`))!] : []),
+          ];
+          where.push(alsoWhere ? or(eq(a.action, p.action), and(...alsoWhere))! : eq(a.action, p.action));
+        }
         if (p.targetKind) where.push(eq(a.targetKind, p.targetKind));
         if (p.targetId) where.push(eq(a.targetId, p.targetId));
         if (p.from != null) where.push(sql`${a.at} >= ${p.from}`);

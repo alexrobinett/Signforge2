@@ -154,8 +154,15 @@ describe('connecting an account', () => {
     expect(await result('start_connection', { provider: 'fake' }, agent)).toMatchObject({
       ok: false,
       error: 'forbidden',
-      message: expect.stringContaining('signed in to the CMS'),
+      message: expect.stringContaining('for people only'),
     });
+    expect((await owner.org.connections.authorizations.list()).length).toBe(before);
+  });
+
+  it('refuses the in-CMS agent, which acts as the member but must not choose a connection for them (#258)', async () => {
+    const cmsAgent: Caller = { ...owner, actor: { ...owner.actor, clientId: 'cms-agent' } };
+    const before = (await owner.org.connections.authorizations.list()).length;
+    expect(await result('start_connection', { provider: 'fake' }, cmsAgent)).toMatchObject({ ok: false, error: 'forbidden' });
     expect((await owner.org.connections.authorizations.list()).length).toBe(before);
   });
 
@@ -194,11 +201,11 @@ describe('disconnecting', () => {
 
   it('keeps a connection a source reads through, disconnected and without credentials', async () => {
     const c = await connect();
-    await call('create_data_source', { id: 'rooms', name: 'Rooms', format: 'provider', connectionId: c.id, resource: 'calendar-1' });
+    await call('save_data_source', { id: 'rooms', name: 'Rooms', format: 'provider', connectionId: c.id, resource: 'calendar-1' });
     expect(await call('disconnect', { connectionId: c.id })).toEqual({ deleted: false, dataSourceIds: ['rooms'] });
     expect(await owner.org.connections.get(c.id)).toMatchObject({ status: 'disconnected', credentialsSealed: null });
     // Nothing left to revoke the second time; deleted once its source is.
-    await call('delete_data_source', { dataSourceId: 'rooms' });
+    await call('delete', { type: 'data_source', id: 'rooms' });
     const before = revoked.length;
     expect(await call('disconnect', { connectionId: c.id })).toEqual({ deleted: true, dataSourceIds: [] });
     expect(revoked.length).toBe(before);
@@ -207,7 +214,7 @@ describe('disconnecting', () => {
 
 describe('a provider data source', () => {
   it('names a connection of the org and a resource, sealed and never shown', async () => {
-    const { dataSource } = await call('create_data_source', {
+    const { dataSource } = await call('save_data_source', {
       id: 'sheet',
       name: 'Prices',
       format: 'provider',
@@ -219,8 +226,8 @@ describe('a provider data source', () => {
     expect(await owner.org.dataSources.get('sheet')).toMatchObject({ urlEncrypted: `sealed:${o.orgId}/sheet:sheet-abc!A1:C20` });
     expect(JSON.stringify(await owner.org.auditLog.list({ limit: 100 }))).not.toContain('sheet-abc');
 
-    const { dataSource: moved } = await call('update_data_source', { dataSourceId: 'sheet', resource: 'sheet-abc!A1:C40' });
-    expect(moved).toMatchObject({ failures: 0, nextPollAt: 0 });
+    const { dataSource: moved } = await call('save_data_source', { dataSourceId: 'sheet', resource: 'sheet-abc!A1:C40' });
+    expect(moved).toMatchObject({ failures: 0, nextPollAt: null });
     expect(await owner.org.dataSources.get('sheet')).toMatchObject({ urlEncrypted: `sealed:${o.orgId}/sheet:sheet-abc!A1:C40` });
   });
 
@@ -231,16 +238,16 @@ describe('a provider data source', () => {
       { id: 'x3', name: 'x', format: 'provider', connectionId: o.connection, resource: 'r', feedUrl: 'https://example.com/a' },
       { id: 'x4', name: 'x', format: 'json', feedUrl: 'https://example.com/a', connectionId: o.connection, resource: 'r' },
     ];
-    for (const input of bad) expect(await result('create_data_source', input), input.id).toMatchObject({ ok: false, error: 'invalid_input' });
-    expect(await result('update_data_source', { dataSourceId: o.dataSource, resource: 'r' })).toMatchObject({ ok: false, error: 'invalid_input' });
-    expect(await result('update_data_source', { dataSourceId: 'sheet', feedUrl: 'https://example.com/a' })).toMatchObject({
+    for (const input of bad) expect(await result('save_data_source', input), input.id).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await result('save_data_source', { dataSourceId: o.dataSource, resource: 'r' })).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await result('save_data_source', { dataSourceId: 'sheet', feedUrl: 'https://example.com/a' })).toMatchObject({
       ok: false,
       error: 'invalid_input',
     });
   });
 
   it("cannot read through another org's connection", async () => {
-    expect(await result('create_data_source', { name: 'x', format: 'provider', connectionId: other.connection, resource: 'r' })).toMatchObject({
+    expect(await result('save_data_source', { name: 'x', format: 'provider', connectionId: other.connection, resource: 'r' })).toMatchObject({
       ok: false,
       error: 'not_found',
       message: expect.stringContaining(other.connection),

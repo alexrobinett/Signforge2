@@ -11,7 +11,7 @@
  * before anything else in it runs. Inline modules, external scripts, inline event handlers and
  * `javascript:` URLs do not run at all.
  */
-import { bundleScripts, TEMPLATE_SCRIPT_START } from '@signforge/contract';
+import { bundleScripts, TEMPLATE_SCRIPT_START } from '@signforge/contract/scripts';
 import { Sha256 } from './sha256';
 
 /** A spot that has not reported ready by this point is skipped. */
@@ -70,6 +70,11 @@ export function containedFrames(bundle: string): { wrapper: string; template: st
     '<style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;border:0;width:100%;height:100%}</style>' +
     `<script>${RELAY}</script>`;
   return { wrapper, template };
+}
+
+/** Throw if the work was cancelled while it waited: the Frame host's and the slot's check after each await. */
+export function alive(signal: AbortSignal): void {
+  if (signal.aborted) throw new Error('cancelled');
 }
 
 /** The template frame's `sandbox`: scripts only, so an opaque origin, no popups, forms or navigating other frames. */

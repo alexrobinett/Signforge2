@@ -4,15 +4,15 @@
  * an edit reaches screens with the next publish. Each kit view says which screens that will be
  * (`reach`), and which screens cannot get a kit because their groups disagree (`conflicts`).
  */
-import { brandWarnings, chooseBrandKit, FONTS, fontById, HEX_COLOR, onColor } from '@signforge/compiler';
+import { orgGroups } from './memberships';
+import { brandWarnings, chooseBrandKit, FONTS, fontById, onColor } from '@signforge/compiler';
 import { unverified } from '@signforge/compiler/draft';
 import type { BrandColors } from '@signforge/contract';
 import type { BrandAssignment, BrandKitRow, OrgScope } from '@signforge/db';
-import { z } from 'zod';
-import { id, idempotencyKey, ifVersion, name } from './fields';
-import { page, pageInput } from './paging';
-import { defineTool, notFound, ToolError } from './tool';
-import { brandShape, outputs, type BrandKitView } from './outputs';
+import { page } from './paging';
+import { defineTool, invalidFields, notFound, ToolError } from './tool';
+import { outputs, type BrandKitView } from './outputs';
+import { inputs } from './inputs';
 
 // ------------------------------------------------------------------ colours
 
@@ -33,41 +33,6 @@ export function kitColors(row: Pick<BrandKitRow, 'colorsJson'>): { colors: Brand
   return { colors, derived };
 }
 
-const hex = z
-  .string()
-  .regex(HEX_COLOR, 'a hex colour, #rgb or #rrggbb')
-  .transform((v) => v.toLowerCase())
-  .describe('A hex colour, #rrggbb');
-const colorsInput = z
-  .object({
-    primary: hex.describe('Filled buttons and badges'),
-    accent: hex.describe('Highlights, tags, the crawl label'),
-    background: hex.describe('The page'),
-    surface: hex.describe('Cards and rows on the page'),
-    text: hex.describe('Body text'),
-    muted: hex.describe('Secondary text'),
-    onPrimary: hex.optional().describe('Text on primary. Leave out to derive it for 4.5:1 contrast'),
-    onAccent: hex.optional().describe('Text on accent. Leave out to derive it for 4.5:1 contrast'),
-  })
-  .describe('The kit colours');
-const colorsPatch = z
-  .object({
-    primary: hex.optional(),
-    accent: hex.optional(),
-    background: hex.optional(),
-    surface: hex.optional(),
-    text: hex.optional(),
-    muted: hex.optional(),
-    onPrimary: hex.nullable().optional().describe('Null derives it again'),
-    onAccent: hex.nullable().optional().describe('Null derives it again'),
-  })
-  .describe('The colours to change; the rest stay');
-
-const fontId = (role: string) =>
-  z
-    .string()
-    .refine((v) => fontById(v) !== undefined, 'not a font in the catalogue; see list_fonts')
-    .describe(`The ${role} font's catalogue id, such as base/inter. See list_fonts`);
 // ------------------------------------------------------------------ views
 
 /** A choice staged in this call but not committed yet, so a view can show the result. */
@@ -79,16 +44,18 @@ interface Pending {
 
 /** Everything the kit views need beyond the kit itself: who chose what, and each screen's resulting kit. */
 async function brandContext(org: OrgScope, pending: Pending = {}) {
-  const [assignments, screens, members] = await Promise.all([org.brandKits.assignments.list(), org.screens.list(), org.screenGroups.allMembers()]);
-  const groupsOf = Map.groupBy(members, (m) => m.screenId);
+  const assignments = await org.brandKits.assignments.list();
   const of = (target: BrandAssignment['target']) => assignments.filter((a) => a.target === target);
+  // Groups matter only to a kit a group chose (or is choosing): then their members, a smart group's resolved (#186).
+  const { screens, groupsOf } =
+    of('group').length || pending.group ? await orgGroups(org) : { screens: await org.screens.list(), groupsOf: new Map<string, string[]>() };
   const byGroup = new Map(of('group').map((a) => [a.groupId!, a.brandKitId]));
   const byScreen = new Map(of('screen').map((a) => [a.screenId!, a.brandKitId]));
   if (pending.group) byGroup.set(...pending.group);
   if (pending.screen) byScreen.set(...pending.screen);
   const defaultKit = pending.defaultKit ?? of('org')[0]?.brandKitId;
   const choices = screens.map((s) => {
-    const groups = Object.fromEntries((groupsOf.get(s.id) ?? []).flatMap((m) => (byGroup.has(m.groupId) ? [[m.groupId, byGroup.get(m.groupId)!]] : [])));
+    const groups = Object.fromEntries((groupsOf.get(s.id) ?? []).flatMap((g) => (byGroup.has(g) ? [[g, byGroup.get(g)!]] : [])));
     return { screenId: s.id, groups, ...chooseBrandKit({ screen: byScreen.get(s.id), groups, default: defaultKit }) };
   });
   return { byGroup, byScreen, defaultKit, choices };
@@ -146,11 +113,6 @@ async function checkLogo(org: OrgScope, assetId: string | null | undefined, fiel
   if (problem) throw new ToolError('invalid_input', problem, [{ path: field, message: problem }]);
 }
 
-const logoFields = {
-  logoOnDarkAssetId: id('asset').describe('The logo for dark backgrounds: an SVG or PNG image asset'),
-  logoOnLightAssetId: id('asset').describe('The logo for light backgrounds, if it differs'),
-};
-
 // ------------------------------------------------------------------ tools
 
 const listFonts = defineTool({
@@ -160,7 +122,7 @@ const listFonts = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_fonts,
   output: outputs.list_fonts,
   example: {},
   handler: async ({ input }) => {
@@ -186,12 +148,12 @@ const listBrandKits = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_brand_kits,
   output: outputs.list_brand_kits,
   example: {},
-  handler: async ({ org, input }) => {
+  handler: async ({ org, input, memo }) => {
     const { rows, next } = page(await org.brandKits.list(), (k) => [k.id], input);
-    const ctx = await brandContext(org);
+    const ctx = await memo('brandContext', () => brandContext(org));
     return { brandKits: rows.map((r) => kitView(r, ctx)), next };
   },
 });
@@ -203,98 +165,88 @@ const getBrandKit = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ brandKitId: id('brand kit') }),
+  input: inputs.get_brand_kit,
   output: outputs.get_brand_kit,
   example: { brandKitId: 'bk_example' },
-  handler: async ({ org, input }) => ({ brandKit: kitView(await requireKit(org, input.brandKitId), await brandContext(org)) }),
+  // Once per read: a read of several kits by id shares one context (review of #608).
+  handler: async ({ org, input, memo }) => ({
+    brandKit: kitView(await requireKit(org, input.brandKitId), await memo('brandContext', () => brandContext(org))),
+  }),
 });
 
-const createBrandKit = defineTool({
-  name: 'create_brand_kit',
+/** The colours a new kit must give; onPrimary and onAccent are derived when left out. */
+const BASE_COLORS = ['primary', 'accent', 'background', 'surface', 'text', 'muted'] as const;
+
+const saveBrandKit = defineTool({
+  name: 'save_brand_kit',
   description:
-    "Create a brand kit: colours as hex, a shape, optional display and body fonts from list_fonts, and an optional logo (an SVG or PNG image asset). Leave out onPrimary and onAccent to have them derived for 4.5:1 contrast; pairs below 4.5:1 come back as warnings. The organization's first kit becomes its default; pass makeDefault for a later one. Screens get it at the next publish. Pass an idempotencyKey so a retry cannot create it twice. Returns { brandKit }.",
+    "Create a brand kit, or change one. Without brandKitId it creates one: a name, colours as hex (primary, accent, background, surface, text and muted), a shape (default soft), optional display and body fonts from read, and an optional logo (an SVG or PNG image asset); pass an idempotencyKey so a retry cannot create it twice. With brandKitId it changes what you give (null derives onPrimary or onAccent again, takes the template's font, or removes a logo); pass the version you read as ifVersion so a change made since is not overwritten. makeDefault makes it the organization's default. describe(brand_kit) has the rules: derived colours, the default, when screens get it. Returns { brandKit }.",
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
   idempotent: true,
-  input: z
-    .object({
-      name: name('brand kit'),
-      colors: colorsInput,
-      shape: brandShape.default('soft'),
-      displayFontId: fontId('display').optional(),
-      bodyFontId: fontId('body').optional(),
-      logoOnDarkAssetId: logoFields.logoOnDarkAssetId.optional(),
-      logoOnLightAssetId: logoFields.logoOnLightAssetId.optional(),
-      makeDefault: z.boolean().optional().describe("Make it the organization's default kit"),
-      idempotencyKey,
-    })
-    .refine((v) => !v.logoOnLightAssetId || v.logoOnDarkAssetId, { message: 'a light logo needs a dark one', path: ['logoOnLightAssetId'] }),
-  output: outputs.create_brand_kit,
+  // Strict, as every save is: a field it does not take is refused by name, not dropped (review of #499).
+  input: inputs.save_brand_kit,
+  output: outputs.save_brand_kit,
   example: {
     name: 'House style',
     colors: { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' },
     displayFontId: 'base/oswald',
     bodyFontId: 'base/inter',
   },
-  target: (_input, output) => ({ kind: 'brand_kit', id: output.brandKit.id }),
-  handler: async ({ org, input, write }) => {
-    await checkLogo(org, input.logoOnDarkAssetId, 'logoOnDarkAssetId');
-    await checkLogo(org, input.logoOnLightAssetId, 'logoOnLightAssetId');
-    const kit = write(
-      await org.brandKits.stage.insert({
-        name: input.name,
-        colorsJson: JSON.stringify(input.colors),
-        shape: input.shape,
-        displayFontId: input.displayFontId ?? null,
-        bodyFontId: input.bodyFontId ?? null,
-        logoOnDarkAssetId: input.logoOnDarkAssetId ?? null,
-        logoOnLightAssetId: input.logoOnLightAssetId ?? null,
-      }),
-    );
-    const isFirst = (await org.brandKits.assignments.list()).every((a) => a.target !== 'org');
-    if (!(input.makeDefault || isFirst)) return { brandKit: kitView(kit, await brandContext(org)) };
-    // Staged after the kit's insert, so the kit row exists when the batch reaches this one.
-    write(await org.brandKits.assignments.stage.set({ target: 'org' }, kit.id, { newKit: true }));
-    return { brandKit: kitView(kit, await brandContext(org, { defaultKit: kit.id })) };
+  // The audit log's Made the default follows this, the outcome, not the input's makeDefault (#507).
+  auditDetail: (output) => (output.madeDefault ? { madeDefault: true } : undefined),
+  target: (input, output) => {
+    const id = input.brandKitId ?? output?.brandKit.id;
+    return id === undefined ? undefined : { kind: 'brand_kit', id };
   },
-});
-
-const updateBrandKit = defineTool({
-  name: 'update_brand_kit',
-  description:
-    'Change a brand kit. Give only what changes: colours (null for onPrimary or onAccent derives it again), shape, name, fonts (null for the template font), logos (null removes). Screens keep the kit as it was until the next publish; the result says which screens it will reach. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { brandKit }.',
-  scope: 'content:draft',
-  minRole: 'editor',
-  mutates: true,
-  input: z.object({
-    brandKitId: id('brand kit'),
-    name: name('brand kit').optional(),
-    colors: colorsPatch.optional(),
-    shape: brandShape.optional(),
-    displayFontId: fontId('display').nullable().optional(),
-    bodyFontId: fontId('body').nullable().optional(),
-    logoOnDarkAssetId: logoFields.logoOnDarkAssetId.nullable().optional(),
-    logoOnLightAssetId: logoFields.logoOnLightAssetId.nullable().optional(),
-    ifVersion,
-  }),
-  output: outputs.update_brand_kit,
-  example: { brandKitId: 'bk_example', colors: { accent: '#e11d48' }, shape: 'round' },
-  target: (input) => ({ kind: 'brand_kit', id: input.brandKitId }),
   handler: async ({ org, input, write }) => {
-    const kit = await requireKit(org, input.brandKitId);
     await checkLogo(org, input.logoOnDarkAssetId, 'logoOnDarkAssetId');
     await checkLogo(org, input.logoOnLightAssetId, 'logoOnLightAssetId');
+    const lightOnly = (dark: string | null | undefined, light: string | null | undefined) =>
+      light && !dark ? invalidFields('a light logo needs a dark one', 'logoOnDarkAssetId') : undefined;
+    if (input.brandKitId === undefined) {
+      if (input.ifVersion !== undefined) throw invalidFields('a new brand kit has no version yet: ifVersion is for a change', 'ifVersion');
+      const { name, colors } = input;
+      const missing = BASE_COLORS.filter((k) => colors?.[k] === undefined);
+      if (name === undefined || missing.length)
+        throw invalidFields(
+          `a new brand kit needs a name and the colours ${BASE_COLORS.join(', ')}${missing.length ? ` (missing ${missing.join(', ')})` : ''}; give brandKitId to change one`,
+          ...(name === undefined ? ['name'] : []),
+          ...missing.map((k) => `colors.${k}`),
+        );
+      const refused = lightOnly(input.logoOnDarkAssetId, input.logoOnLightAssetId);
+      if (refused) throw refused;
+      const kit = write(
+        await org.brandKits.stage.insert({
+          name,
+          // Null derives a text colour, as leaving it out does.
+          colorsJson: JSON.stringify(Object.fromEntries(Object.entries(colors ?? {}).filter(([, v]) => v !== null && v !== undefined))),
+          shape: input.shape ?? 'soft',
+          displayFontId: input.displayFontId ?? null,
+          bodyFontId: input.bodyFontId ?? null,
+          logoOnDarkAssetId: input.logoOnDarkAssetId ?? null,
+          logoOnLightAssetId: input.logoOnLightAssetId ?? null,
+        }),
+      );
+      const isFirst = (await org.brandKits.assignments.list()).every((a) => a.target !== 'org');
+      if (!(input.makeDefault || isFirst)) return { brandKit: kitView(kit, await brandContext(org)), madeDefault: false };
+      // Staged after the kit's insert, so the kit row exists when the batch reaches this one.
+      write(await org.brandKits.assignments.stage.set({ target: 'org' }, kit.id, { newKit: true }));
+      return { brandKit: kitView(kit, await brandContext(org, { defaultKit: kit.id })), madeDefault: true };
+    }
+    const kit = await requireKit(org, input.brandKitId);
     let colorsJson: string | undefined;
     if (input.colors) {
       const next: Record<string, string | undefined> = { ...(JSON.parse(kit.colorsJson) as StoredColors) };
       for (const [k, v] of Object.entries(input.colors)) if (v !== undefined) next[k] = v ?? undefined;
       colorsJson = JSON.stringify(next);
     }
-    const dark = input.logoOnDarkAssetId === undefined ? kit.logoOnDarkAssetId : input.logoOnDarkAssetId;
-    const light = input.logoOnLightAssetId === undefined ? kit.logoOnLightAssetId : input.logoOnLightAssetId;
-    if (light && !dark)
-      throw new ToolError('invalid_input', 'a light logo needs a dark one', [{ path: 'logoOnDarkAssetId', message: 'a light logo needs a dark one' }]);
+    const refused = lightOnly(
+      input.logoOnDarkAssetId === undefined ? kit.logoOnDarkAssetId : input.logoOnDarkAssetId,
+      input.logoOnLightAssetId === undefined ? kit.logoOnLightAssetId : input.logoOnLightAssetId,
+    );
+    if (refused) throw refused;
     const row = write(
       await org.brandKits.stage.update(
         kit,
@@ -310,25 +262,11 @@ const updateBrandKit = defineTool({
         input.ifVersion,
       ),
     );
-    return { brandKit: kitView(row, await brandContext(org)) };
-  },
-});
-
-const setDefaultBrandKit = defineTool({
-  name: 'set_default_brand_kit',
-  description:
-    "Make a brand kit the organization's default: the kit of every screen with no choice of its own and none from its groups. Takes effect at the next publish. Returns { brandKit }.",
-  scope: 'content:draft',
-  minRole: 'editor',
-  mutates: true,
-  input: z.object({ brandKitId: id('brand kit') }),
-  output: outputs.set_default_brand_kit,
-  example: { brandKitId: 'bk_example' },
-  target: (input) => ({ kind: 'brand_kit', id: input.brandKitId }),
-  handler: async ({ org, input, write }) => {
-    const kit = await requireKit(org, input.brandKitId);
+    // Made the default only by a save that changes it: not one of the kit that is the default already.
+    const wasDefault = (await org.brandKits.assignments.list()).some((a) => a.target === 'org' && a.brandKitId === kit.id);
+    if (!input.makeDefault || wasDefault) return { brandKit: kitView(row, await brandContext(org)), madeDefault: false };
     write(await org.brandKits.assignments.stage.set({ target: 'org' }, kit.id));
-    return { brandKit: kitView(kit, await brandContext(org, { defaultKit: kit.id })) };
+    return { brandKit: kitView(row, await brandContext(org, { defaultKit: kit.id })), madeDefault: true };
   },
 });
 
@@ -339,13 +277,7 @@ const assignBrandKit = defineTool({
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
-  input: z
-    .object({
-      brandKitId: id('brand kit').nullable().describe('The kit to use, or null to remove the choice'),
-      screenId: id('screen').optional(),
-      groupId: id('group').optional(),
-    })
-    .refine((v) => (v.screenId === undefined) !== (v.groupId === undefined), 'give exactly one of screenId and groupId'),
+  input: inputs.assign_brand_kit,
   output: outputs.assign_brand_kit,
   example: { brandKitId: 'bk_example', screenId: 'scr_example' },
   target: (input) => (input.screenId ? { kind: 'screen', id: input.screenId } : { kind: 'group', id: input.groupId! }),
@@ -361,4 +293,4 @@ const assignBrandKit = defineTool({
   },
 });
 
-export const brandTools = [listFonts, listBrandKits, getBrandKit, createBrandKit, updateBrandKit, setDefaultBrandKit, assignBrandKit];
+export const brandTools = [listFonts, listBrandKits, getBrandKit, saveBrandKit, assignBrandKit];

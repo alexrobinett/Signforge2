@@ -14,6 +14,7 @@
  */
 import { orgOnScreen } from '~/lib/live';
 import { isRetired } from '~/lib/screen-status';
+import { ruleOf, ruleProblem, type RuleTerm } from '~/lib/rules';
 import type { GroupView } from '~/lib/screen-types';
 import { callTool, isConflict, Refusal, toolMessage } from '~/lib/tools';
 import { scheduleKey } from '~/queries/schedule';
@@ -28,7 +29,11 @@ type DialogOf =
   /** `blockedBy`: the schedule entries `delete_group` was refused for, once it was. */
   | { kind: 'delete'; blockedBy: string[] }
   /** `edits`: the boxes this person changed, by screen; any other shows the group as the page holds it. */
-  | { kind: 'members'; edits: Readonly<Record<string, boolean>>; query: string };
+  | { kind: 'members'; edits: Readonly<Record<string, boolean>>; query: string }
+  /** A group made here (#186): a name, and its screens ticked (`edits`) or the rule that matches them (`terms`). */
+  | { kind: 'new'; name: string; how: 'list' | 'rule'; edits: Readonly<Record<string, boolean>>; query: string; terms: RuleTerm[] }
+  /** A smart group's rule, changed at the version the page read (#186). */
+  | { kind: 'rule'; terms: RuleTerm[] };
 
 type GroupDialog = DialogOf & {
   id: string;
@@ -63,6 +68,17 @@ export interface GroupsSlice {
    * none for no change. A screen revoked meanwhile (its status read again first) is left as it is.
    */
   saveGroupMembers: (orgId: string, group: GroupView) => Promise<void>;
+  /** "New group…": a group of listed screens or a smart group, made in one `save_group` (#186). */
+  openNewGroup: (orgId: string) => void;
+  typeNewGroupName: (name: string) => void;
+  chooseNewGroupKind: (how: 'list' | 'rule') => void;
+  createGroup: (orgId: string) => Promise<void>;
+  /** "Rule…": a smart group's conditions, saved at the version the page read. */
+  openGroupRule: (orgId: string, group: GroupView) => void;
+  addRuleTerm: () => void;
+  changeRuleTerm: (index: number, term: RuleTerm) => void;
+  removeRuleTerm: (index: number) => void;
+  saveGroupRule: (orgId: string, group: GroupView) => Promise<void>;
   /** Cancel, Escape or a click outside: ignored while the dialog's delete or save runs. */
   cancelGroupDialog: () => void;
   closeGroupDialog: () => void;
@@ -71,8 +87,14 @@ export interface GroupsSlice {
 const DIALOG = 'dialog';
 
 /** Whether the members dialog shows `screenId` ticked: as this person set it, else as `group` has it. */
-export const memberChecked = (dialog: GroupDialog | null, group: GroupView, screenId: string) =>
-  (dialog?.kind === 'members' ? dialog.edits[screenId] : undefined) ?? group.screenIds.includes(screenId);
+export const memberChecked = (dialog: GroupDialog | null, group: Pick<GroupView, 'screenIds'>, screenId: string) =>
+  (dialog?.kind === 'members' || dialog?.kind === 'new' ? dialog.edits[screenId] : undefined) ?? group.screenIds.includes(screenId);
+
+/** The conditions the open dialog builds: the new group's, or the rule's. */
+export const termsOf = (dialog: GroupDialog | null): RuleTerm[] => (dialog?.kind === 'rule' || dialog?.kind === 'new' ? dialog.terms : []);
+
+/** A condition just added: a key and value still to choose. */
+const BLANK: RuleTerm = { key: '', op: 'eq', values: [] };
 
 /** The schedule entries a refused `delete_group` names (packages/tools/src/groups.ts). */
 function blockingEntries(err: unknown): string[] {
@@ -81,6 +103,10 @@ function blockingEntries(err: unknown): string[] {
   const ids = typeof d === 'object' && d !== null && 'scheduleEntryIds' in d ? d.scheduleEntryIds : null;
   return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
 }
+
+/** The dialog with its conditions changed, and its last refusal cleared, which may have been about them. */
+const withTerms = (d: GroupDialog, change: (terms: RuleTerm[]) => RuleTerm[]): GroupDialog =>
+  d.kind === 'rule' || d.kind === 'new' ? { ...d, terms: change(d.terms), error: null } : d;
 
 export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router, queryClient }) => {
   const patch = (fn: (s: GroupsState) => GroupsState) => set((s) => ({ groups: fn(s.groups) }));
@@ -94,7 +120,8 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
     clock: realClock,
     state: { read: () => get().groups.renames, write: (change) => patch((s) => ({ ...s, renames: change(s.renames) })) },
     async save({ draft: { orgId, record, edit, version } }) {
-      const out = await callTool('rename_group', { groupId: record, name: edit.name.trim(), ifVersion: version });
+      // A rename edits a group the page holds: never a create, so it has its id and version.
+      const out = await callTool('save_group', { groupId: record!, name: edit.name.trim(), ifVersion: version! });
       putGroup(queryClient, orgId, out.group);
       return { version: out.group.version };
     },
@@ -166,10 +193,12 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
     },
 
     openGroupMembers: (orgId, group) => open(orgId, group.id, { kind: 'members', edits: {}, query: '' }),
-    searchGroupMembers: (query) => patch((s) => (s.dialog?.kind === 'members' ? { ...s, dialog: { ...s.dialog, query } } : s)),
+    searchGroupMembers: (query) => patch((s) => (s.dialog?.kind === 'members' || s.dialog?.kind === 'new' ? { ...s, dialog: { ...s.dialog, query } } : s)),
     chooseGroupMember: (screenId, member) =>
       patch((s) =>
-        s.dialog?.kind === 'members' && !s.dialog.pending ? { ...s, dialog: { ...s.dialog, edits: { ...s.dialog.edits, [screenId]: member } } } : s,
+        (s.dialog?.kind === 'members' || s.dialog?.kind === 'new') && !s.dialog.pending
+          ? { ...s, dialog: { ...s.dialog, edits: { ...s.dialog.edits, [screenId]: member } } }
+          : s,
       ),
     async saveGroupMembers(orgId, group) {
       const d = dialog();
@@ -186,9 +215,44 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
         const remove = of(false);
         // Closed meanwhile (Cancel): nothing is sent. The removal goes first, closest to that read.
         if (dialog()?.id !== d.id) return;
-        if (remove.length) putGroup(queryClient, orgId, (await callTool('remove_group_members', { groupId: group.id, screenIds: remove })).group);
+        if (remove.length) putGroup(queryClient, orgId, (await callTool('save_group', { groupId: group.id, screenIds: remove, membership: 'remove' })).group);
         if (add.length && dialog()?.id === d.id)
-          putGroup(queryClient, orgId, (await callTool('add_group_members', { groupId: group.id, screenIds: add })).group);
+          putGroup(queryClient, orgId, (await callTool('save_group', { groupId: group.id, screenIds: add, membership: 'add' })).group);
+      });
+    },
+
+    openNewGroup: (orgId) => open(orgId, '', { kind: 'new', name: '', how: 'list', edits: {}, query: '', terms: [BLANK] }),
+    typeNewGroupName: (name) => patch((s) => (s.dialog?.kind === 'new' && !s.dialog.pending ? { ...s, dialog: { ...s.dialog, name, error: null } } : s)),
+    chooseNewGroupKind: (how) => patch((s) => (s.dialog?.kind === 'new' && !s.dialog.pending ? { ...s, dialog: { ...s.dialog, how, error: null } } : s)),
+    async createGroup(orgId) {
+      const d = dialog();
+      if (d?.kind !== 'new' || d.orgId !== orgId) return;
+      const name = d.name.trim();
+      if (!name) return onDialog(d.id, (x) => ({ ...x, error: 'Name the group.' }));
+      const problem = d.how === 'rule' ? ruleProblem(d.terms) : undefined;
+      if (problem) return onDialog(d.id, (x) => ({ ...x, error: problem }));
+      const screenIds = Object.entries(d.edits).flatMap(([id, member]) => (member ? [id] : []));
+      await run(d, async () => {
+        // The dialog's id is the call's key: a retry after a lost answer makes no second group.
+        await callTool('save_group', { name, idempotencyKey: d.id, ...(d.how === 'rule' ? { selector: ruleOf(d.terms) } : { screenIds }) });
+        await queryClient.invalidateQueries({ queryKey: screensQuery(orgId).queryKey, exact: true });
+      });
+    },
+
+    openGroupRule: (orgId, group) =>
+      open(orgId, group.id, { kind: 'rule', terms: group.selector ? group.selector.all.map((t) => ({ ...t, values: [...t.values] })) : [BLANK] }),
+    addRuleTerm: () => patch((s) => (s.dialog && !s.dialog.pending ? { ...s, dialog: withTerms(s.dialog, (t) => [...t, BLANK]) } : s)),
+    changeRuleTerm: (index, term) =>
+      patch((s) => (s.dialog && !s.dialog.pending ? { ...s, dialog: withTerms(s.dialog, (t) => t.map((x, i) => (i === index ? term : x))) } : s)),
+    removeRuleTerm: (index) =>
+      patch((s) => (s.dialog && !s.dialog.pending ? { ...s, dialog: withTerms(s.dialog, (t) => t.filter((_, i) => i !== index)) } : s)),
+    async saveGroupRule(orgId, group) {
+      const d = dialog();
+      if (d?.kind !== 'rule' || d.orgId !== orgId) return;
+      const problem = ruleProblem(d.terms);
+      if (problem) return onDialog(d.id, (x) => ({ ...x, error: problem }));
+      await run(d, async () => {
+        putGroup(queryClient, orgId, (await callTool('save_group', { groupId: group.id, selector: ruleOf(d.terms), ifVersion: group.version })).group);
       });
     },
 

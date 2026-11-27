@@ -130,6 +130,24 @@ defineTemplate({
       if (kick) line.append(Object.assign(document.createElement('span'), { className: 'kick', textContent: kick }));
       if (title) line.append(Object.assign(document.createElement('span'), { className: 'title', textContent: title }));
     };
+    // The calendar is not updating (#225): the bookings are the spot's fallback, so whether the room is free is not
+    // known. Say so, rather than "Free" from a list that may be out of date.
+    if (ctx.fallback.has('events')) {
+      const stage = el('.stage')!;
+      stage.dataset.state = 'unknown';
+      // The muted ink, read on the page as free's accent is (`--lk-accent-ink-large`): a kit's may be too pale.
+      const page = getComputedStyle(ctx.root);
+      stage.style.setProperty('--tone', readableOn(page.getPropertyValue('--lk-bg').trim(), page.getPropertyValue('--lk-muted').trim(), { large: true }));
+      target = undefined;
+      el('.word')!.textContent = 'Schedule unavailable';
+      say('Check the booking before you use the room', '');
+      for (const part of ['.for', '.until', '.org', '.next', '.allday', '.items', '.pin', '.track']) drop(part);
+      put('.free-day', "The room's calendar is not updating");
+      render(ctx);
+      inkCards();
+      fitWord(el('.word')!);
+      return;
+    }
     if (current) {
       const until = at(current.end);
       say(look === 'poster' ? `Now, until ${until}` : look === 'night' ? '' : `Until ${until} · `, current.title);
@@ -172,6 +190,7 @@ defineTemplate({
     render(ctx);
     inkCards();
     fitWord(el('.word')!);
+    fitRows();
   },
   play(ctx) {
     // Wake on each second boundary; text only changes when the minute does.
@@ -322,6 +341,37 @@ function inkCards(): void {
     card.style.setProperty('--card-text', text!);
     card.style.setProperty('--card-muted', muted!);
     card.style.setProperty('--card-accent', accent!);
+  }
+}
+
+/**
+ * Where the rows need more height than the screen has (a two-line room's name with "Booked by" on), a box would cut
+ * through a line: the room's name gives up its second line, then the meeting line its second, then the notes under it
+ * go, until every text has its lines. By layout, not painted boxes, so the intros' transforms do not count.
+ */
+function fitRows(): void {
+  const squeezed = () =>
+    [...document.querySelectorAll<HTMLElement>('.room, .line, .line .title, .org, .next, .allday')].some((el) => {
+      const s = getComputedStyle(el);
+      // Poster's line is a column holding the clamped title, which its own clamp property does not reach.
+      const clamp = s.display === 'flex' ? 0 : Number(s.webkitLineClamp);
+      const pad = Number.parseFloat(s.paddingTop) + Number.parseFloat(s.paddingBottom);
+      const needs = clamp ? Math.min(el.scrollHeight, clamp * Number.parseFloat(s.lineHeight) + pad) : el.scrollHeight;
+      return el.clientHeight + 1 < needs;
+    });
+  const clamp = (sel: string) => {
+    for (const e of document.querySelectorAll<HTMLElement>(sel)) e.style.setProperty('-webkit-line-clamp', '1');
+  };
+  const steps = [
+    () => clamp('.room'),
+    () => clamp('.line, .line .title'),
+    () => document.querySelector('.next')?.remove(),
+    () => document.querySelector('.allday')?.remove(),
+    () => document.querySelector('.org')?.remove(),
+  ];
+  for (const step of steps) {
+    if (!squeezed()) return;
+    step();
   }
 }
 

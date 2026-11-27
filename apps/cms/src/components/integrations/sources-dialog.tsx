@@ -19,6 +19,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { type Clock, failingWords, hasAddress, kindOf, type ListedSource, type SourceKind, sourceState, weatherFixWords } from '~/lib/integrations';
+import { useCanPublish } from '~/lib/live';
+import { SOURCES_DIALOG } from '~/state/integrations';
 import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
 
@@ -46,12 +48,13 @@ const isAddable = (k: SourceKind): k is keyof typeof ADD => k in ADD;
 export function SourcesDialog({ orgId, sources, clock, canManage }: { orgId: string; sources: ListedSource[]; clock: Clock; canManage: boolean }) {
   const s = useAppStore((st) => st.integrations);
   const openSources = useAppStore((st) => st.openSources);
+  const focusBack = useAppStore((st) => st.focusBack);
   const format = s.dialog;
   const mine = format ? sources.filter((x) => kindOf(x.format) === format) : [];
 
   return (
     <Dialog open={format !== null} onOpenChange={(open) => !open && openSources(null)}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
+      <DialogContent id={SOURCES_DIALOG} className="max-h-[90dvh] overflow-y-auto sm:max-w-xl" onCloseAutoFocus={(e) => focusBack('sources', e)}>
         {format && (
           <>
             <DialogHeader>
@@ -93,6 +96,11 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
   const state = sourceState(source, clock);
   const inputId = `source-url-${source.id}`;
   const photosId = `source-photos-${source.id}`;
+  // Screens follow a source's address and settings with no publish: only someone who may publish changes them (owner
+  // decision on #424). Shown, unavailable, with why, to one who may manage but not publish.
+  const canPublish = useCanPublish();
+  const locked = canManage && !canPublish && (source.format === 'rss' || (source.format !== 'provider' && hasAddress(source)));
+  const whyId = `source-why-${source.id}`;
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     void changeSourceUrl(orgId, source);
@@ -102,7 +110,7 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
     <li className="space-y-3 p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <strong className="font-semibold">{source.name}</strong>
-        <span className={cn('font-mono text-[13px]', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
+        <span className={cn('text-meta tabular-nums', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
           {state.tone === 'ok' ? `checked ${state.word}` : state.word}
         </span>
       </div>
@@ -118,7 +126,8 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
               type="checkbox"
               className="size-4 accent-primary"
               checked={photos}
-              disabled={!canManage || pending}
+              disabled={!canManage || !canPublish || pending}
+              aria-describedby={locked ? whyId : undefined}
               onChange={(e) => void setSourcePhotos(orgId, source, e.target.checked)}
             />
             <Label htmlFor={photosId}>Show story photos</Label>
@@ -130,9 +139,16 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
           </p>
         </div>
       )}
+      {locked && (
+        <p id={whyId} className="text-sm text-muted-foreground">
+          Only owners publish in this organization, so only they change this source’s address{source.format === 'rss' ? ' or photos' : ''}: screens follow those
+          changes without a publish.
+        </p>
+      )}
       {canManage &&
         source.format !== 'provider' &&
-        (editing && hasAddress(source) ? (
+        // The address form only for one who may publish: another never gets a form whose Save is refused.
+        (editing && hasAddress(source) && canPublish ? (
           <form onSubmit={submit} className="space-y-2">
             <Label htmlFor={inputId}>New address for {source.name}</Label>
             <Input
@@ -157,7 +173,15 @@ function SourceItem({ orgId, source, clock, canManage }: { orgId: string; source
         ) : (
           <div className="flex flex-wrap gap-2">
             {hasAddress(source) && (
-              <Button type="button" variant="outline" size="sm" onClick={() => editSourceUrl(source.id)} aria-label={`Change the URL of ${source.name}`}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!canPublish}
+                aria-describedby={locked ? whyId : undefined}
+                onClick={() => editSourceUrl(source.id)}
+                aria-label={`Change URL of ${source.name}`}
+              >
                 Change URL
               </Button>
             )}
@@ -249,9 +273,10 @@ function ConfirmDelete({ orgId }: { orgId: string }) {
   const error = useAppStore((st) => st.integrations.error);
   const ask = useAppStore((st) => st.askToDeleteSource);
   const deleteSource = useAppStore((st) => st.deleteSource);
+  const focusBack = useAppStore((st) => st.focusBack);
   return (
     <AlertDialog open={deleting !== null} onOpenChange={(open) => !open && ask(null)}>
-      <AlertDialogContent>
+      <AlertDialogContent onCloseAutoFocus={(e) => focusBack('delete', e)}>
         <AlertDialogHeader>
           <AlertDialogTitle className="break-words">Delete {deleting?.name}?</AlertDialogTitle>
           <AlertDialogDescription>

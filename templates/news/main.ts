@@ -1,13 +1,56 @@
-import { defineTemplate, fitWords, formatter, now as clockNow } from '@signforge/template-sdk';
-import { readableOn } from '@signforge/template-sdk/contrast';
+import { applyLook } from '@signforge/template-looks';
+import { now as clockNow, defineTemplate, fitWords, formatter, type TemplateContext } from '@signforge/template-sdk';
+import { bindRow, rowImage } from '@signforge/template-sdk/rows';
 
-interface Item {
+/** A row of the `items` field, as the news feed (`NewsFeed`) writes it. */
+interface Story {
   title: string;
   published: string;
   source: string;
+  summary: string;
 }
 
-/** "33 minutes ago", "il y a 2 heures": the item's age in the feed's language. */
+/** A story with a headline, and its row in `items`, which `bindRow` and `rowImage` read by. */
+interface Listed {
+  story: Story;
+  row: number;
+}
+
+/** Stories in the strip, which the lead turns through: as many as the strip's columns hold at a readable size. */
+const LIST_ROWS = { landscape: 5, portrait: 4 } as const;
+
+/** The lead headline at each step, from the look's own size down; past the last, a headline is cut to its lines. */
+const HEADLINE_STEPS = [1, 0.86, 0.74, 0.64];
+/**
+ * A story without a photo starts a step larger (`--nw-bare-step`, 1.45 in landscape), so it has one step more: 0.55 of
+ * 1.45 is about 0.8, where 1.25's last step was (0.64 of it), so a long headline is cut no sooner than before (review of #629).
+ */
+const BARE_STEPS = [...HEADLINE_STEPS, 0.55];
+
+/** When the first story comes in, after the header (0 ms) and the strip (100 ms): the spec's play-start stagger. */
+const FIRST_AT_MS = 150;
+
+/** The strip's bar: it starts this long before a story's turn and moves for this long, so it lands as the headline does. */
+const BAR_LEAD_MS = 150;
+const BAR_MS = 600;
+const STANDARD = 'cubic-bezier(0.2, 0, 0, 1)';
+
+/** How long before its turn a later story's photo starts to load. */
+const LOAD_AHEAD_MS = 3000;
+
+/** The most a photo is drawn above its own size: past it, a feed's small photo looks soft (owner decision on #476). */
+const MAX_UPSCALE = 1.25;
+
+/**
+ * The later stories' photos, each loaded in play a little before its turn rather than in prepare: the SDK decodes every
+ * photo with a `src` before ready, and on the Pi four 1080p photos took a portrait prepare from about 460 to 600 ms
+ * (spike/pi-perf/RESULTS.md, News 2.0). Timers of the play, cleared in `stop`, as the spec's lifecycle asks (#477):
+ * a tool that seeks a play's time without running its timers then finds no timer of an earlier play waiting.
+ */
+let later: { story: HTMLElement; img: HTMLImageElement; row: number; at: number }[] = [];
+let timers: number[] = [];
+
+/** "33 minutes ago", "il y a 2 heures": the story's age in the feed's language. */
 function ago(iso: string, now: Date, locale: string): string {
   const t = new Date(iso).getTime();
   if (!iso || Number.isNaN(t)) return '';
@@ -18,72 +61,270 @@ function ago(iso: string, now: Date, locale: string): string {
   return hrs < 24 ? rtf.format(-hrs, 'hour') : rtf.format(-Math.round(hrs / 24), 'day');
 }
 
-/** Shorten an element's text to whole words that fit its box. Only text that overflows costs layouts. */
-function ellipsize(el: HTMLElement): void {
-  const text = el.textContent ?? '';
-  if (!text) return;
-  // Glyphs overhang a tight line-height by a few pixels; text cut by a line clamp overflows by a
-  // whole line. Half a line tells them apart.
-  const slack = parseFloat(getComputedStyle(el).fontSize) / 2;
-  el.textContent = fitWords(text, (s) => {
-    el.textContent = s;
-    return el.scrollWidth <= el.clientWidth + 1 && el.scrollHeight <= el.clientHeight + slack;
-  });
+/** A copy of a `<template>`'s element: a story layer or a strip row. */
+function clone(id: string): HTMLElement {
+  const el = document.querySelector<HTMLTemplateElement>(`#${id}`)!.content.firstElementChild!.cloneNode(true);
+  if (!(el instanceof HTMLElement)) throw new Error(`#${id} holds no element`);
+  return el;
 }
 
 defineTemplate({
-  prepare(ctx) {
-    const root = document.documentElement;
-    const accent = String(ctx.data.accent);
-    root.style.setProperty('--accent', accent);
-    // The badge is the spot's accent, which need not be the kit's (with no kit it is the default
-    // palette's amber, where the template's white text read at 2.14:1): its text is chosen against it.
-    const style = getComputedStyle(root);
-    root.style.setProperty('--on-accent', readableOn(accent, style.getPropertyValue('--on-accent')));
-    // The age line is the accent on the background: amber, for one, does not read on a light kit.
-    // It is large text at 1080p (3.2vmin, 35 px), where 3:1 reads.
-    root.style.setProperty('--accent-text', readableOn(style.getPropertyValue('--bg'), accent, { large: true }));
-    const now = clockNow();
-    const items = ((ctx.data.items as Item[]) ?? []).filter((i) => i.title);
-    const [lead, ...rest] = items;
-    document.getElementById('clock')!.textContent = formatter(ctx, { hour: 'numeric', minute: '2-digit' }).format(now);
-    const credit = String(ctx.data.source || lead?.source || '');
-    document.getElementById('credit')!.textContent = credit;
-    if (lead) {
-      document.getElementById('lead')!.textContent = lead.title;
-      // The age sits under the feed's own words, so it is in the feed's language; the screen's when the feed declares none.
-      document.getElementById('age')!.textContent = ago(lead.published, now, String(ctx.data.language || ctx.locale));
-    }
-    // Portrait has the height for more secondary headlines; drop any that do not fit.
-    const more = document.getElementById('more')!;
-    for (const item of rest.slice(0, ctx.orientation === 'portrait' ? 5 : 4)) {
-      const li = document.createElement('li');
-      li.textContent = item.title;
-      more.appendChild(li);
-    }
-    const main = document.querySelector('main')!;
-    while (more.children.length && main.scrollHeight > main.clientHeight + 1) more.lastElementChild!.remove();
-    // Text that does not fit ends on a whole word ("rain…"), not after a space as CSS cuts it ("rain …").
-    for (const el of [document.getElementById('lead')!, document.getElementById('credit')!, ...more.children]) ellipsize(el as HTMLElement);
+  async prepare(ctx) {
+    const { data } = ctx;
+    later = [];
+    // Unpainted until play: a frame that paints a photo while prepare runs has it decoded for the
+    // screen first, and the SDK's decode before ready waits behind that one (photo-promo, #168).
+    const leads = document.getElementById('leads')!;
+    leads.style.visibility = 'hidden';
 
-    // The crawl holds the headlines twice and slides by exactly one copy, so it loops seamlessly.
-    const crawl = document.getElementById('crawl')!;
-    // With no headlines (a feed that failed or has not loaded yet) there is no crawl: hide the bar
-    // rather than show an empty white strip.
-    if (!items.length) {
-      document.querySelector('footer')!.hidden = true;
-      return;
-    }
-    for (let copy = 0; copy < 2; copy++) {
-      for (const item of items) {
-        const span = document.createElement('span');
-        span.textContent = item.title;
-        crawl.appendChild(span);
+    // The contract has checked the list against the field before a template sees it: the check here only tells TypeScript.
+    const items: Story[] = Array.isArray(data.items) ? data.items : [];
+    // A row without a headline is left out, and every story keeps its own row's photo.
+    const all: Listed[] = items.flatMap((story, row) => (story.title.trim() ? [{ story, row }] : []));
+    const listed = all.slice(0, LIST_ROWS[ctx.orientation]);
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // The lead turns every `rotationSeconds`, through the listed stories, each for an equal share of the play. Held still, it shows the first.
+    const turns = reduced
+      ? Math.min(1, listed.length)
+      : Math.min(listed.length, Math.max(1, Math.round(ctx.durationMs / (Number(data.rotationSeconds) * 1000))));
+    const photos = data.showImages === true && listed.some(({ row }) => rowImage(ctx, 'items', row, 'image'));
+
+    const stories = Array.from({ length: Math.max(1, turns) }, () => clone('story'));
+    leads.append(...stories);
+    const rows = document.getElementById('rows')!;
+    if (listed.length > 1) rows.append(...listed.map(() => clone('row')));
+    // An element with nothing to show is off, as if switched off, so the layout closes up around it.
+    await applyLook({ ...ctx, data: { ...data, showImages: photos, showList: data.showList === true && listed.length > 1 } });
+
+    const credit = String(data.source || '').trim();
+    const now = clockNow();
+    document.getElementById('clock')!.textContent = formatter(ctx, { hour: 'numeric', minute: '2-digit' }).format(now);
+    const lang = String(data.language || ctx.locale);
+
+    const slot = ctx.durationMs / stories.length;
+    stories.forEach((el, i) => {
+      // Each story comes on at its turn, over the last, which has gone by then; the last stays to the end of the play.
+      el.style.zIndex = String(i);
+      el.style.setProperty('--at', `${i ? Math.round(i * slot) : FIRST_AT_MS}ms`);
+      if (i < stories.length - 1) el.style.setProperty('--until', `${Math.round((i + 1) * slot)}ms`);
+      const entry = listed[i];
+      if (!entry) {
+        el.classList.add('no-photo');
+        el.querySelector('.headline')!.textContent = 'No headlines yet';
+        for (const part of el.querySelectorAll('.area, .meta, .summary')) part.remove();
+        return;
       }
+      const { story, row } = entry;
+      const photo = el.querySelector<HTMLImageElement>('.photo');
+      if (i > 0) photo?.removeAttribute('data-sf-src');
+      bindRow(el, ctx, 'items', row);
+      const bare = () => {
+        el.classList.add('no-photo');
+        el.querySelector('.area')?.remove();
+      };
+      if (!photos || !photo || !rowImage(ctx, 'items', row, 'image')) bare();
+      else {
+        // A photo the browser cannot decode: bindRow hides it, and the story goes without one, its headline refitted to the width.
+        const watch = new MutationObserver(() => {
+          if (!photo.hidden) return;
+          watch.disconnect();
+          bare();
+          el.style.removeProperty('--fit');
+          // From the title, not the cut made beside the photo.
+          el.querySelector('.headline')!.textContent = story.title;
+          fitHeadlines([el]);
+        });
+        watch.observe(photo, { attributes: true, attributeFilter: ['hidden'] });
+        if (i > 0) later.push({ story: el, img: photo, row, at: i * slot - LOAD_AHEAD_MS });
+      }
+      const meta = el.querySelector('.meta');
+      if (meta) {
+        // The spot's credit, where one is set: a feed's own name for itself ("NYT > Top Stories") is not what the screen should say.
+        const src = credit || story.source;
+        const age = ago(story.published, now, lang);
+        if (src) meta.querySelector('.src')!.textContent = src;
+        else meta.querySelector('.src')!.remove();
+        if (age) meta.querySelector('.age')!.textContent = age;
+        else meta.querySelector('.age')!.remove();
+        if (!src && !age) meta.remove();
+      }
+      if (!story.summary) el.querySelector('.summary')?.remove();
+    });
+
+    const stripRows = [...rows.querySelectorAll<HTMLElement>(':scope > .row')];
+    stripRows.forEach((el, i) => {
+      bindRow(el, ctx, 'items', listed[i]!.row);
+      el.querySelector('.number')!.textContent = String(i + 1);
+    });
+    const progress = document.querySelector<HTMLElement>('.progress')!;
+    if (stories.length < 2) progress.remove();
+    else {
+      progress.style.setProperty('--nw-slot', `${slot}ms`);
+      progress.style.setProperty('--nw-turns', String(stories.length));
     }
-    const copyWidth = crawl.scrollWidth / 2;
-    const pxPerSec = (ctx.viewport.width * Number(ctx.data.crawlSpeed || 6)) / 60;
-    root.style.setProperty('--crawl-shift', `${-copyWidth}px`);
-    root.style.setProperty('--crawl-s', `${copyWidth / pxPerSec}s`);
+
+    // The first story's photo has its size once the SDK's decode before ready has it: no decode of its own.
+    const first = stories[0]!.querySelector<HTMLImageElement>('.photo[src]');
+    if (first) {
+      const body = document.body;
+      await loaded(first);
+      // New data while it loaded: the SDK put a fresh document in place, which the next prepare fills.
+      if (document.body !== body) throw new Error('new data replaced this prepare');
+      fit(stories[0]!, first);
+    }
+    fitHeadlines(stories);
+    if (rows.isConnected && stripRows.length) mark(ctx, stripRows, stories.length, slot);
+  },
+  play(ctx) {
+    document.getElementById('leads')!.style.visibility = '';
+    for (const { story, img, row, at } of later)
+      timers.push(
+        window.setTimeout(() => {
+          img.dataset.sfSrc = 'image';
+          bindRow(img, ctx, 'items', row);
+          void loaded(img).then(() => fit(story, img));
+        }, at),
+      );
+  },
+  stop() {
+    for (const t of timers) clearTimeout(t);
+    timers = [];
   },
 });
+
+/** Resolves once `img` has loaded, or failed to. */
+const loaded = (img: HTMLImageElement) =>
+  img.complete
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => {
+        img.addEventListener('load', () => resolve(), { once: true });
+        img.addEventListener('error', () => resolve(), { once: true });
+      });
+
+/** The photo in its own shape, as large as its area holds and at most MAX_UPSCALE times its size: never cropped. */
+function fit(story: HTMLElement, img: HTMLImageElement): void {
+  const { naturalWidth: w, naturalHeight: h } = img;
+  const area = story.querySelector('.area')?.getBoundingClientRect();
+  if (!area || !w || !h) return;
+  const scale = Math.min(MAX_UPSCALE, area.width / w, area.height / h);
+  story.style.setProperty('--nw-photo-w', `${Math.floor(w * scale)}px`);
+  story.style.setProperty('--nw-photo-h', `${Math.floor(h * scale)}px`);
+}
+
+/**
+ * Each lead headline at the largest step whose lines (the look's `--nw-lines`) hold it, cut on a word only at the
+ * smallest. Every story is written before any is read, so each step, and the cut, costs one layout however many
+ * stories there are. Fitted a story at a time, four headlines of about 120 characters took Poster's and Night's
+ * landscape prepares on the Pi to 483-514 ms, up to 34 ms over 2.0.0's (review of #492).
+ */
+function fitHeadlines(stories: HTMLElement[]): void {
+  const heads = stories.map((story) => story.querySelector<HTMLElement>('.headline')!);
+  /** The height the look's lines give a headline. */
+  const room = (h: HTMLElement) => {
+    const s = getComputedStyle(h);
+    return Number(s.getPropertyValue('--nw-lines')) * Number.parseFloat(s.lineHeight);
+  };
+  /** More lines than the look gives, or text that runs past its story's foot: a headline within its lines can still push the summary off (review of #492). */
+  const over = (h: HTMLElement) => {
+    if (h.offsetHeight > room(h) + 1) return true;
+    const text = h.closest<HTMLElement>('.text')!;
+    return text.offsetTop + text.offsetHeight > h.closest<HTMLElement>('.story')!.clientHeight + 1;
+  };
+  /**
+   * Over, or holding a word wider than its line, which `overflow-wrap: anywhere` would break mid-word: Night's large
+   * steps showed "Thanksgivin / g" (review of #502). Read with the wrap a browser does on its own, which breaks after a
+   * hyphen or dash, between CJK characters and in a URL, so only a word that cannot fit counts (review of #629). Every
+   * headline is set and read together, so a step costs one layout more, not one a headline.
+   */
+  const unfit = (hs: HTMLElement[]) => {
+    for (const h of hs) h.style.overflowWrap = 'normal';
+    const wide = hs.map((h) => h.scrollWidth > h.clientWidth + 1);
+    for (const h of hs) h.style.removeProperty('overflow-wrap');
+    return hs.filter((h, i) => wide[i] || over(h));
+  };
+  const stepsOf = (h: HTMLElement) => (h.closest('.story')!.classList.contains('no-photo') ? BARE_STEPS : HEADLINE_STEPS);
+  let long = unfit(heads);
+  for (let k = 1; k < BARE_STEPS.length; k++) {
+    // A headline past its own last step goes on to the cut.
+    const stepping = long.filter((h) => k < stepsOf(h).length);
+    if (!stepping.length) break;
+    for (const h of stepping) h.closest<HTMLElement>('.story')!.style.setProperty('--fit', String(stepsOf(h)[k]));
+    long = [...long.filter((h) => k >= stepsOf(h).length), ...unfit(stepping)];
+  }
+  // At the last step a word may still break only because it is wider than the line: left so, as long as it fits.
+  long = long.filter(over);
+  if (!long.length) return;
+  // Longer still: cut on a word, with "…", rather than clamped, which would clip the last line's descenders. Where
+  // each word's line ends is read from the one layout there is; the cut is checked with one more.
+  const full = long.map((h) => h.textContent!);
+  // Read from the greedy layout: a balanced one spreads the words over the lines, and holds fewer than they can.
+  for (const h of long) h.style.setProperty('text-wrap', 'wrap');
+  const kept = long.map(wordsInRoom);
+  long.forEach((h, i) => {
+    h.style.removeProperty('text-wrap');
+    h.textContent = fitWords(full[i]!, (text) => text.trim().split(/\s+/).length <= kept[i]!);
+  });
+  long.forEach((h, i) => {
+    if (!over(h)) return;
+    // The "…" took the last word to another line, or there is no space to cut on (a URL, or a script written
+    // without them): searched with a layout a try, and between characters, so a headline never runs past its lines.
+    const fits = (text: string) => {
+      h.textContent = text;
+      return !over(h);
+    };
+    h.textContent = fitWords(full[i]!, fits);
+    if (over(h)) h.textContent = cutChars(full[i]!, fits);
+  });
+
+  /** How many of `h`'s words end within its lines, read from the layout it has (its only child is its text). */
+  function wordsInRoom(h: HTMLElement): number {
+    const text = h.firstChild!;
+    const box = h.getBoundingClientRect();
+    // The rects are as drawn, through the intro's transform at its start: measured as a share of the drawn height.
+    const limit = box.top + ((room(h) + 1) * box.height) / h.offsetHeight;
+    const range = document.createRange();
+    let n = 0;
+    for (const word of h.textContent!.matchAll(/\S+/g)) {
+      range.setStart(text, word.index);
+      range.setEnd(text, word.index + word[0].length);
+      const r = range.getBoundingClientRect();
+      // By the word's middle: set solid, a glyph box stands past its line's, and the last line would never count.
+      if ((r.top + r.bottom) / 2 > limit) break;
+      n++;
+    }
+    return n;
+  }
+}
+
+/** The longest start of `text`, with "…", that `fits`: a search over its characters. */
+function cutChars(text: string, fits: (candidate: string) => boolean): string {
+  const chars = [...text];
+  let lo = 0;
+  let hi = chars.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (fits(`${chars.slice(0, mid).join('')}…`)) lo = mid;
+    else hi = mid - 1;
+  }
+  return `${chars.slice(0, lo).join('')}…`;
+}
+
+/**
+ * The strip's bar under the story the lead shows: under the first from the start, moving to each next one so that it
+ * lands as that story's headline does. One transform animation the length of the play, which the SDK starts with the rest.
+ */
+function mark(ctx: TemplateContext, rows: HTMLElement[], turns: number, slot: number): void {
+  const bar = document.querySelector<HTMLElement>('.bar')!;
+  const at = (i: number) => `translateX(${rows[i]!.offsetLeft}px)`;
+  bar.style.width = `${rows[0]!.offsetWidth}px`;
+  bar.style.transform = at(0);
+  if (turns < 2) return;
+  const d = ctx.durationMs;
+  const frames: Keyframe[] = [{ offset: 0, transform: at(0) }];
+  for (let i = 1; i < turns; i++) {
+    const leave = i * slot - BAR_LEAD_MS;
+    frames.push({ offset: leave / d, transform: at(i - 1), easing: STANDARD }, { offset: (leave + BAR_MS) / d, transform: at(i) });
+  }
+  frames.push({ offset: 1, transform: at(turns - 1) });
+  bar.animate(frames, { duration: d, fill: 'both' });
+}

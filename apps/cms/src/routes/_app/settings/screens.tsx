@@ -8,8 +8,11 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { EllipsisIcon, LoaderCircleIcon, RotateCwIcon, SearchIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
 import { EditorFields } from '~/components/editor';
+import { RuleBuilder } from '~/components/screens/rule-builder';
+import { Badge } from '~/components/ui/badge';
+import { choiceVariants } from '~/components/ui/choice';
 import { PageHeader } from '~/components/page';
-import { SaveRow, SettingsSection } from '~/components/settings/parts';
+import { FieldProblem, SaveState, SettingsSection } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '~/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '~/components/ui/dropdown-menu';
@@ -24,13 +27,14 @@ import { isRetired } from '~/lib/screen-status';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
 import { playlistsQuery } from '~/queries/playlists';
 import { scheduleQuery } from '~/queries/schedule';
-import { screenRosterQuery, screensQuery } from '~/queries/screens';
+import { labelKeysQuery, screenRosterQuery, screensQuery } from '~/queries/screens';
 import { brandKitsQuery } from '~/queries/spots';
 import { cn } from '~/lib/utils';
 import { getOrgSettings } from '~/server/settings.functions';
+import { termWords } from '~/lib/rules';
 import { memberChecked } from '~/state/groups';
 import { useAppStore } from '~/state/provider';
-import { editsIn, type SettingsEdits } from '~/state/settings';
+import { editsIn, settingsProblems, type SettingsEdits } from '~/state/settings';
 
 export const Route = createFileRoute('/_app/settings/screens')({
   loader: async ({ context: { queryClient }, parentMatchPromise }) => {
@@ -40,6 +44,7 @@ export const Route = createFileRoute('/_app/settings/screens')({
       orgId &&
         Promise.all([
           queryClient.query(screensQuery(orgId)),
+          queryClient.query(labelKeysQuery(orgId)),
           queryClient.query(scheduleQuery(orgId)),
           queryClient.query(brandKitsQuery(orgId)),
           queryClient.query(playlistsQuery(orgId)),
@@ -60,15 +65,18 @@ function ScreenSettings() {
   const editSettings = useAppStore((s) => s.editSettings);
   const saveSettings = useAppStore((s) => s.saveSettings);
   if (!settings) return null;
+  const problems = settingsProblems(edits, settings);
   const edit = (change: SettingsEdits) => editSettings(orgId, 'screens', settings.version, change);
+  // Each typed field saves itself when it is left, or on Enter (#366).
+  const save = () => void saveSettings(orgId, 'screens', settings);
 
   function submit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (settings) void saveSettings(orgId, 'screens', settings);
+    save();
   }
 
   return (
-    // Space enough that the form's Save reads as the form's, not the Groups list's.
+    // Space enough that the form's save status reads as the form's, not the Groups list's.
     <div className="space-y-10">
       <form onSubmit={submit} className="space-y-6" noValidate>
         <EditorFields>
@@ -87,9 +95,13 @@ function ScreenSettings() {
                   type="time"
                   value={edits.updateFrom ?? settings.updateWindow.from}
                   onChange={(e) => edit({ updateFrom: e.target.value })}
+                  onBlur={save}
                   disabled={!canEdit}
                   className="w-36"
+                  aria-invalid={problems.updateFrom !== undefined || undefined}
+                  aria-describedby={problems.updateFrom ? `${id}-from-bad` : undefined}
                 />
+                <FieldProblem id={`${id}-from-bad`} text={problems.updateFrom} />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor={`${id}-to`}>To</Label>
@@ -99,12 +111,16 @@ function ScreenSettings() {
                   type="time"
                   value={edits.updateTo ?? settings.updateWindow.to}
                   onChange={(e) => edit({ updateTo: e.target.value })}
+                  onBlur={save}
                   disabled={!canEdit}
                   className="w-36"
+                  aria-invalid={problems.updateTo !== undefined || undefined}
+                  aria-describedby={problems.updateTo ? `${id}-to-bad` : undefined}
                 />
+                <FieldProblem id={`${id}-to-bad`} text={problems.updateTo} />
               </div>
             </div>
-            <p className="text-[13px] text-muted-foreground">Local time at each screen. A window that ends before it starts runs past midnight.</p>
+            <p className="text-meta text-muted-foreground">Local time at each screen. A window that ends before it starts runs past midnight.</p>
           </SettingsSection>
 
           <SettingsSection
@@ -124,15 +140,18 @@ function ScreenSettings() {
                 inputMode="numeric"
                 value={edits.unreachableAfterMinutes ?? settings.unreachableAfterMinutes}
                 onChange={(e) => edit({ unreachableAfterMinutes: e.target.value })}
+                onBlur={save}
                 disabled={!canEdit}
                 className="w-24"
-                aria-describedby={`${id}-minutes-unit`}
+                aria-invalid={problems.unreachableAfterMinutes !== undefined || undefined}
+                aria-describedby={problems.unreachableAfterMinutes ? `${id}-minutes-unit ${id}-minutes-bad` : `${id}-minutes-unit`}
               />
               <span id={`${id}-minutes-unit`} className="text-sm">
                 minutes without a heartbeat
               </span>
             </div>
-            <p className="text-[13px] text-muted-foreground">
+            <FieldProblem id={`${id}-minutes-bad`} text={problems.unreachableAfterMinutes} />
+            <p className="text-meta text-muted-foreground">
               Screens check in every 5 minutes. One email goes out when a screen passes this, and one when it is back.{' '}
               <Link to="/settings/notifications" className="text-primary underline underline-offset-4">
                 Choose who gets these alerts
@@ -141,7 +160,7 @@ function ScreenSettings() {
             </p>
           </SettingsSection>
 
-          <SaveRow at="screens" scope={{ page: 'screens', orgId }} canEdit={canEdit} />
+          <SaveState form="screens" canEdit={canEdit} />
         </EditorFields>
       </form>
       <Groups />
@@ -163,6 +182,8 @@ function Groups() {
   const openGroupRename = useAppStore((s) => s.openGroupRename);
   const askToDeleteGroup = useAppStore((s) => s.askToDeleteGroup);
   const openGroupMembers = useAppStore((s) => s.openGroupMembers);
+  const openGroupRule = useAppStore((s) => s.openGroupRule);
+  const openNewGroup = useAppStore((s) => s.openNewGroup);
   // Each screen's state, polled: a screen revoked while this page is open leaves the counts and the
   // picker within a poll. The full list is read again only when a screen comes or goes.
   const { data: live } = useQuery(screenRosterQuery(orgId));
@@ -180,12 +201,19 @@ function Groups() {
           <Link to="/screens" search={{ view: 'table' }} className="text-primary underline underline-offset-4">
             Screens table
           </Link>
-          , a screen&apos;s settings, or its Members here.
+          , a screen&apos;s settings, or its Members here. A smart group&apos;s screens are the ones its rule matches.
         </>
       }
     >
+      {canManage && (
+        <div>
+          <Button type="button" variant="outline" size="sm" onClick={() => openNewGroup(orgId)}>
+            New group…
+          </Button>
+        </div>
+      )}
       {groups.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No groups yet. Make one from a screen&apos;s Settings and groups.</p>
+        <p className="text-sm text-muted-foreground">No groups yet. Make one here, or from a screen&apos;s Settings and groups.</p>
       ) : (
         // The actions open dialogs held in the store, so they wait for the page to hydrate (#140).
         <EditorFields>
@@ -222,6 +250,13 @@ function Groups() {
                         <Link to="/screens" search={{ group: g.id }} className="hover:underline">
                           {g.name}
                         </Link>
+                        {g.selector && (
+                          <>
+                            <Badge className="ml-2 align-middle">Rule</Badge>
+                            {/* Its conditions as text, so a keyboard, a touch and a screen reader get them too (review of #614). */}
+                            <span className="block text-meta font-normal text-muted-foreground">{g.selector.all.map(termWords).join(' and ')}</span>
+                          </>
+                        )}
                       </th>
                       <td className="px-3 py-2.5 tabular-nums">{plural(members, 'screen')}</td>
                       <td className="px-3 py-2.5">
@@ -245,7 +280,11 @@ function Groups() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onSelect={() => openGroupMembers(orgId, g)}>Members…</DropdownMenuItem>
+                              {g.selector ? (
+                                <DropdownMenuItem onSelect={() => openGroupRule(orgId, g)}>Rule…</DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem onSelect={() => openGroupMembers(orgId, g)}>Members…</DropdownMenuItem>
+                              )}
                               <DropdownMenuItem onSelect={() => openGroupRename(orgId, g)}>Rename…</DropdownMenuItem>
                               <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => askToDeleteGroup(orgId, g.id)}>
                                 Delete…
@@ -265,6 +304,8 @@ function Groups() {
       {group && open?.kind === 'rename' && <RenameDialog orgId={orgId} />}
       {group && open?.kind === 'delete' && <DeleteDialog orgId={orgId} group={group} blockedBy={open.blockedBy} entries={entries} />}
       {group && open?.kind === 'members' && <MembersDialog orgId={orgId} group={group} screens={active} />}
+      {group && open?.kind === 'rule' && <RuleDialog orgId={orgId} group={group} screens={active} />}
+      {open?.kind === 'new' && open.orgId === orgId && <NewGroupDialog orgId={orgId} screens={active} />}
     </SettingsSection>
   );
 }
@@ -398,16 +439,8 @@ function DeleteDialog({ orgId, group, blockedBy, entries }: { orgId: string; gro
 
 /** A searchable checklist of the screens (retired ones left out): tick those in the group. */
 function MembersDialog({ orgId, group, screens }: { orgId: string; group: GroupView; screens: ScreenView[] }) {
-  const id = useId();
-  const dialog = useAppStore((s) => s.groups.dialog);
-  const pending = useAppStore((s) => s.groups.dialog?.pending ?? false);
-  const search = useAppStore((s) => s.searchGroupMembers);
-  const choose = useAppStore((s) => s.chooseGroupMember);
   const save = useAppStore((s) => s.saveGroupMembers);
   const close = useAppStore((s) => s.cancelGroupDialog);
-  if (dialog?.kind !== 'members') return null;
-  const q = dialog.query.trim().toLowerCase();
-  const listed = screens.filter((s) => s.name.toLowerCase().includes(q)).toSorted(byName);
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     void save(orgId, group);
@@ -420,56 +453,161 @@ function MembersDialog({ orgId, group, screens }: { orgId: string; group: GroupV
           <DialogDescription>Tick the screens to have in the group. A change reaches screens at the next publish.</DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid gap-3">
-          <div className="relative">
-            <Label htmlFor={id} className="sr-only">
-              Search screens
-            </Label>
-            <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <Input
-              id={id}
-              type="search"
-              placeholder="Search by name"
-              value={dialog.query}
-              onChange={(e) => search(e.target.value)}
-              className="pl-9"
-              aria-describedby={`${id}-count`}
-            />
-          </div>
-          <p id={`${id}-count`} className="text-[13px] text-muted-foreground" aria-live="polite">
-            {screens.filter((s) => memberChecked(dialog, group, s.id)).length} of {plural(screens.length, 'screen')} chosen{q && ` · ${listed.length} shown`}
-          </p>
-          <fieldset className={cn('max-h-[50dvh] overflow-y-auto rounded-lg border', pending && 'opacity-60')}>
-            <legend className="sr-only">Screens</legend>
-            {listed.length === 0 ? (
-              <p className="p-3 text-sm text-muted-foreground">No screen matches.</p>
-            ) : (
-              listed.map((s) => (
-                <label key={s.id} className="flex min-h-11 items-center gap-3 border-b px-3 text-sm last:border-b-0 hover:bg-muted/50">
-                  <input
-                    type="checkbox"
-                    className="size-4 accent-primary"
-                    checked={memberChecked(dialog, group, s.id)}
-                    onChange={(e) => choose(s.id, e.target.checked)}
-                    // While Save runs the store takes no change; the boxes say so.
-                    aria-disabled={pending || undefined}
-                  />
-                  {s.name}
-                </label>
-              ))
-            )}
-          </fieldset>
+          <ScreenChecklist group={group} screens={screens} />
           <Refused />
-          <DialogFooter>
-            {/* While Save runs, Cancel waits for it (the store ignores it), so a save is all or nothing. */}
-            <Button type="button" variant="outline" onClick={close} aria-disabled={pending || undefined} className={cn(pending && 'opacity-60')}>
-              Cancel
-            </Button>
-            <Button type="submit" aria-disabled={pending || undefined}>
-              {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} Save
-            </Button>
-          </DialogFooter>
+          <SaveButtons action="Save" />
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Cancel and the dialog's action: while it runs, Cancel waits for it (the store ignores it), so a save is all or nothing. */
+function SaveButtons({ action }: { action: string }) {
+  const pending = useAppStore((s) => s.groups.dialog?.pending ?? false);
+  const close = useAppStore((s) => s.cancelGroupDialog);
+  return (
+    <DialogFooter>
+      <Button type="button" variant="outline" onClick={close} aria-disabled={pending || undefined} className={cn(pending && 'opacity-60')}>
+        Cancel
+      </Button>
+      <Button type="submit" aria-disabled={pending || undefined}>
+        {pending && <LoaderCircleIcon className="animate-spin" aria-hidden />} {action}
+      </Button>
+    </DialogFooter>
+  );
+}
+
+/** A smart group's rule: its conditions, and the screens they match now. */
+function RuleDialog({ orgId, group, screens }: { orgId: string; group: GroupView; screens: ScreenView[] }) {
+  const { keys } = useSuspenseQuery(labelKeysQuery(orgId)).data;
+  const save = useAppStore((s) => s.saveGroupRule);
+  const close = useAppStore((s) => s.cancelGroupDialog);
+  const submit = (e: SubmitEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    void save(orgId, group);
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && close()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{group.name}’s rule</DialogTitle>
+          <DialogDescription>Its screens are the ones whose labels meet every condition, as they are at each publish.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="grid gap-3">
+          <RuleBuilder screens={screens} keys={keys} />
+          <Refused />
+          <SaveButtons action="Save" />
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** A group made here: named, then its screens ticked or a rule that matches them. */
+function NewGroupDialog({ orgId, screens }: { orgId: string; screens: ScreenView[] }) {
+  const id = useId();
+  const dialog = useAppStore((s) => s.groups.dialog);
+  const { keys } = useSuspenseQuery(labelKeysQuery(orgId)).data;
+  const name = useAppStore((s) => s.typeNewGroupName);
+  const choose = useAppStore((s) => s.chooseNewGroupKind);
+  const create = useAppStore((s) => s.createGroup);
+  const close = useAppStore((s) => s.cancelGroupDialog);
+  if (dialog?.kind !== 'new') return null;
+  const submit = (e: SubmitEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    void create(orgId);
+  };
+  return (
+    <Dialog open onOpenChange={(o) => !o && close()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>New group</DialogTitle>
+          <DialogDescription>A set of screens a schedule entry or a brand kit can aim at. It reaches them at the next publish.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="grid gap-4">
+          <div className="grid gap-1.5">
+            <Label htmlFor={`${id}-name`}>Name</Label>
+            <Input id={`${id}-name`} value={dialog.name} onChange={(e) => name(e.target.value)} maxLength={100} placeholder="North drive-thru" />
+          </div>
+          <fieldset className="grid gap-2">
+            <legend className="mb-1 text-sm font-medium">Which screens</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(
+                [
+                  ['list', 'These screens', 'Tick them: the group keeps them until you change it.'],
+                  ['rule', 'Screens that match…', 'A rule on their labels: screens labelled to match join it.'],
+                ] as const
+              ).map(([how, title, words]) => (
+                <label key={how} className={choiceVariants({ className: 'flex cursor-pointer items-start gap-2.5 rounded-lg p-3 text-sm' })}>
+                  <input type="radio" name={`${id}-how`} checked={dialog.how === how} onChange={() => choose(how)} className="mt-1 accent-primary" />
+                  <span className="grid gap-0.5">
+                    <span className="font-semibold">{title}</span>
+                    <span className="text-meta text-muted-foreground">{words}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          {dialog.how === 'list' ? <ScreenChecklist group={{ screenIds: [] }} screens={screens} /> : <RuleBuilder screens={screens} keys={keys} />}
+          <Refused />
+          <SaveButtons action="Create group" />
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The screens, searchable, each ticked as the open dialog has it: a group's members, or a new group's. */
+function ScreenChecklist({ group, screens }: { group: Pick<GroupView, 'screenIds'>; screens: ScreenView[] }) {
+  const id = useId();
+  const dialog = useAppStore((s) => s.groups.dialog);
+  const pending = useAppStore((s) => s.groups.dialog?.pending ?? false);
+  const search = useAppStore((s) => s.searchGroupMembers);
+  const choose = useAppStore((s) => s.chooseGroupMember);
+  if (dialog?.kind !== 'members' && dialog?.kind !== 'new') return null;
+  const q = dialog.query.trim().toLowerCase();
+  const listed = screens.filter((s) => s.name.toLowerCase().includes(q)).toSorted(byName);
+  return (
+    <>
+      <div className="relative">
+        <Label htmlFor={id} className="sr-only">
+          Search screens
+        </Label>
+        <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <Input
+          id={id}
+          type="search"
+          placeholder="Search by name"
+          value={dialog.query}
+          onChange={(e) => search(e.target.value)}
+          className="pl-9"
+          aria-describedby={`${id}-count`}
+        />
+      </div>
+      <p id={`${id}-count`} className="text-meta text-muted-foreground" aria-live="polite">
+        {screens.filter((s) => memberChecked(dialog, group, s.id)).length} of {plural(screens.length, 'screen')} chosen{q && ` · ${listed.length} shown`}
+      </p>
+      <fieldset className={cn('max-h-[50dvh] overflow-y-auto rounded-lg border', pending && 'opacity-60')}>
+        <legend className="sr-only">Screens</legend>
+        {listed.length === 0 ? (
+          <p className="p-3 text-sm text-muted-foreground">No screen matches.</p>
+        ) : (
+          listed.map((s) => (
+            <label key={s.id} className="flex min-h-11 items-center gap-3 border-b px-3 text-sm last:border-b-0 hover:bg-muted/50">
+              <input
+                type="checkbox"
+                className="size-4 accent-primary"
+                checked={memberChecked(dialog, group, s.id)}
+                onChange={(e) => choose(s.id, e.target.checked)}
+                // While Save runs the store takes no change; the boxes say so.
+                aria-disabled={pending || undefined}
+              />
+              {s.name}
+            </label>
+          ))
+        )}
+      </fieldset>
+    </>
   );
 }

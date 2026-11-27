@@ -1,6 +1,6 @@
 import { cva, type VariantProps } from 'class-variance-authority';
 import { Slot } from 'radix-ui';
-import type { ComponentProps } from 'react';
+import { type ComponentProps, cloneElement, isValidElement } from 'react';
 import { cn } from '~/lib/utils';
 
 export const buttonVariants = cva(
@@ -20,7 +20,7 @@ export const buttonVariants = cva(
         default: 'h-10 px-4 py-2 has-[>svg]:px-3',
         xs: 'h-7 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5',
         sm: 'h-8 gap-1.5 px-3 has-[>svg]:px-2.5',
-        lg: 'h-11 px-5 text-[15px] has-[>svg]:px-4',
+        lg: 'h-11 px-5 text-md has-[>svg]:px-4',
         icon: 'size-10',
       },
     },
@@ -33,8 +33,16 @@ export function Button({
   variant,
   size,
   asChild = false,
+  children,
   ...props
 }: ComponentProps<'button'> & VariantProps<typeof buttonVariants> & { asChild?: boolean }) {
   const Comp = asChild ? Slot.Root : 'button';
-  return <Comp data-slot="button" className={cn(buttonVariants({ variant, size, className }))} {...props} />;
+  const said = variant ?? 'default';
+  // A slotted child's own props win over the slot's, so its data-variant is set on the child itself.
+  const child = asChild && isValidElement<Record<string, unknown>>(children) ? cloneElement(children, { 'data-variant': said }) : children;
+  return (
+    <Comp data-slot="button" className={cn(buttonVariants({ variant, size, className }))} {...props} data-variant={said}>
+      {child}
+    </Comp>
+  );
 }

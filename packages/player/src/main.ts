@@ -32,17 +32,22 @@
  * shows a code again (owner decision Q2, the default).
  */
 import {
+  MAX_SYNC_BLOBS,
   MAX_SYNC_SOURCES,
-  SUPPORTED_MANIFEST_SCHEMAS,
-  SUPPORTED_PROTOCOLS,
+  THIS_PLAYER,
+  isDisplayOutput,
+  parseSupervisorAliveResponse,
   parseSyncResponse,
   type DeviceCommand,
+  type DisplayOutput,
+  type FailedPlayerRelease,
   type ScreenKind,
   type ScreenManifest,
   type SyncRequest,
   type Transition,
 } from '@signforge/contract';
-import { displayOn, localTime } from '@signforge/player-core';
+import { displayOn, localTime, manifestSnapshotFiles, spotSnapshotFiles } from '@signforge/player-core';
+import { openSpareFrame } from '@signforge/player-core/frame-host';
 import { clock, now, synced } from './clock';
 import { BrowserCredential } from './browser-credential';
 import { DeviceCredential, type ScreenCredential } from './credential';
@@ -53,7 +58,9 @@ import {
   dataSettled,
   dataStatus,
   heldVersions,
+  liveData,
   offerChecked,
+  namedImages,
   offerPending,
   offerSnapshots,
   restoreSources,
@@ -61,17 +68,32 @@ import {
   startDataLoop,
 } from './data';
 import { activeOverride, savedOverride, setOverride, wakeable } from './override';
-import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay } from './plays';
+import { acknowledgePlays, loadPlays, pendingPlays, playBatch, recordPlay, retractPlay } from './plays';
 import { Playback } from './playback';
 import { startPreview, type Preview } from './preview';
-import { Slot } from './slot';
+import { bundleHangs } from './bundles';
+import { Slot, stopKeepingFrames, warmBundles } from './slot';
 import { NudgeSocket, UnauthorisedSync } from './socket';
 import { contentRetryMs, syncGapMs, syncWaitMs, type SyncTiming } from './sync-interval';
 import { SOURCE } from './source';
 import { parseTransitionOverride } from './transition-override';
-import { PinSet, UnauthorisedError, filesMissing, loadManifests, rememberGood, requestPersistence, sync, wipeContent } from './store';
+import {
+  PinSet,
+  UnauthorisedError,
+  filesMissing,
+  heldBlobs,
+  loadManifests,
+  rememberGood,
+  requestPersistence,
+  sync,
+  syncFeedImages,
+  wipeContent,
+} from './store';
 
 declare const __SF_PLAYER_VERSION__: string;
+declare const __SF_PLAYER_RELEASE__: number;
+/** The player release this build is (#628), which the supervisor's health gate waits for; none for a hand-made build. */
+const RELEASE = __SF_PLAYER_RELEASE__ ? { release: __SF_PLAYER_RELEASE__ } : {};
 
 const query = new URLSearchParams(location.search);
 const CONTENT = query.get('content') ?? './content';
@@ -86,6 +108,26 @@ const SUPERVISOR = query.get('supervisor') ?? 'http://127.0.0.1:8091';
 /** How often the player tells the supervisor it is alive. Its `STALE_S` must allow for a few missed. */
 const ALIVE_MS = 5000;
 const KIND: ScreenKind = query.get('kind') === 'browser' ? 'browser' : 'device';
+/** The player release the supervisor last rolled back, as its `/alive` reply says, sent on each sync (#628). */
+let failedRelease: FailedPlayerRelease | undefined;
+
+/** Beat the supervisor's `/alive` with this build's version and release, which its health gate after an update waits for (#628). */
+async function beat(): Promise<void> {
+  const res = await supervisorFetch('/alive', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ version: __SF_PLAYER_VERSION__, ...RELEASE }),
+  });
+  if (!res.ok) return;
+  const raw: unknown = await res.json();
+  // A reason this build does not know, from a newer supervisor, is `other`, the contract's open value: the report still
+  // reaches the server, which would refuse a sync carrying an unknown one. A reply it cannot read otherwise is dropped.
+  const failed = typeof raw === 'object' && raw !== null && 'failedRelease' in raw ? raw.failedRelease : undefined;
+  let reply = parseSupervisorAliveResponse(raw);
+  if (!reply.ok && typeof failed === 'object' && failed !== null) reply = parseSupervisorAliveResponse({ failedRelease: { ...failed, reason: 'other' } });
+  if (!reply.ok) console.warn("[sf] the supervisor's /alive reply is not one this player reads:", reply.problems.join('; '));
+  failedRelease = reply.ok ? reply.value.failedRelease : undefined;
+}
 /** The supervisor's secret, collected from it at first use. Never in the URL: templates can read that. */
 let supervisorToken = '';
 
@@ -158,6 +200,8 @@ const state = {
   skipped: 0,
   lastError: '',
   lastSync: '',
+  /** Syncs the player has finished with: their snapshots offered, their photos asked for. Tests wait on it. */
+  syncs: 0,
   online: navigator.onLine,
   /**
    * 'pairing' while a code is shown, 'revoked' while the screen wipes itself, 'no credential' while
@@ -203,6 +247,10 @@ const state = {
   get data(): Record<string, string> {
     return dataStatus();
   },
+  /** Times the bundle worker did not answer in time and was ended (bundles.ts): a healthy parse never counts (#577). */
+  get bundleHangs(): number {
+    return bundleHangs();
+  },
   /** Live values and snapshots refused per data source: a broken feed shows here. */
   get dataRejected(): Record<string, number> {
     return dataRejections();
@@ -223,7 +271,10 @@ Object.assign(window, { __sf: state });
 let lastFrame = 0;
 let interval = 0;
 const warmup: number[] = [];
+/** `performance.now()` at the last animation frame: the supervisor's beat waits on it (see boot). */
+let drewAt = performance.now();
 function monitor(t: number): void {
+  drewAt = performance.now();
   // Asleep, the panel may have no signal and the browser stops producing frames: nothing to measure.
   if (!state.displayOn) {
     lastFrame = 0;
@@ -273,7 +324,8 @@ function renderHud(): void {
 }
 
 // ------------------------------------------------------------------ playback
-const slots = [new Slot(), new Slot()] as const;
+// `playback` is made below; a slot reports a death only once its spot has loaded.
+const slots = [new Slot((why) => playback.died(0, why)), new Slot((why) => playback.died(1, why))] as const;
 let lastProgress = performance.now();
 
 /**
@@ -319,15 +371,36 @@ function show(next: Slot, prev: Slot | undefined, transition: Transition): { sta
   return { started, done };
 }
 
+/** The play the ledger last recorded: only the spot on screen's play can be taken back (`unplayed`). */
+let lastRecorded: { at: number; spot: string; ms: number } | undefined;
+
 /** Where the playback loop reports to the CMS, in preview mode. Set in boot. */
 let preview: Preview | undefined;
 
 /**
  * Files cache cleanup must keep beyond the active manifest's: the spot on screen (`playing`), the
- * spot loading (`preparing`), either of which may come from a manifest just replaced, and the last
- * good manifest's (`last-good`).
+ * spot loading (`preparing`), either of which may come from a manifest just replaced, the last
+ * good manifest's (`last-good`), and feed images referenced by held snapshots (`snapshots`).
  */
 const pins = new PinSet();
+
+let lastSnapshotPins = new Set<string>();
+const heldSnapshotHashes = (): Set<string> => manifestSnapshotFiles([playback.manifest, playback.lastGood], liveData);
+/** Keep `pins`'s `snapshots` holder in step with held snapshots. Returns true if any previously pinned hash was dropped. */
+function refreshSnapshotPins(): boolean {
+  const next = heldSnapshotHashes();
+  let dropped = false;
+  for (const sha of lastSnapshotPins) if (!next.has(sha)) dropped = true;
+  lastSnapshotPins = next;
+  pins.hold('snapshots', next);
+  return dropped;
+}
+
+/**
+ * The last manifest adopted: the snapshots refused for the one before it offered again, then its sources restored. Pins
+ * are refreshed only after it, or a second pending snapshot not yet stored would lose its photos to the next cleanup (#460).
+ */
+let adoption: Promise<void> = Promise.resolve();
 
 const playback = new Playback({
   clock: {
@@ -363,8 +436,15 @@ const playback = new Playback({
     played(step, manifestId, at) {
       preview?.played(manifestId, step.spot.id);
       state.played++;
+      // While it plays, read the bundles still to come, the playlist's next spots first (#232).
+      const items = step.playlist.items.map((i) => i.spot);
+      if (playback.manifest?.id === manifestId) warmBundles(playback.manifest, [...items.slice(step.index + 1), ...items.slice(0, step.index)]);
       // On a clock it does not trust the screen cannot say which hour a play was in: not counted.
-      if (SOURCE === 'device' && clock.trusted) recordPlay(at, step.spot.id, step.spot.durationMs);
+      lastRecorded = undefined;
+      if (SOURCE === 'device' && clock.trusted) {
+        lastRecorded = { at, spot: step.spot.id, ms: step.spot.durationMs };
+        recordPlay(at, step.spot.id, step.spot.durationMs);
+      }
       state.log.push({
         spot: step.spot.id,
         playlist: step.playlist.id,
@@ -373,6 +453,15 @@ const playback = new Playback({
         durationMs: step.spot.durationMs,
       });
       if (state.log.length > 500) state.log.shift();
+    },
+    unplayed(step, manifestId, at) {
+      state.played--;
+      // Only what `played` recorded: the clock may have become trusted since, or the spot changed length.
+      if (lastRecorded?.at === at && lastRecorded.spot === step.spot.id) retractPlay(at, lastRecorded.spot, lastRecorded.ms);
+      lastRecorded = undefined;
+      const startedAt = new Date(at).toISOString();
+      const i = state.log.findLastIndex((e) => e.spot === step.spot.id && e.manifest === manifestId && e.startedAt === startedAt);
+      if (i >= 0) state.log.splice(i, 1);
     },
     skipped(message) {
       state.skipped++;
@@ -391,7 +480,16 @@ const playback = new Playback({
     progress: () => (lastProgress = performance.now()),
     adopted(next) {
       wakeData();
-      if (API) void offerPending(next).then(() => restoreSources(next));
+      if (API) {
+        // After the adoption before it, not instead of it: a cleanup waits for every waiting snapshot to be stored (#464).
+        adoption = adoption.catch(() => undefined).then(() => offerPending(next).then(() => restoreSources(next)));
+        void adoption.then(() => {
+          if (refreshSnapshotPins()) {
+            feedBlobsDue = true;
+            content.wake();
+          }
+        });
+      } else refreshSnapshotPins();
       socket?.reportApplied(next.id);
     },
     // Its files may have been evicted while another manifest played: the next sync checks them.
@@ -401,6 +499,7 @@ const playback = new Playback({
   preview: SOURCE === 'preview',
   playing: applyOverrides,
   dataSettled: (sources) => dataSettled(sources, DATA_WAIT_MS),
+  extraFiles: (spot, manifest) => spotSnapshotFiles(spot, manifest, liveData),
 });
 
 /**
@@ -442,6 +541,23 @@ async function setPanel(on: boolean): Promise<boolean> {
     state.display = 'no supervisor';
   }
   return false;
+}
+
+/**
+ * The panel's video mode as the supervisor last read it (#511), for the heartbeat; undefined from a
+ * browser, without a supervisor, or from one that does not read it.
+ */
+async function displayOutput(): Promise<DisplayOutput | undefined> {
+  if (KIND === 'browser') return undefined;
+  try {
+    const res = await supervisorFetch('/display', {});
+    const reply: unknown = res.ok ? await res.json() : undefined;
+    // Checked as the server checks it, so a reply it would refuse never fails the sync.
+    const output: unknown = typeof reply === 'object' && reply !== null ? Reflect.get(reply, 'output') : undefined;
+    return isDisplayOutput(output) ? { mode: output.mode, resets: output.resets } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** A switch the supervisor did not confirm (restarting, busy) is asked for again this soon. */
@@ -507,11 +623,20 @@ function revoked(): Promise<void> {
     const held = !!playback.manifest || !!playback.lastGood || pendingPlays() > 0;
     // No content fetch may store or adopt anything after the wipe: stop the one in flight, and any retry.
     contentDue = false;
+    feedBlobsDue = false;
+    evictDue = false;
+    settleAfterBlobs = false;
+    pendingFeedBlobs.clear();
+    incomingFeedBlobs.clear();
+    lastSnapshotPins.clear();
+    pins.release('snapshots');
+    pins.release('snapshots-incoming');
     contentAbort.abort(new Error('revoked'));
     await contentFetch?.catch(() => undefined);
     contentAbort = new AbortController();
     await credential?.revoke();
     setOverride(null);
+    stopKeepingFrames();
     await wipeContent().catch((err: unknown) => console.warn('[sf] could not wipe the cache', err));
     if (held) {
       location.reload();
@@ -621,7 +746,11 @@ async function fetchManifest(signal?: AbortSignal): Promise<void> {
     // The sync that named it has kept its snapshots (apiSync offers them before it asks for content):
     // once the stored copies are read, its sources have had their first load, and spots waiting on
     // them start now rather than at the data wait's end.
-    if (API) await restoreSources(result.manifest).then(() => settleSources(result.manifest));
+    if (API)
+      await adoption.then(() => {
+        refreshSnapshotPins();
+        if (!settleAfterBlobs) settleSources(result.manifest);
+      });
   }
 }
 
@@ -660,40 +789,96 @@ let lastFileCheck = Number.NEGATIVE_INFINITY;
 const content = wakeable();
 /** A sync asked for the content, and it has not been fetched since. */
 let contentDue = false;
+/** A sync brought missing feed image blobs to fetch, or dropped snapshot pins to evict. */
+let feedBlobsDue = false;
+/** Feed image hashes a sync asked us to fetch. */
+const pendingFeedBlobs = new Set<string>();
+/**
+ * Feed images a sync sent for a manifest the screen may not have adopted yet: pinned (`snapshots-incoming`) until none
+ * is pending and no manifest is due, so a manifest fetch that fails for a while cannot let a cleanup delete them before
+ * that manifest, whose snapshots name them, is in (review of #240). Every sync's since the last release, as holding
+ * replaces the pin; `pendingFeedBlobs` empties as each pass takes its batch.
+ */
+const incomingFeedBlobs = new Set<string>();
+/** True when a prior cleanup kept stale blobs only because a playing/preparing spot still pinned them. */
+let evictDue = false;
+/** Settle data sources once the initial feed-blob download batch finishes (or on timeout). */
+let settleAfterBlobs = false;
 /** Stops the content worker's fetch in flight (a revoke), and the fetch itself while it runs. */
 let contentAbort = new AbortController();
-let contentFetch: Promise<void> | undefined;
+let contentFetch: Promise<unknown> | undefined;
 
 /**
- * The one worker that fetches content from the API: the manifest the server wants now, and its
- * files. A sync only asks for it, so a long download or a failure never holds back the next
- * heartbeat. A failure retries on its own, backing off (src/sync-interval.ts); a sync meanwhile
- * makes it try at once, and every attempt fetches the latest desired manifest.
+ * The one worker that fetches content from the API: the manifest the server wants now, its files,
+ * and missing feed-image blobs for held snapshots. A sync only asks for it, so a long download or
+ * a failure never holds back the next heartbeat. A failure retries on its own, backing off
+ * (src/sync-interval.ts); a sync meanwhile makes it try at once, and every attempt fetches the
+ * latest desired manifest.
  */
 async function contentLoop(): Promise<never> {
   let failures = 0;
   return loopRestartingOnError('content', async () => {
-    if (!contentDue) return content.wait(FILE_CHECK_MS);
-    contentDue = false;
+    if (!contentDue && !feedBlobsDue) return content.wait(FILE_CHECK_MS);
     const { signal } = contentAbort;
-    try {
-      await (contentFetch = fetchManifest(signal));
-      lastFileCheck = performance.now();
-      failures = 0;
-    } catch (err) {
-      // Stopped by a revoke, which also cancelled what was due.
-      if (signal.aborted) return;
-      // Refused: the sync revokes.
-      if (err instanceof UnauthorisedError) return poll.wake();
-      contentDue = true;
-      const message = err instanceof Error ? err.message : String(err);
-      state.lastError = `content: ${message}`;
-      console.warn('[sf] could not fetch the content', err);
-      if (!playback.manifest) status(`SignForge\nWaiting for content…\n${message}`);
-      await content.wait(contentRetryMs(++failures, timing()));
-    } finally {
-      contentFetch = undefined;
+    let retry = false;
+    if (contentDue) {
+      contentDue = false;
+      try {
+        await (contentFetch = fetchManifest(signal));
+        lastFileCheck = performance.now();
+        failures = 0;
+      } catch (err) {
+        // Stopped by a revoke, which also cancelled what was due.
+        if (signal.aborted) return;
+        // Refused: the sync revokes.
+        if (err instanceof UnauthorisedError) return poll.wake();
+        contentDue = true;
+        retry = true;
+        const message = err instanceof Error ? err.message : String(err);
+        state.lastError = `content: ${message}`;
+        console.warn('[sf] could not fetch the content', err);
+        if (!playback.manifest) status(`SignForge\nWaiting for content…\n${message}`);
+      } finally {
+        contentFetch = undefined;
+      }
     }
+    // Even when the manifest could not be fetched: the spots playing wait for these images
+    // (settleAfterBlobs), and a manifest that keeps failing must not make every one wait out the data wait.
+    if (feedBlobsDue) {
+      const batch = [...pendingFeedBlobs];
+      pendingFeedBlobs.clear();
+      feedBlobsDue = false;
+      refreshSnapshotPins();
+      try {
+        const pass = syncFeedImages(BASE, batch, {
+          headers: await deviceHeaders(),
+          ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}),
+          pinned: pins,
+          signal,
+        });
+        contentFetch = pass;
+        evictDue = await pass;
+      } catch (err) {
+        if (signal.aborted) return;
+        if (err instanceof UnauthorisedError) return poll.wake();
+        console.warn('[sf] could not sync feed images', err);
+      } finally {
+        contentFetch = undefined;
+        if (settleAfterBlobs && !pendingFeedBlobs.size) {
+          settleAfterBlobs = false;
+          settleSources(playback.manifest);
+        }
+      }
+    }
+    // Once nothing is pending and the manifest is in, the images a sync sent need no pin of their own: the manifest's
+    // snapshots pin those it names. Any they do not name go on the next pass (review of #240, round 2).
+    if (incomingFeedBlobs.size && !pendingFeedBlobs.size && !contentDue) {
+      refreshSnapshotPins();
+      if ([...incomingFeedBlobs].some((sha) => !lastSnapshotPins.has(sha))) feedBlobsDue = true;
+      incomingFeedBlobs.clear();
+      pins.release('snapshots-incoming');
+    }
+    if (retry) await content.wait(contentRetryMs(++failures, timing()));
   });
 }
 
@@ -709,23 +894,27 @@ function ofHeldSources(values: Record<string, number>): Record<string, number> {
 /** The heartbeat and play counts up; manifest, snapshots, server time, ticket and commands down. */
 async function apiSync(): Promise<void> {
   const { manifest } = playback;
-  const batch = playBatch(now());
+  const batch = await playBatch(now());
+  const heldFeed = await heldBlobs(heldSnapshotHashes());
+  const output = await displayOutput();
   const req: SyncRequest = {
     seq: batch.seq,
     epoch: batch.epoch,
-    player: { version: __SF_PLAYER_VERSION__, manifestSchemas: SUPPORTED_MANIFEST_SCHEMAS, protocols: SUPPORTED_PROTOCOLS },
+    player: { version: __SF_PLAYER_VERSION__, ...RELEASE, ...THIS_PLAYER },
     manifest: {
       ...(manifest ? { active: manifest.id } : {}),
       filesMissing: filesMissing(),
       ...(state.fallback ? { fallbackFrom: state.fallback } : {}),
       ...(state.lastGood ? { lastGood: state.lastGood } : {}),
     },
-    display: { on: state.displayOn, ...(displayMethods ? { methods: displayMethods } : {}), ...withOverride() },
+    display: { on: state.displayOn, ...(displayMethods ? { methods: displayMethods } : {}), ...withOverride(), ...(output ? { output } : {}) },
     deviceTime: new Date().toISOString(),
     clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
     playCounts: batch.counts,
     snapshots: ofHeldSources(heldVersions()),
     dataRejected: ofHeldSources(dataRejections()),
+    ...(heldFeed.length ? { blobs: heldFeed.slice(0, MAX_SYNC_BLOBS) } : {}),
+    ...(failedRelease ? { failedRelease } : {}),
   };
   const sentAt = Date.now();
   const res = await fetch(`${BASE}/sync`, {
@@ -759,13 +948,37 @@ async function apiSync(): Promise<void> {
   playback.clockMoved();
 
   await offerSnapshots(r.snapshots, () => playback.manifest, r.desiredManifest);
+  // Fallen back from the manifest the sync names, the screen plays the last good one until a newer publish: only the
+  // photos its snapshots name are fetched, as the rest would be evicted again after every sync (#460).
+  const held = r.desiredManifest === state.fallback ? heldSnapshotHashes() : undefined;
+  const incomingBlobs = (r.blobs ?? []).filter((sha) => !held || held.has(sha));
+  // Every source of the manifest playing has had its first load: a spot waiting for its feed starts
+  // with what there is. Unless its images are on their way: the content worker settles it once they are in.
+  if (!incomingBlobs.length) settleSources(playback.manifest);
   await offerChecked(r.checked ?? {});
+  const dropped = refreshSnapshotPins();
+  for (const sha of incomingBlobs) incomingFeedBlobs.add(sha);
+  let superseded = false;
+  if (incomingFeedBlobs.size) {
+    // Only photos a snapshot still names: one a newer snapshot dropped is not kept while the manifest is on its way (#464).
+    const named = namedImages();
+    for (const sha of incomingFeedBlobs) if (!named.has(sha)) superseded = incomingFeedBlobs.delete(sha);
+    pins.hold('snapshots-incoming', incomingFeedBlobs);
+  }
+  if (incomingBlobs.length) {
+    for (const sha of incomingBlobs) pendingFeedBlobs.add(sha);
+    feedBlobsDue = true;
+    settleAfterBlobs = true;
+  } else if (dropped || evictDue || superseded) {
+    feedBlobsDue = true;
+  }
   // After the snapshots are kept, so a manifest the content worker adopts has its data.
   const current = state.fallback || playback.manifest?.id;
   if (r.desiredManifest && (r.desiredManifest !== current || filesMissing() > 0 || performance.now() - lastFileCheck > FILE_CHECK_MS)) {
     contentDue = true;
-    content.wake();
   }
+  if (contentDue || feedBlobsDue) content.wake();
+  state.syncs++;
 }
 
 // Untrusted, the clock cannot tell whether the saved override has ended: it is reported as saved,
@@ -885,6 +1098,8 @@ async function boot(): Promise<void> {
     void loopRestartingOnError('playback', () => playback.pass());
     return;
   }
+  // Before anything else: the template renderer starts while the player reads its storage (#232).
+  openSpareFrame(document.body);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('[sf] no service worker', e));
   state.persistent = await requestPersistence();
   await loadPlays();
@@ -896,8 +1111,12 @@ async function boot(): Promise<void> {
   // Its files stay until a newer manifest has played, in case the active one plays nothing.
   if (stored.lastGood) playback.restore(stored.lastGood);
   const cached = stored.active ?? stored.lastGood;
-  if (cached) playback.adopt(cached);
-  else status('SignForge\nWaiting for content…');
+  if (cached) {
+    // The last good manifest's snapshots too, before any cleanup: their photos are pinned, though it is not the one adopted (#464).
+    if (API) await Promise.all([cached, stored.lastGood].map((m) => m && restoreSources(m).catch(() => undefined)));
+    playback.adopt(cached);
+    refreshSnapshotPins();
+  } else status('SignForge\nWaiting for content…');
 
   // If playback stops advancing for far longer than any spot should take, start over.
   setInterval(() => {
@@ -907,14 +1126,32 @@ async function boot(): Promise<void> {
   }, 10_000);
   // That watchdog runs in the renderer it watches. The supervisor restarts the kiosk when these
   // beats stop (device/pi/supervisor.py). Without a supervisor (the demo in a browser) nobody hears them.
-  if (KIND === 'device') setInterval(() => void supervisorFetch('/alive', { method: 'POST' }).catch(() => undefined), ALIVE_MS);
+  // A page whose timers run but that draws no frames is a frozen panel: while it should be drawing
+  // (panel on, page visible) it beats only after a frame. Asleep or hidden, the browser may stop
+  // producing frames by design, so it beats on.
+  if (KIND === 'device')
+    setInterval(() => {
+      if (state.displayOn && document.visibilityState === 'visible' && performance.now() - drewAt > ALIVE_MS) return;
+      void beat().catch(() => undefined);
+    }, ALIVE_MS);
 
   void syncLoop();
   if (API) void contentLoop();
   socket?.start();
   // From the API, snapshots come on the sync; static content has no sync, so each source is fetched.
   // Never with the credential: from the API, data comes on the sync.
-  if (!API) wakeData = startDataLoop(BASE, () => playback.manifest);
+  if (!API)
+    wakeData = startDataLoop(
+      BASE,
+      () => playback.manifest,
+      async (m) => {
+        const dropped = refreshSnapshotPins();
+        const wanted = [...manifestSnapshotFiles([m, playback.lastGood], liveData)];
+        if (wanted.length || dropped || evictDue) {
+          evictDue = await syncFeedImages(BASE, wanted, { ...(STALL_OVERRIDE_MS ? { stallMs: STALL_OVERRIDE_MS } : {}), pinned: pins });
+        }
+      },
+    );
   void loopRestartingOnError('playback', () => playback.pass());
   void displayLoop();
 }

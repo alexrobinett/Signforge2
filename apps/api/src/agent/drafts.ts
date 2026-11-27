@@ -1,0 +1,317 @@
+/**
+ * What the agent's drawer may draft (#268, docs/proposals/cms-agent.md): a few writes, each a
+ * proposal in the turn and written only when the person saves it (`POST /api/agent/apply`).
+ *
+ * Each draft names its target and how it is read before (`DRAFTS`), so the drawer shows what it
+ * would change and the person can undo it; and each is checked here, in the turn and again when it
+ * is saved (`draftRefusal`), whatever the model was told:
+ *  - only `content:draft` and `screens:manage` writes that change a draft, never one that publishes,
+ *    takes over, deletes, revokes, reaches an address or acts on live screens at once;
+ *  - no spot's `url`, kind, media or bindings, and no web page spot at all (its address is one the
+ *    stage and screens open; #269's card will show it);
+ *  - a screen's name only (`update_screen`), never its settings, which change what it plays when;
+ *  - no takeover: an entry that cuts in at once is #269's to confirm.
+ * A viewer's drawer drafts too, as a request to copy for someone who may save it: the dispatcher
+ * refuses a viewer's save, as it refuses any of theirs.
+ *
+ * A save takes only what a turn proposed (#269): the turn signs each draft it sends, as the drawer
+ * shows it, for its member and org (`signDraft`), and the save refuses a call whose token is not the
+ * one signed for that call, member and org, or has run out. The token is an HMAC under the server's
+ * secret, not a record in the org's Durable Object as a confirmation card is: a draft can change
+ * until the turn ends (`join`), so the turn signs the drafts it answers with, however many, at no
+ * storage write or Durable Object call, and the save checks them at none either. A token is not
+ * spent by a save, and need not be: an update saves only at the version it was drafted on, so a
+ * second save of it is a conflict, and a creation carries the idempotency key the turn gave it.
+ */
+import { CMS_AGENT_CLIENT_ID, type Caller, dispatch, entryView, type Grant, permits, registry } from '@signforge/tools';
+import type { Hono } from 'hono';
+import { z } from 'zod';
+import type { ApiEnv } from '../api';
+import { cmsCaller, STATUS } from '../api/tools';
+import { authSecret } from '../auth';
+import type { ConnectorDeps } from '../connectors';
+import type { ApplyAnswer, ProposedCall } from './chat-shapes';
+import { canonical } from './confirm';
+import { type AgentDeps, readBody } from './inline';
+
+type ApplyResult = ApplyAnswer['results'][number];
+
+/** A draft as the turn makes it, before it is signed for the answer. */
+export type Proposal = Omit<ProposedCall, 'token'>;
+
+type Row = Record<string, unknown>;
+const isRow = (v: unknown): v is Row => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** A draft's target: the read tool that gives it as it is now (none for a schedule entry, read by id), the input key naming it, and the output key holding it. */
+interface Target {
+  kind: string;
+  read: string | null;
+  id: string;
+  out: string;
+  /** The only fields the drawer drafts, where its tool takes more: the model is shown these alone, and refused the rest. */
+  fields?: readonly string[];
+  /** What the drawer says the draft does, with `fields`: its tool's own description would offer the rest. */
+  says?: string;
+  /** Whether a call without the id is a creation the drawer drafts too; otherwise the id is required. */
+  creates?: boolean;
+}
+
+/** The writes the drawer drafts, and their targets, which a creation has none of. Each has its undo in the CMS (src/state/agent-drawer.ts). */
+const DRAFTS: Record<string, Target> = {
+  // A spot's name, length and fields: its address, kind, media and bindings are not the agent's (#269).
+  save_spot: { kind: 'spot', read: 'get_spot', id: 'spotId', out: 'spot', fields: ['name', 'durationMs', 'data'] },
+  save_playlist: { kind: 'playlist', read: 'get_playlist', id: 'playlistId', out: 'playlist', fields: ['name', 'transition', 'spotIds'] },
+  save_schedule_entry: { kind: 'schedule_entry', read: null, id: 'scheduleEntryId', out: 'entry', creates: true },
+  // A screen's settings change what it plays when, so the drawer drafts its name alone (#345).
+  update_screen: {
+    kind: 'screen',
+    read: 'get_screen',
+    id: 'screenId',
+    out: 'screen',
+    fields: ['name'],
+    says: 'Rename a screen. The name is what people see in the CMS; screens do not show it. Returns { screen }.',
+  },
+};
+
+/** At most this many drafts in a turn, and in one save. */
+export const MAX_DRAFTS = 15;
+
+/** How long after its turn a draft may be saved: later, the person asks the agent again. */
+export const DRAFT_MS = 30 * 60_000;
+
+/** Whom a turn proposed its drafts to. */
+export interface Proposer {
+  orgId: string;
+  userId: string;
+}
+
+/** Domain separation: the same secret signs Better Auth's cookies and screens' socket tickets. */
+const SIGNED = 'sf-agent-draft.v1.';
+const encoder = new TextEncoder();
+
+/** The HMAC-SHA256, in hex, of a draft for `who` until `expires`: its tool and input exactly, keys in any order. */
+async function mac(env: Pick<Env, 'AUTH_SECRET' | 'ENVIRONMENT'>, who: Proposer, call: { tool: string; input: Row }, expires: number): Promise<string> {
+  const key = await crypto.subtle.importKey('raw', encoder.encode(authSecret(env)), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signed = canonical({ orgId: who.orgId, userId: who.userId, tool: call.tool, input: call.input, expires });
+  const bytes = new Uint8Array(await crypto.subtle.sign('HMAC', key, encoder.encode(SIGNED + signed)));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** A draft's token, `<expires>.<mac>`: what a save of exactly this call by `who` carries, until `DRAFT_MS` after `now`. */
+export async function signDraft(
+  env: Pick<Env, 'AUTH_SECRET' | 'ENVIRONMENT'>,
+  who: Proposer,
+  call: { tool: string; input: Row },
+  now: number,
+): Promise<string> {
+  const expires = now + DRAFT_MS;
+  return `${expires}.${await mac(env, who, call, expires)}`;
+}
+
+/** Whether a turn proposed exactly this call to `who`, and it has not run out by `now`. */
+async function proposedTo(env: Pick<Env, 'AUTH_SECRET' | 'ENVIRONMENT'>, who: Proposer, call: ApplyCall, now: number): Promise<boolean> {
+  const dot = call.token.indexOf('.');
+  const expires = Number(call.token.slice(0, dot));
+  if (expires <= now) return false;
+  const x = encoder.encode(await mac(env, who, call, expires));
+  const y = encoder.encode(call.token.slice(dot + 1));
+  return x.byteLength === y.byteLength && crypto.subtle.timingSafeEqual(x, y);
+}
+
+/**
+ * The most D1 statements a save prepares, the session's reads with its drafts', well inside Workers
+ * Paid's 1,000 a request. A save's drafts are costed before any is written (`saveStatements`), and
+ * the turn drafts no more than one save holds.
+ */
+export const SAVE_STATEMENTS = 300;
+
+/**
+ * Each draft's D1 statements, saved by an editor (whose role check reads the org's settings): its
+ * target read again, the write and its audit row; a screen's view reads its status too. A spot's or
+ * playlist's keeps the draft it replaces beside it (#116), the drawer's saves being an agent's
+ * proposal: the kept draft and the draft's version guard with it, and a playlist's read of its items. A playlist's
+ * order takes 2 more for every 24 spots, their check and their rows, 24 a statement. Measured in
+ * test/agent-chat.test.ts, which holds `saveStatements` to them.
+ */
+const STATEMENTS: Record<string, number> = {
+  save_spot: 10,
+  save_playlist: 14,
+  // An entry's aim is read again too: one more for a group or a screen, which an update reads whatever its input.
+  save_schedule_entry: 8,
+  update_screen: 16,
+};
+/**
+ * The session's reads, before any draft, with its cookie cache warm. A cold session whose cache is refreshed
+ * reads one more, 3: `SAVE_STATEMENTS` (48) leaves that one under the Free plan's 50 (review of #410).
+ */
+const SESSION_STATEMENTS = 2;
+
+/** The D1 statements a save of `calls` prepares, at most; a tool it does not draft is refused before any. */
+export function saveStatements(calls: readonly { tool: string; input: Row }[]): number {
+  const spots = (input: Row) => (Array.isArray(input.spotIds) ? input.spotIds.length : 0);
+  return calls.reduce((n, { tool, input }) => n + (STATEMENTS[tool] ?? 0) + 2 * Math.ceil(spots(input) / 24), SESSION_STATEMENTS);
+}
+
+/**
+ * The drafting tools a caller with `grant` is offered: those of `DRAFTS` its role may call, or, for a
+ * viewer, those an editor may, as requests to copy.
+ */
+export function draftTools(grant: Grant) {
+  const asked = grant.role === 'viewer' ? { ...grant, role: 'editor' as const } : grant;
+  return Object.entries(DRAFTS).flatMap(([name, target]) => {
+    const tool = registry.get(name);
+    if (!tool?.mutates || tool.people || !permits(asked, tool)) return [];
+    const { fields } = target;
+    if (!fields || !(tool.input instanceof z.ZodObject)) return [{ name, description: tool.description, input: tool.input }];
+    // The target, required, and these fields: the version is the drawer's to add, from its read. Other keys are kept, not
+    // stripped, so the draft's refusal names them rather than proposing what is left (`draftRefusal`).
+    const shape: Record<string, z.ZodType> = tool.input.shape;
+    const input = z
+      .object(Object.fromEntries([target.id, ...fields].map((k) => [k, shape[k]!])))
+      .required({ [target.id]: true })
+      .loose();
+    return [{ name, description: target.says ?? tool.description, input }];
+  });
+}
+
+/** The draft's target as it is now, through its read tool, as the member; null for a creation, or why it cannot be read. */
+async function before(caller: Caller, name: string, input: Row): Promise<{ target: Row | null } | { problem: string }> {
+  const t = DRAFTS[name];
+  if (!t) return { target: null };
+  const id = input[t.id];
+  if (id === undefined) return t.creates ? { target: null } : { problem: `the agent changes a ${t.kind}: give its ${t.id}` };
+  const missing = { problem: `${t.kind} ${String(id)} not found` };
+  if (typeof id !== 'string') return missing;
+  // No tool reads one entry: its row, as list_schedule_entries gives it, or none once deleted.
+  if (!t.read) {
+    const row = await caller.org.scheduleEntries.get(id);
+    return row && row.deletedAt === null ? { target: entryView(row) } : missing;
+  }
+  const out = await dispatch(registry, t.read, { [t.id]: id }, caller);
+  if (!out.ok) return { problem: out.message };
+  const target = isRow(out.output) ? out.output[t.out] : undefined;
+  return isRow(target) ? { target } : missing;
+}
+
+/** Why the drawer may not make this draft, whatever the role allows; undefined when it may. */
+function draftRefusal(name: string, input: Row, target: Row | null): string | undefined {
+  if (name === 'save_spot' && target?.kind === 'url') return "a web page spot's address is not the agent's to change: change it in the spot's editor";
+  const t = DRAFTS[name];
+  if (t?.fields)
+    for (const key of Object.keys(input))
+      if (![t.id, 'ifVersion', ...t.fields].includes(key))
+        return `the agent drafts a ${t.kind}'s ${t.fields.join(', ')} alone, not its ${key}: change that in its settings`;
+  if (name === 'save_schedule_entry' && (target?.takeover === true || input.startsAt !== undefined || input.endsAt !== undefined))
+    return 'a takeover cuts in on screens at once: start or change it yourself, on the Schedule page';
+  return undefined;
+}
+
+/**
+ * A call the model made to a drafting tool, as the drawer proposes it: checked against the tool's
+ * input and the rules above, its target read, and its `ifVersion` the version read, so a save made
+ * since refuses it rather than being overwritten. Or why not, for the model to read.
+ */
+export async function propose(caller: Caller, name: string, raw: unknown): Promise<{ call: Proposal } | { problem: string }> {
+  const tool = registry.get(name);
+  if (!tool || !Object.hasOwn(DRAFTS, name)) return { problem: `${name} is not a tool you may draft with` };
+  // A change must change something. Said before the tool's own check, whose refusal lists what the drawer may not draft (#503).
+  const t = DRAFTS[name];
+  if (t && isRow(raw) && raw[t.id] !== undefined && Object.keys(raw).every((k) => k === t.id || k === 'ifVersion'))
+    return { problem: `nothing to change in the ${t.kind}` };
+  const parsed = tool.input.safeParse(raw);
+  if (!parsed.success || !isRow(raw)) return { problem: parsed.success ? 'the input is not an object' : z.prettifyError(parsed.error) };
+  const read = await before(caller, name, raw);
+  if ('problem' in read) return read;
+  const refused = draftRefusal(name, raw, read.target);
+  if (refused) return { problem: refused };
+  const { ifVersion: _theirs, ...input } = raw;
+  const version = read.target?.version;
+  return {
+    call: {
+      tool: name,
+      input: typeof version === 'number' ? { ...input, ifVersion: version } : { ...input, idempotencyKey: crypto.randomUUID() },
+      target: t && read.target ? { kind: t.kind, id: String(read.target.id) } : null,
+      before: read.target,
+    },
+  };
+}
+
+/** Where a schedule entry plays: one choice, so a later change of it replaces the earlier one's whole. */
+const AIM = new Set(['target', 'groupId', 'screenId']);
+
+/**
+ * A second change to what `earlier` changes, joined to it on its read (#268). A new aim replaces the
+ * earlier one whole: a group's entry then aimed at the org kept its group, which the aim rule refuses,
+ * at save, after the drafts before it were written (#344). Each change passed alone, and aim is the
+ * only rule across fields, so the joined one passes too.
+ */
+export function join(earlier: Proposal, made: Proposal): Proposal {
+  const kept = made.input.target === undefined ? earlier.input : Object.fromEntries(Object.entries(earlier.input).filter(([k]) => !AIM.has(k)));
+  return { ...earlier, input: { ...kept, ...made.input, ifVersion: earlier.input.ifVersion } };
+}
+
+const applyCall = z
+  .object({
+    tool: z.string().max(60),
+    input: z.record(z.string(), z.unknown()),
+    token: z.string().regex(/^\d{1,16}\.[0-9a-f]{64}$/, 'the token the agent signed this change with'),
+  })
+  .strict();
+type ApplyCall = z.output<typeof applyCall>;
+const applyRequest = z.object({ calls: z.array(applyCall).min(1).max(MAX_DRAFTS) }).strict();
+
+/**
+ * `POST /api/agent/apply` (#268): the drafts the person saved, written in order through the
+ * dispatcher as the member via cms-agent, each checked again as when it was proposed; the first
+ * refused (a save made since, `conflict`) stops the rest, and is said as a refused call. Each write is
+ * audited by the dispatcher in its batch. Budget: at most 5 drafts and `SAVE_STATEMENTS` D1
+ * statements, costed before anything is written (test).
+ *
+ * Each call must carry the token its turn signed it with, for this member in this org, before it ran
+ * out (`signDraft`): all are checked before any is written, so the audit's "via agent" (`cms-agent`)
+ * is the turn's word, never the browser's (#269). Each update must carry its `ifVersion`, so a save
+ * never overwrites a change made since.
+ */
+export function mountApply(api: Hono<ApiEnv>, connectors: ConnectorDeps | undefined, deps: AgentDeps = {}) {
+  api.post('/agent/apply', async (c) => {
+    const request = await readBody(c, applyRequest);
+    if (request instanceof Response) return request;
+    if (saveStatements(request.calls) > SAVE_STATEMENTS)
+      return c.json({ error: 'invalid_input', message: 'these changes are too large to save at once: save fewer, or a shorter play order' }, 400);
+    const who = { orgId: c.var.org.orgId, userId: c.var.session.user.id };
+    const now = (deps.now ?? Date.now)();
+    for (const call of request.calls)
+      if (!(await proposedTo(c.env, who, call, now))) {
+        const message = 'this is not a change the agent proposed to you here, or it has run out: ask the agent again';
+        return c.json({ results: [{ tool: call.tool, ok: false, error: 'forbidden', message }] } satisfies ApplyAnswer, 403);
+      }
+    const caller: Caller = { ...cmsCaller(c, connectors), actor: { kind: 'user', id: c.var.session.user.id, clientId: CMS_AGENT_CLIENT_ID } };
+    const results: ApplyResult[] = [];
+    for (const { tool, input } of request.calls) {
+      if (!Object.hasOwn(DRAFTS, tool)) {
+        results.push({ tool, ok: false, error: 'forbidden', message: `${tool} is not one the agent drafts` });
+        break;
+      }
+      const named = DRAFTS[tool];
+      if (named && input[named.id] !== undefined && typeof input.ifVersion !== 'number') {
+        results.push({ tool, ok: false, error: 'invalid_input', message: 'an update is saved only at the version it was drafted on: give ifVersion' });
+        break;
+      }
+      const read = await before(caller, tool, input);
+      const refused = 'problem' in read ? read.problem : draftRefusal(tool, input, read.target);
+      if (refused) {
+        results.push({ tool, ok: false, error: 'forbidden', message: refused });
+        break;
+      }
+      const out = await dispatch(registry, tool, input, caller);
+      if (!out.ok) {
+        results.push({ tool, ok: false, error: out.error, message: out.message });
+        break;
+      }
+      results.push({ tool, ok: true, output: out.output });
+    }
+    const failed = results.at(-1);
+    // A refusal keeps its status (403 for a viewer, 409 for a save made since), with the results: the writes before it stand.
+    return c.json({ results } satisfies ApplyAnswer, failed && !failed.ok ? STATUS[failed.error] : 200);
+  });
+}

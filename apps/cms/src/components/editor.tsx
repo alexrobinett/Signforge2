@@ -4,10 +4,12 @@
  * and EditorFields, which the brand kit, screen, settings, audit log and assets pages and the pairing form use too.
  */
 import { Link } from '@tanstack/react-router';
-import { ChevronLeftIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ChevronLeftIcon, MoreHorizontalIcon } from 'lucide-react';
+import { type ReactNode, useCallback } from 'react';
 import { Alert, AlertDescription } from '~/components/ui/alert';
+import { AlertDialog, AlertDialogContent } from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '~/components/ui/dropdown-menu';
 import { useHydrated } from '~/lib/hydrated';
 
 /** How the save is going, in the header's words. */
@@ -61,13 +63,14 @@ export function EditorHeader({
         {back.label}
       </Link>
       <div className="flex min-w-0 flex-col gap-0.5">
-        <h1 className="truncate text-[17px] font-semibold">{title}</h1>
+        <h1 className="line-clamp-2 text-lg font-semibold wrap-anywhere">{title}</h1>
         <p className="text-xs text-muted-foreground" aria-live="polite">
           {about}
         </p>
       </div>
       {children && (
-        <div className="ml-auto flex gap-2">
+        // Wraps, right-aligned: on a phone four actions are wider than the editor, whose frame clips what overflows.
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
           <EditorFields>{children}</EditorFields>
         </div>
       )}
@@ -76,15 +79,42 @@ export function EditorHeader({
 }
 
 /** A save that failed, under the header; a refused one (`stale`: someone else changed it) offers a reload. */
-export function SaveAlert({ error, stale, onReload }: { error: string | null; stale: boolean; onReload: () => void }) {
+export function SaveAlert({ error, stale, onReload, onRetry }: { error: string | null; stale: boolean; onReload: () => void; onRetry: () => void }) {
+  // Its height while it sticks, as `--save-alert-height` on the page, for the scroll padding a focused field keeps clear
+  // of it (styles.css): measured, as a long refusal wraps to more lines (#495). None while it scrolls with the form.
+  const measured = useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    const root = document.documentElement;
+    const seen = new ResizeObserver(() =>
+      root.style.setProperty('--save-alert-height', getComputedStyle(el).position === 'sticky' ? `${el.offsetHeight}px` : '0px'),
+    );
+    seen.observe(el);
+    return () => {
+      seen.disconnect();
+      root.style.removeProperty('--save-alert-height');
+    };
+  }, []);
   if (!stale && !error) return null;
   return (
-    <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
+    // Announced as it appears (#479), and kept in view under a phone's top bar while the form scrolls. Only in a narrow
+    // editor: a wide one fits the viewport, with its stage sticky at the top, where it would cover the toggles (#485).
+    <Alert
+      ref={measured}
+      variant="destructive"
+      role="alert"
+      data-save-alert
+      className="sticky top-14 z-20 rounded-none border-x-0 border-t-0 lg:top-0 @3xl:static"
+    >
       <AlertDescription className="flex flex-wrap items-center gap-3">
         {error}
-        {stale && (
+        {stale ? (
           <Button size="sm" variant="outline" onClick={onReload}>
             Reload
+          </Button>
+        ) : (
+          // Not a conflict (no answer, a refusal): the edit is still here, and saves when tried again (review of #461).
+          <Button size="sm" variant="outline" onClick={onRetry}>
+            Try again
           </Button>
         )}
       </AlertDescription>
@@ -92,19 +122,56 @@ export function SaveAlert({ error, stale, onReload }: { error: string | null; st
   );
 }
 
-/** Saves the draft now; there is nothing to save while it is saved, saving, or refused. */
-export function SaveDraftButton({ status, stale, onSave }: { status: Parameters<typeof saveWord>[0]; stale: boolean; onSave: () => void }) {
+const MORE_ID = 'editor-more';
+
+/**
+ * The editor's ⋯ menu (#378), after Publish: Delete is in it, away from Publish, where
+ * a slip would hit it. It asks first (`EditorDeleteQuestion`), which gives focus back to ⋯.
+ */
+export function EditorMoreMenu({ onDelete }: { onDelete: () => void }) {
   return (
-    <Button variant="outline" disabled={status === 'saved' || status === 'saving' || stale} onClick={onSave}>
-      Save draft
-    </Button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button id={MORE_ID} variant="outline" size="icon" aria-label="More actions: delete">
+          <MoreHorizontalIcon aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onDelete}>
+          Delete…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-/** Publishes what the editor has open; while one is on its way, says so. */
+/**
+ * The question Delete… asks. Closed (Escape, Cancel), it gives focus to ⋯ at once. Radix gives it back
+ * once the closing has played, to what had it as the question opened: the menu's Delete… item, gone by
+ * then, so focus was on the page's body.
+ */
+export function EditorDeleteQuestion({ open, onOpenChange, children }: { open: boolean; onOpenChange: (open: boolean) => void; children: ReactNode }) {
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        onOpenChange(next);
+        // Once React has closed it: until then its focus trap takes focus back.
+        if (!next) queueMicrotask(() => document.getElementById(MORE_ID)?.focus());
+      }}
+    >
+      <AlertDialogContent onCloseAutoFocus={(e) => e.preventDefault()}>{children}</AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/**
+ * Publishes what the editor has open; while one is on its way, says so. Not disabled then (README,
+ * React rules): focus stays on it, so a question the publish asks (#360) gives focus back to it.
+ */
 export function PublishButton({ pending, disabled, onPublish }: { pending: boolean; disabled: boolean; onPublish: () => void }) {
   return (
-    <Button disabled={pending || disabled} onClick={onPublish}>
+    <Button disabled={disabled} aria-disabled={pending || undefined} className={pending ? 'opacity-60' : undefined} onClick={() => !pending && onPublish()}>
       {pending ? 'Publishing…' : 'Publish'}
     </Button>
   );

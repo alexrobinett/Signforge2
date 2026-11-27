@@ -8,7 +8,7 @@
  */
 import { spotProblems, type CompileInput } from '@signforge/compiler';
 import { compileProbe, DEFAULT_FIT, spotFromDraft, type DraftReads, type Probe, type SpotDraft as SavedDraft } from '@signforge/compiler/draft';
-import { validateSpotData, type FieldDef, type Orientation, type ScalarFieldDef, type ScreenManifest, type Transition } from '@signforge/contract';
+import { validateSpotField, type FieldDef, type Orientation, type ScreenManifest, type Transition } from '@signforge/contract';
 import type { ToolOutput } from '@signforge/tools/outputs';
 import type { AssetView } from './assets';
 import type { BindingInput } from './live-data';
@@ -62,49 +62,24 @@ export const usableVersions = (templates: TemplateView[]) =>
   });
 
 /**
- * The contract's messages for each field, from `validateSpotData` run on that field alone, so a
- * message sits by the field it is about. An image field with no image yet asks for one.
+ * The contract's messages for each field, from the check a publish runs on it (`validateSpotField`),
+ * so a message sits by the field it is about and the editor agrees with the publish: an image is
+ * checked with its toggle (#252), and a bound toggle never counts as off (#285). `fields` are the
+ * spot's, every one, as a publish sees them: an image's toggle may be a live field the form does
+ * not draw (#304). `names` are the fields to report on.
  */
-export function fieldProblems(fields: Record<string, FieldDef>, draft: Pick<SpotDraft, 'data' | 'assets'>): Map<string, string[]> {
+export function fieldProblems(
+  fields: Record<string, FieldDef>,
+  draft: Pick<SpotDraft, 'data' | 'assets' | 'bindings'>,
+  names: string[] = Object.keys(fields),
+): Map<string, string[]> {
   const out = new Map<string, string[]>();
-  for (const [name, def] of Object.entries(fields)) {
-    const data = name in draft.data ? { [name]: draft.data[name] } : {};
-    const assets = name in draft.assets ? { [name]: draft.assets[name] } : {};
-    const problems = validateSpotData({ [name]: def }, data, assets);
+  for (const name of names) {
+    const problems = validateSpotField(fields, draft.data, draft.assets, draft.bindings, name);
     if (problems.length) out.set(name, problems);
   }
   return out;
 }
-
-/** A value for a field with no default yet: a new list row's, or a new spot's. */
-export function startValue(d: ScalarFieldDef): unknown {
-  if (d.default !== undefined) return d.default;
-  switch (d.type) {
-    case 'text':
-    case 'url':
-      return '';
-    case 'number':
-      return d.min ?? 0;
-    case 'boolean':
-      return false;
-    case 'color':
-      return '#ffffff';
-    case 'select':
-      return d.options[0];
-    case 'date':
-    case 'datetime':
-      // No day is right for every template (a countdown's target, an event's start): without a `min`, the editor asks for one.
-      return d.min ?? '';
-  }
-}
-
-/** A new spot's data: a value for each field the template gives no default, so the draft starts valid but for a date to pick. */
-export const startData = (fields: Record<string, FieldDef>) =>
-  Object.fromEntries(
-    Object.entries(fields).flatMap(([name, def]) =>
-      def.type === 'image' || def.default !== undefined ? [] : [[name, def.type === 'list' ? [] : startValue(def)]],
-    ),
-  );
 
 /**
  * The asset and template views as the draft-to-spot module reads them. A template is the one
@@ -227,6 +202,33 @@ const KIND_WORD = { image: 'Image', video: 'Video', url: 'Web page' } as const;
 /** What the spot is, in a few words: its template's name, or its kind. */
 export const spotWhat = (s: Pick<SpotView, 'kind' | 'templateVersionId'>, versions: Map<string, TemplateVersionView>) =>
   s.kind === 'template' ? (versions.get(s.templateVersionId ?? '')?.manifest.name ?? 'Template') : KIND_WORD[s.kind];
+
+/** A spot's name, as `save_spot` takes it: at most this many characters. */
+const NAME_MAX = 100;
+
+/**
+ * A new spot's name from its template's (#360): the name itself while no spot has it, else the
+ * first free "Name 2", "Name 3", …; trimmed, and cut so the number still fits in a name's length.
+ */
+export function nextName(template: string, spots: readonly { name: string }[]): string {
+  const base = template.trim();
+  const taken = new Set(spots.map((s) => s.name));
+  const named = (suffix: string) => `${base.slice(0, NAME_MAX - suffix.length).trimEnd()}${suffix}`;
+  if (!taken.has(named(''))) return named('');
+  let n = 2;
+  while (taken.has(named(` ${n}`))) n += 1;
+  return named(` ${n}`);
+}
+
+const and = (words: string[]) => (words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : (words[0] ?? ''));
+
+/**
+ * What Publish asks before sample copy reaches screens (#360): "In Pier 9, Headline and Body still
+ * have sample text.", each spot named, even one alone: a publish from ⌘K or the sidebar shows no spot.
+ */
+export function sampleWords(spots: readonly { name: string; labels: string[] }[]): string {
+  return spots.map(({ name, labels }) => `In ${name}, ${and(labels)} still ${labels.length === 1 ? 'has' : 'have'} sample text.`).join(' ');
+}
 
 /** Whether screens have it, in words. */
 export const publishWord = (s: Pick<SpotView, 'published' | 'draftChanged'>) =>

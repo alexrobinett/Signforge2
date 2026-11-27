@@ -3,9 +3,13 @@
  * downloaded once however many manifests use it, and a manifest only goes live when every file
  * it names is present and verified.
  */
-import { safeUrl, validTimezone, validateManifest, type ScreenManifest } from '@signforge/contract';
+import { manifestShape, parseManifest, safeUrl, validTimezone, validateManifest, type ScreenManifest } from '@signforge/contract';
 import { planSync } from '@signforge/player-core';
+import type { Frames } from './bundles';
 import { STALL_MS, UnauthorisedError, download, type DownloadRequest, type DownloadResult } from './download';
+
+declare const __SF_PLAYER_VERSION__: string;
+declare const __SF_BUILD_TIME__: number;
 
 export { UnauthorisedError };
 
@@ -15,6 +19,37 @@ const ACTIVE = '/_sf/manifest/active';
 const BLOB_PREFIX = '/_sf/blob/';
 const PARTIAL_PREFIX = '/_sf/partial/';
 const blobKey = (sha: string) => `${BLOB_PREFIX}${sha}`;
+
+/**
+ * Each template bundle as this player contains it (`containedFrames`), kept beside the file cache so the first prepare
+ * after a page load or a kiosk restart does not contain it again: on a Pi 4 that was about 240 ms of a 400 kB bundle's
+ * first prepare (#232). Kept under the player's build, its version and when it was built: a build with uncommitted
+ * changes, or one made without git, names its commit or `0.0.0` alone, so the time tells it from the build before. A
+ * player that contains bundles differently never reads what another made, and a sync's cleanup deletes what others left.
+ */
+const FRAMES = 'sf-frames-v1';
+const FRAMES_PREFIX = '/_sf/frames/';
+const framesKey = (sha: string) => `${FRAMES_PREFIX}${encodeURIComponent(`${__SF_PLAYER_VERSION__}+${__SF_BUILD_TIME__}`)}/${sha}`;
+
+/** The frames this player made of bundle `sha` and kept, if it has. */
+export async function storedFrames(sha: string): Promise<Frames | undefined> {
+  const res = await (await caches.open(FRAMES)).match(framesKey(sha));
+  if (!res) return undefined;
+  const kept: unknown = await res.json();
+  return typeof kept === 'object' && kept && 'wrapper' in kept && 'template' in kept && typeof kept.wrapper === 'string' && typeof kept.template === 'string'
+    ? { wrapper: kept.wrapper, template: kept.template }
+    : undefined;
+}
+
+/** Forget the frames kept of bundle `sha`: a prepare from them failed, so they are made again. */
+export async function dropFrames(sha: string): Promise<void> {
+  await (await caches.open(FRAMES)).delete(framesKey(sha));
+}
+
+/** Keep the frames of bundle `sha`, for the next page load. */
+export async function storeFrames(sha: string, frames: Frames): Promise<void> {
+  await (await caches.open(FRAMES)).put(framesKey(sha), jsonResponse(JSON.stringify(frames)));
+}
 
 /**
  * Download one file into the file cache (see `download`). In the browser it runs in a worker, so
@@ -50,44 +85,41 @@ const LAST_GOOD = '/_sf/manifest/last-good';
 const jsonResponse = (text: string) => new Response(text, { headers: { 'content-type': 'application/json' } });
 
 /**
- * What the player needs to run a manifest at all: without these the sequencer cannot pick a spot.
+ * What the player needs to run a manifest at all, beyond its shape: without these the sequencer cannot pick a spot.
  * Also holds the line on what makes a screen unsafe, whatever release stored the manifest.
  */
-function unplayable(m: Partial<ScreenManifest> | null): string | undefined {
-  if (!m || typeof m !== 'object') return 'not an object';
-  if (typeof m.id !== 'string' || !m.id) return 'no id';
-  for (const k of ['files', 'templates', 'spots', 'playlists', 'dataSources'] as const) if (!m[k] || typeof m[k] !== 'object') return `no ${k}`;
-  if (!Array.isArray(m.schedule)) return 'no schedule';
-  if (!m.screen || !validTimezone(m.screen.timezone)) return 'no valid time zone';
-  if (!Object.values(m.playlists!).every((p) => p && Array.isArray(p.items))) return 'a playlist has no items';
-  if (!m.playlists![m.defaultPlaylist ?? '']) return 'no default playlist';
-  if (Object.values(m.spots!).some((sp) => sp?.kind === 'url' && !safeUrl(sp.url))) return 'a URL spot is not https';
+function unplayable(m: ScreenManifest): string | undefined {
+  if (!validTimezone(m.screen.timezone)) return 'no valid time zone';
+  if (!m.playlists[m.defaultPlaylist]) return 'no default playlist';
+  if (Object.values(m.spots).some((sp) => sp.kind === 'url' && !safeUrl(sp.url))) return 'a URL spot is not https';
   return undefined;
 }
 
 /**
  * Read a stored manifest. Everything stored passed the validator of the release that stored it,
  * so one this release's validator rejects (a schema it no longer plays, a tightened rule) is
- * still played when it can be run at all: an offline screen keeps its content across an update.
+ * still played when it can be run at all: when it reads as the manifest's shape (#156) and is playable. An offline
+ * screen keeps its content across an update.
  */
 async function loadStored(key: string): Promise<ScreenManifest | undefined> {
   const text = await (await (await caches.open(STATE)).match(key))?.text();
   if (text === undefined) return undefined;
-  let m: ScreenManifest;
+  let stored: unknown;
   try {
-    m = JSON.parse(text) as ScreenManifest;
+    stored = JSON.parse(text);
   } catch {
     console.warn(`[sf] stored manifest ${key} is not JSON; ignored`);
     return undefined;
   }
-  const broken = unplayable(m);
-  if (broken) {
+  const read = manifestShape.read(stored);
+  const broken = read.ok ? unplayable(read.value) : read.problems[0];
+  if (!read.ok || broken) {
     console.warn(`[sf] stored manifest ${key} cannot be played (${broken}); ignored`);
     return undefined;
   }
-  const problems = validateManifest(m);
-  if (problems.length) console.warn(`[sf] stored manifest ${m.id} is kept although this player rejects it: ${problems[0]}`);
-  return m;
+  const problems = validateManifest(read.value);
+  if (problems.length) console.warn(`[sf] stored manifest ${read.value.id} is kept although this player rejects it: ${problems[0]}`);
+  return read.value;
 }
 
 /** The manifest last made active and the last one that played, as far as the cache holds usable copies. */
@@ -152,6 +184,19 @@ export class PinSet implements Iterable<string> {
   }
 }
 
+/**
+ * The end of the file cache work queued so far. A sync and a feed-image pass take turns: each
+ * one's cleanup deletes every partial download and every file the active manifest does not name,
+ * so run alongside another it would delete that one's download in flight, or the files of a
+ * manifest downloaded but not yet made active.
+ */
+let turn: Promise<unknown> = Promise.resolve();
+function inTurn<T>(work: () => Promise<T>): Promise<T> {
+  const run = turn.then(work);
+  turn = run.catch(() => undefined);
+  return run;
+}
+
 /** Files of the manifest last synced, and of the one playing while falling back, that were missing and are not yet downloaded. */
 let missingNow = 0;
 export const filesMissing = (): number => missingNow;
@@ -188,9 +233,13 @@ export interface SyncOptions {
  * Fetch the manifest at `base`. If it is new, download and verify every missing file, then
  * make it active in one step. Any failure leaves the current manifest and files untouched.
  */
-export async function sync(
+export function sync(base: string, options: SyncOptions = {}): Promise<SyncResult> {
+  return inTurn(() => syncNow(base, options));
+}
+
+async function syncNow(
   base: string,
-  { currentId, headers = {}, stallMs = STALL_MS, pinned = [], fallback, signal = new AbortController().signal }: SyncOptions = {},
+  { currentId, headers = {}, stallMs = STALL_MS, pinned = [], fallback, signal = new AbortController().signal }: SyncOptions,
 ): Promise<SyncResult> {
   const get = (conditional: boolean) =>
     fetch(`${base}/manifest.json`, {
@@ -220,13 +269,13 @@ export async function sync(
     if (!res.ok) throw new Error(`manifest request failed: ${res.status}`);
     text = await res.text();
   }
-  const next = JSON.parse(text) as ScreenManifest;
-  const same = next.id === currentId;
-
-  if (!same) {
-    const problems = validateManifest(next);
-    if (problems.length) throw new Error(`manifest ${next.id} rejected: ${problems[0]}`);
-  }
+  const sent: unknown = JSON.parse(text);
+  const id = typeof sent === 'object' && sent !== null && 'id' in sent ? sent.id : undefined;
+  const same = id === currentId;
+  // The manifest playing, unchanged, is read by its shape alone, as it was when stored; a new one meets every rule.
+  const read = same ? manifestShape.read(sent) : parseManifest(sent);
+  if (!read.ok) throw new Error(`manifest ${String(id)} rejected: ${read.problems[0]}`);
+  const next = read.value;
 
   // Even when the manifest is unchanged, files may have gone: the browser can evict the cache
   // under storage pressure if persistence was refused. Fetch back whatever is missing.
@@ -269,12 +318,74 @@ export async function sync(
   return same ? { changed: false, downloaded } : { manifest: next, changed: true, downloaded };
 }
 
-/** Delete every file neither the active manifest nor a pin needs, and any leftover partial download. */
-async function cleanup(blobs: Cache, active: ScreenManifest, pinned: Iterable<string>): Promise<void> {
+/** Delete every file neither the active manifest nor a pin needs, and any leftover partial download. Returns true if any stale file was kept by a pin. */
+async function cleanup(blobs: Cache, active: ScreenManifest, pinned: Iterable<string>): Promise<boolean> {
   const { hashes, partials } = await heldKeys(blobs);
   const { stale } = planSync(active, hashes);
   const keep = new Set(pinned);
-  await Promise.all([...stale.filter((sha) => !keep.has(sha)).map(blobKey), ...partials].map((k) => blobs.delete(k)));
+  const evict = stale.filter((sha) => !keep.has(sha));
+  await Promise.all([...evict.map(blobKey), ...partials].map((k) => blobs.delete(k)));
+  // Frames go with their bundle, and those another build made go.
+  const gone = new Set(evict);
+  const held = new Set(hashes.filter((sha) => !gone.has(sha)).map(framesKey));
+  try {
+    const frames = await caches.open(FRAMES);
+    const kept = (await frames.keys()).map((r) => new URL(r.url).pathname);
+    await Promise.all(kept.filter((k) => !held.has(k)).map((k) => frames.delete(k)));
+  } catch (err) {
+    // Kept frames only save a prepare time: a frames cache that cannot be listed or pruned must not fail the sync, which
+    // would leave the screen on its old content. It goes, and is made again.
+    console.warn('[sf] could not prune kept frames: dropping them', err);
+    await caches.delete(FRAMES).catch(() => undefined);
+  }
+  return evict.length < stale.length;
+}
+
+/** Which of `hashes` are currently stored in the local blob cache, in order and deduplicated. */
+export async function heldBlobs(hashes: Iterable<string>): Promise<string[]> {
+  const want = [...new Set(hashes)];
+  if (!want.length) return [];
+  const held = new Set((await heldKeys(await caches.open(BLOBS))).hashes);
+  return want.filter((sha) => held.has(sha));
+}
+
+/**
+ * Feed images (#196): delete the files nothing needs, as a sync's cleanup does, then fetch those of
+ * `hashes` that are missing. Cleanup goes first, so the space is free before new files arrive.
+ *
+ * What to keep is the stored active manifest's files (the synced one, which while falling back is
+ * not the one playing) and `pinned`, read when cleanup runs. With no stored manifest nothing is
+ * known to be stale, and nothing is deleted.
+ *
+ * Best-effort: a feed image that is missing, corrupt, too large or not an image is logged and
+ * skipped, so its story plays with no image; a 401 (`UnauthorisedError`) or an abort is rethrown.
+ * Returns true if cleanup kept a stale file because a pin held it.
+ */
+export function syncFeedImages(
+  base: string,
+  hashes: Iterable<string>,
+  { headers = {}, stallMs = STALL_MS, pinned = [], signal = new AbortController().signal }: Pick<SyncOptions, 'headers' | 'stallMs' | 'pinned' | 'signal'> = {},
+): Promise<boolean> {
+  return inTurn(async () => {
+    const blobs = await caches.open(BLOBS);
+    const active = await loadStored(ACTIVE);
+    const kept = active ? await cleanup(blobs, active, pinned) : false;
+    const held = new Set((await heldKeys(blobs)).hashes);
+    for (const sha of new Set(hashes)) {
+      if (held.has(sha)) continue;
+      signal.throwIfAborted();
+      try {
+        await fetchFile(
+          { url: `${base}/blobs/${sha}`, sha, feedImage: true, headers, stallMs, key: blobKey(sha), partialKey: `${PARTIAL_PREFIX}${sha}` },
+          signal,
+        );
+      } catch (err) {
+        if (err instanceof UnauthorisedError || signal.aborted) throw err;
+        console.warn(`[sf] feed image ${sha.slice(0, 12)} unavailable`, err);
+      }
+    }
+    return kept;
+  });
 }
 
 /** Ask the browser not to evict the cache under storage pressure. */
@@ -288,6 +399,6 @@ export async function requestPersistence(): Promise<boolean> {
  * org that revoked it. The player shell, cached by the service worker, stays.
  */
 export async function wipeContent(): Promise<void> {
-  await Promise.all([caches.delete(BLOBS), caches.delete(STATE)]);
+  await Promise.all([caches.delete(BLOBS), caches.delete(STATE), caches.delete(FRAMES)]);
   missingNow = 0;
 }

@@ -77,6 +77,7 @@ function Mapping({ field, def, binding, columns, onChange }: { field: string; de
       <legend className="mb-1 text-sm font-medium">Columns for each item</legend>
       <div className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
         {Object.entries(def.item).map(([prop, d]) => {
+          if (d.type === 'image') return null;
           const current = table.columns[prop];
           const id = `map-${field}-${prop}`;
           return (
@@ -208,7 +209,7 @@ function TableValues({
   const rows = readPath(data, 'rows');
   // Read when it was added, not yet polled: what screens get after the first check.
   const firstRead = !snapshot && justRead !== undefined;
-  const fresh = firstRead || isFresh(snapshot, now);
+  const fresh = firstRead || isFresh(dataSource, snapshot, now);
   const unbind = () => onChange((d) => ({ ...d, bindings: Object.fromEntries(Object.entries(d.bindings).filter(([f]) => !(f in live.fields))) }));
   return (
     <LiveCard fresh={fresh} instead="typed items" className="gap-3">
@@ -254,7 +255,7 @@ function TableValues({
           </div>
         );
       })}
-      <p className="text-[13px] leading-snug text-foreground">
+      <p className="text-meta leading-snug text-foreground">
         {firstRead && !dataSource.lastError
           ? 'Read just now. Screens get it after the first check, within a minute.'
           : freshness(dataSource, snapshot, now).replaceAll('fallback values', 'typed items')}
@@ -285,10 +286,10 @@ function TablePicker({ target, ids, sources, boundId }: { target: SourceTarget; 
     <div className="flex flex-col gap-3">
       {tables.length > 0 && <SourceChoice target={target} sources={tables} boundId={boundId} id={`${ids}.table`} label="Table" word="table" />}
       {st.adding ? (
-        <fieldset className="rounded-[10px] border p-3">
-          {/* Floated, so it sits inside the frame instead of cutting its border. */}
-          <legend className="float-left mb-3 font-medium">From a CSV or JSON link</legend>
-          <div className="clear-left flex flex-col gap-3">
+        // Grouped by its heading and space, not a box inside the editor's form (#377).
+        <fieldset>
+          <legend className="mb-3 font-medium">From a CSV or JSON link</legend>
+          <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
               <label htmlFor={`${ids}.table-url`} className="text-sm font-medium">
                 Address

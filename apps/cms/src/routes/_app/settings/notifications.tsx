@@ -9,7 +9,7 @@ import { useId, type ReactNode, type SubmitEvent } from 'react';
 import { toast } from 'sonner';
 import { EditorFields } from '~/components/editor';
 import { PageHeader } from '~/components/page';
-import { ActionError, SaveRow, SettingsSection, useRunning } from '~/components/settings/parts';
+import { ActionError, SaveState, SettingsSection, useRunning } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
@@ -217,16 +217,32 @@ function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
   const running = useRunning(pageOf(orgId));
   const busy = running !== undefined;
   const removing = running === `remove:${kind}`;
+  const focus = useAppStore((s) => s.focusWhenReplaced);
   const name = CHANNEL_COPY[kind].title;
   if (!asking)
     return (
-      <Button type="button" variant="ghost" className="text-destructive" aria-disabled={busy || undefined} onClick={() => ask(orgId, kind)}>
+      <Button
+        ref={focus(`remove:${kind}`)}
+        type="button"
+        variant="ghost"
+        className="text-destructive"
+        aria-disabled={busy || undefined}
+        onClick={() => ask(orgId, kind)}
+      >
         Remove {name}
       </Button>
     );
   return (
-    <div className="w-full space-y-2 rounded-lg border border-destructive/40 p-3">
-      <p>Stop sending alerts to {name}? Its URL is forgotten, and alerts still waiting for it are not sent.</p>
+    // Escape is Keep it (review of #421): focus goes back to Remove.
+    <fieldset
+      aria-label={`Remove ${name}`}
+      className="m-0 min-w-0 w-full space-y-2 rounded-lg border border-destructive/40 p-3"
+      onKeyDown={(e) => e.key === 'Escape' && ask(orgId, null)}
+    >
+      {/* Focus comes here as Remove gives way to it (#289): the question first, then Tab to its answers. */}
+      <p ref={focus(`confirm:${kind}`)} tabIndex={-1} className="rounded-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+        Stop sending alerts to {name}? Its URL is forgotten, and alerts still waiting for it are not sent.
+      </p>
       <ActionError at={`remove:${kind}`} />
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="destructive" aria-disabled={busy || undefined} onClick={() => void remove(orgId, kind)}>
@@ -237,7 +253,7 @@ function RemoveChannel({ kind }: { kind: AlertChannel['kind'] }) {
           Keep it
         </Button>
       </div>
-    </div>
+    </fieldset>
   );
 }
 
@@ -257,6 +273,8 @@ function UrlForm({
 }) {
   const id = useId();
   const running = useRunning(pageOf(useOrgId()));
+  // Once the channel is removed, its card's form to set one takes the focus Remove had (#289).
+  const focus = useAppStore((s) => s.focusWhenReplaced(`form:${at}`));
   const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const url = String(new FormData(e.currentTarget).get('url') ?? '');
@@ -271,7 +289,7 @@ function UrlForm({
     <EditorFields>
       <form method="post" onSubmit={submit} className="mt-2 w-full space-y-2" noValidate>
         <Label htmlFor={id}>{name}</Label>
-        <Input id={id} name="url" type="url" inputMode="url" autoComplete="off" spellCheck={false} placeholder={placeholder} required />
+        <Input ref={focus} id={id} name="url" type="url" inputMode="url" autoComplete="off" spellCheck={false} placeholder={placeholder} required />
         <p className="text-xs text-muted-foreground">Kept encrypted, and never shown again.</p>
         <ActionError at={at} />
         <Button type="submit" aria-disabled={running !== undefined || undefined}>
@@ -338,13 +356,11 @@ function RulesForm({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
   const saveSettings = useAppStore((s) => s.saveSettings);
   // A rule shows its edited fields, else what the page read: a reload refreshes the rest.
   const rule = (kind: AlertKind): AlertRule => ({ ...settings.alerts[kind], ...edits?.[kind] });
-  const edit = (kind: AlertKind, change: Partial<AlertRule>) =>
+  // Every control here is a choice: it saves at once (#366).
+  const edit = (kind: AlertKind, change: Partial<AlertRule>) => {
     editSettings(orgId, 'notifications', settings.version, { alerts: { ...edits, [kind]: { ...edits?.[kind], ...change } } });
-
-  function submit(e: SubmitEvent<HTMLFormElement>) {
-    e.preventDefault();
     void saveSettings(orgId, 'notifications', settings);
-  }
+  };
 
   const box = (kind: AlertKind, when: string, channel: 'email' | 'slack' | 'webhook') => (
     <label className="flex items-center gap-2 sm:justify-center">
@@ -364,7 +380,7 @@ function RulesForm({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
   );
 
   return (
-    <form onSubmit={submit} noValidate>
+    <form onSubmit={(e) => e.preventDefault()} noValidate>
       <EditorFields>
         <SettingsSection
           id={`${id}-who`}
@@ -418,7 +434,7 @@ function RulesForm({ data, canEdit }: { data: Loaded; canEdit: boolean }) {
             </Link>
             .
           </p>
-          <SaveRow at="notifications" scope={pageOf(orgId)} canEdit={canEdit} />
+          <SaveState form="notifications" canEdit={canEdit} />
         </SettingsSection>
       </EditorFields>
     </form>

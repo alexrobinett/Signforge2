@@ -1,0 +1,1 @@
+ALTER TABLE `feed_images` ADD `validated_from` text;

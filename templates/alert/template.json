@@ -1,21 +1,22 @@
 {
   "id": "alert",
-  "version": "1.0.0",
+  "version": "1.3.1",
   "name": "Alert",
   "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
   "fields": {
     "severity": { "type": "select", "label": "Severity", "options": ["emergency", "warning", "advisory", "notice"], "default": "emergency" },
-    "headline": { "type": "text", "label": "Headline", "default": "Evacuate the building now", "maxLength": 60 },
+    "headline": { "type": "text", "label": "Headline", "default": "Evacuate the building now", "maxLength": 40, "maxMarks": 4 },
     "instructions": {
       "type": "text",
       "label": "Instructions",
       "default": "Use the nearest stairway. Do not use the elevators. Gather at the north car park and wait for your floor warden.",
-      "maxLength": 240
+      "maxLength": 240,
+      "maxMarks": 4
     },
-    "issuedBy": { "type": "text", "label": "Issued by", "default": "Issued by Building Safety", "maxLength": 48 },
-    "endsAt": { "type": "text", "label": "Ends at", "default": "4:00 PM", "maxLength": 24 },
-    "qrUrl": { "type": "url", "label": "QR code address", "default": "", "maxLength": 200 },
-    "qrLabel": { "type": "text", "label": "QR code label", "default": "Scan for updates", "maxLength": 32 },
+    "issuedBy": { "type": "text", "label": "Issued by", "default": "Issued by Building Safety", "maxLength": 48, "maxMarks": 4 },
+    "endsAt": { "type": "text", "label": "Ends at", "default": "4:00 PM", "maxLength": 24, "maxMarks": 4 },
+    "qrUrl": { "type": "url", "label": "QR code address", "default": "", "maxBytes": 213 },
+    "qrLabel": { "type": "text", "label": "QR code label", "default": "Scan for updates", "maxLength": 32, "maxMarks": 4 },
     "showQr": { "type": "boolean", "label": "Show the QR code", "default": true },
     "showIssuedBy": { "type": "boolean", "label": "Show who issued it", "default": true },
     "showEndsAt": { "type": "boolean", "label": "Show when it ends", "default": true }

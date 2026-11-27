@@ -24,13 +24,13 @@ let page: Page;
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-dates-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Launch Hall');
+  await createOrg(page, 'Launch Hall', ADDRESS);
   const orgId: string = (await (await page.request.get('/api/session')).json()).organization.id;
   // The org's own approved template, in SQL: registering one runs the runtime check, which the local API has no container for.
   // The form is what this spec is about: the stage never gets the bundle, which is not uploaded.
   const at = Date.now();
   const report = JSON.stringify({ ok: true, bundleBytes: 1000, checks: [], checkedAt: at, sourcesSha256: '0'.repeat(64) });
-  d1(
+  await d1(
     `INSERT INTO templates (id, org_id, key, name, created_at, updated_at) VALUES ('tpl_e2e_${at}', '${orgId}', 'launch-countdown', 'Launch countdown', ${at}, ${at}); ` +
       'INSERT INTO template_versions (id, org_id, template_id, version, manifest_json, bundle_sha256, status, check_report_json, created_at, updated_at) ' +
       `VALUES ('tv_e2e_${at}', '${orgId}', 'tpl_e2e_${at}', '1.0.0', '${JSON.stringify(countdown)}', '${'f'.repeat(64)}', 'approved', '${report}', ${at}, ${at})`,
@@ -38,12 +38,11 @@ test.beforeAll(async ({ browser }) => {
 });
 test.afterAll(() => page.context().close());
 
-test('a new spot leaves a datetime with no default for the editor to pick, says it needs one, and saves the one picked', async () => {
-  test.setTimeout(60_000);
+test('a new spot leaves a datetime with no default for the editor to pick, says it needs one once left empty, and saves the one picked', async () => {
   await page.goto('/spots');
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
-  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: 'Launch countdown' });
+  await page.getByRole('radio', { name: 'Launch countdown', exact: true }).check();
   await page.getByLabel('Name').fill('Grand opening');
   await page.getByRole('button', { name: 'Create spot' }).click();
   await expect(page.getByRole('heading', { name: 'Grand opening', level: 1 })).toBeVisible();
@@ -53,11 +52,23 @@ test('a new spot leaves a datetime with no default for the editor to pick, says 
   const target = page.getByLabel('Target');
   await expect(target).toHaveAttribute('type', 'datetime-local');
   await expect(target).toHaveValue('');
+  // Nothing is wrong with a field nobody has had the chance to fill (#359): left empty, it says so, in words.
+  await expect(target).not.toHaveAttribute('aria-invalid');
+  await expect(page.locator('#field-target-error')).toBeEmpty();
+  await target.focus();
+  await target.blur();
   await expect(target).toHaveAttribute('aria-invalid', 'true');
-  await expect(page.locator('#field-target-error')).toHaveText('field "target" has no date and time yet');
-  expect((await tool(page, 'get_spot', { spotId })).spot.data).toEqual({ target: '' });
+  await expect(page.locator('#field-target-error')).toHaveText('No date and time for Target: pick one.');
+  // Said where a screen reader hears it as it appears: a live region the field had all along (review of #387).
+  await expect(page.locator('#field-target-error')).toHaveAttribute('aria-live', 'polite');
+  await expect(target).toHaveAttribute('aria-describedby', 'field-target-error');
+  // Its text starts with the template's sample copy, marked as sample (#360; before, empty, #253).
+  expect((await tool(page, 'get_spot', { spotId })).spot.data).toEqual({ target: '', title: 'Doors open' });
+  await expect(page.getByLabel('Title')).toHaveAccessibleDescription('Sample text. Replace it before you publish.');
 
   await target.fill('2026-12-24T18:00');
-  await expect(page.locator('#field-target-error')).toHaveCount(0);
-  await expect.poll(async () => (await tool(page, 'get_spot', { spotId })).spot.data, { timeout: 10_000 }).toEqual({ target: '2026-12-24T18:00' });
+  await expect(page.locator('#field-target-error')).toBeEmpty();
+  await expect
+    .poll(async () => (await tool(page, 'get_spot', { spotId })).spot.data, { timeout: 10_000 })
+    .toEqual({ target: '2026-12-24T18:00', title: 'Doors open' });
 });

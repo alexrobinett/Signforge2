@@ -25,23 +25,47 @@ interface UploadSettings {
 }
 /** The data-source poller (src/data). */
 interface DataSourceSettings {
-  /** Encrypts feed URLs and alert channels' URLs and signing secrets at rest (src/data/cipher.ts), 32+ random bytes. Required outside dev; changing it loses every stored URL and secret. */
+  /**
+   * Encrypts feed URLs and alert channels' URLs and signing secrets at rest, and seals every list's cursors (src/data/cipher.ts,
+   * #345), 32+ random bytes. Required outside dev, by any paginated list too, so an environment's first deploy must set it;
+   * changing it loses every stored URL and secret, and every cursor given out.
+   */
   DATA_SOURCE_KEY?: string;
   /** Dev only: where `find_places` searches instead of Open-Meteo's geocoding (src/data/places.ts). The CMS e2e points it at a stub. */
   GEOCODING_URL?: string;
   /** Dev only: the origin that answers every feed fetch, path and query kept (src/data/fetch.ts `feedGuards`). The CMS e2e points it at its file server. */
   FEED_STUB_URL?: string;
+  /** New feed photos an org may queue in a day (src/data/feed-photos.ts `photoBudget`), 60 when unset. The demo sets more for its real-feed test. */
+  FEED_PHOTOS_ORG_DAILY?: string;
+  /** New feed photos one source may queue in a day, 30 when unset. */
+  FEED_PHOTOS_SOURCE_DAILY?: string;
+  /** Queue messages the feed photos may send a UTC day, across orgs, rechecks and retries too (#339), 500 when unset. */
+  FEED_PHOTOS_QUEUE_DAILY?: string;
+  /** Images transformations the feed photos may ask for a UTC month (src/data/feed-photos.ts `monthlyTransforms`, #500), 4,500 when unset. */
+  IMAGES_MONTHLY_TRANSFORMS?: string;
 }
 /** Connected accounts (src/connectors). */
 interface ConnectorSettings {
   /**
-   * Encrypts connections' credentials (OAuth grants, API keys) and pending PKCE verifiers at rest
+   * Encrypts connections' credentials (OAuth grants, API keys), pending PKCE verifiers and orgs' model keys at rest
    * (src/connectors/vault.ts), 32+ random bytes, separate from DATA_SOURCE_KEY. Required outside dev;
    * changing it loses every connection's credentials (each then needs reconnecting).
    */
   CONNECTION_KEY?: string;
 }
-interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings {}
+/** The built-in agent's model providers (src/agent). */
+interface AgentSettings {
+  /** Dev only: where the Anthropic adapter sends its requests instead of Anthropic's API (src/agent/provider.ts). The CMS e2e points it at a stub. */
+  ANTHROPIC_BASE_URL?: string;
+}
+/** Reading agents' calls back (src/agents/calls.ts): Analytics Engine's SQL API. Unset in dev, which keeps its calls in the process. */
+interface AgentCallSettings {
+  /** The Cloudflare account the AGENT_CALLS dataset is in. */
+  ANALYTICS_ACCOUNT_ID?: string;
+  /** An API token with Account Analytics: Read, for the SQL API. A secret. Without it, a deployed environment shows no call numbers. */
+  ANALYTICS_TOKEN?: string;
+}
+interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings, AgentSettings, AgentCallSettings {}
 declare namespace Cloudflare {
-  interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings {}
+  interface Env extends AuthSettings, UploadSettings, DataSourceSettings, ConnectorSettings, AgentSettings, AgentCallSettings {}
 }

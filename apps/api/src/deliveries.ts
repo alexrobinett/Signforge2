@@ -23,19 +23,31 @@ import {
   scoped,
   settleAlertDeliveries,
 } from '@signforge/db';
-import type { AlertEvent } from '@signforge/tools';
+import { type AlertEvent, approves, AUDIENCE_ROLES, orgSettings } from '@signforge/tools';
 import { MissingKey, openAlertSecret } from './data/cipher';
 import { dohResolver, FetchError, type FetchGuards, guardedPost } from './data/fetch';
 import type { EmailSender } from './email';
 
 /**
- * Deliveries per run. Each POST takes one fetch, and its host's DNS two more, once per run: 12 to
- * as many hosts is 36 of the Free plan's 50 fetches an invocation. Its D1 queries do not grow with
- * it: the claim, the channels and the settles are one each (`claimDueAlertDeliveries` in
- * packages/db), and an email test reads its org's members once. The rest wait for the next run.
+ * Deliveries per run, sized for the Workers Paid plan's 1,000 D1 queries and 1,000 calls to services an invocation. Each
+ * POST takes one fetch, and its host's DNS two more, once per run: 40 to as many hosts is 120. Its D1 queries do not grow
+ * with it: the claim, the channels (one JSON bind) and the settles are one each (`claimDueAlertDeliveries` in packages/db),
+ * and an email test reads its org's members once. Bounded at 40 so even worst-case approver fan-out stays under 1,000 calls.
+ * The rest wait for the next run.
  */
-const DELIVERIES_PER_RUN = 12;
-/** How long a claimed attempt is held: past one run's sends at 5 seconds each, and short of the next run. */
+export const DELIVERIES_PER_RUN = 40;
+/**
+ * One exception: an approvers' email this run claims whole (one `deliverNow` did not send) fans out, and sends up to this
+ * many emails more, with one D1 batch to queue them and one to settle them. All 40 deliveries may fan out: 40 * (1 + 12)
+ * = 520 calls, with the DNS lookups under 1,000.
+ */
+const FANOUT_PER_DELIVERY = 12;
+/**
+ * Lanes sending at once: a lane is one org's one channel, whose deliveries go one at a time, so one receiver at a time
+ * sees SignForge and Slack's one message a second holds. Others (another org's webhook, another channel) run alongside.
+ */
+export const CONCURRENT_LANES = 8;
+/** How long a claimed attempt is held: past one lane's sends, all 40 at 5 seconds each, and short of the next run. */
 const LEASE_MS = 4 * 60_000;
 const FIRST_RETRY_MS = 5 * 60_000;
 const MAX_RETRY_MS = 2 * 3_600_000;
@@ -59,12 +71,12 @@ type DeliveryEnv = Pick<Env, 'DB' | 'DATA_SOURCE_KEY' | 'ENVIRONMENT'>;
 /** Where an attempt sends: the channel its delivery names, and for email the org's members. */
 interface Reach {
   channel: (orgId: string, kind: AlertChannelRow['kind']) => AlertChannelRow | undefined;
-  members: (orgId: string) => Promise<{ userId: string; email: string }[]>;
+  members: (orgId: string) => Promise<{ userId: string; email: string; role: string }[]>;
 }
 
 /** The org's members, read once per run or call. */
 function membersOnce(db: D1Database): Reach['members'] {
-  const read = new Map<string, Promise<{ userId: string; email: string }[]>>();
+  const read = new Map<string, Promise<{ userId: string; email: string; role: string }[]>>();
   return (orgId) => {
     let m = read.get(orgId);
     if (!m) read.set(orgId, (m = orgMembers(db, orgId)));
@@ -73,9 +85,9 @@ function membersOnce(db: D1Database): Reach['members'] {
 }
 
 /**
- * Send what is due at `now`, one at a time, so one receiver at a time sees SignForge and Slack's
- * one message a second holds; then record every attempt in one batch. A run that dies before that
- * leaves its attempts claimed, and the next run after the lease sends them again.
+ * Send what is due at `now`, CONCURRENT_LANES lanes at a time, each lane's deliveries one at a time;
+ * then record every attempt in one batch. A run that dies before that leaves its attempts claimed,
+ * and the next run after the lease sends them again.
  */
 export async function deliverAlerts(env: DeliveryEnv, email: EmailSender, { now, guards = workerGuards() }: { now: number; guards?: FetchGuards }) {
   const claimed = await claimDueAlertDeliveries(env.DB, now, { limit: DELIVERIES_PER_RUN, leaseMs: LEASE_MS });
@@ -91,12 +103,19 @@ export async function deliverAlerts(env: DeliveryEnv, email: EmailSender, { now,
   };
   const settled: { orgId: string; id: string; attempt: number; result: AttemptResult }[] = [];
   const failed: unknown[] = [];
-  for (const row of claimed) {
-    await attempt(env, email, { ...guards, resolve }, reach, row, now).then(
-      (result) => settled.push({ orgId: row.orgId, id: row.id, attempt: row.attempts, result }),
-      (e: unknown) => failed.push(e),
-    );
-  }
+  const lanes = Map.groupBy(claimed, (row) => `${row.orgId}:${row.channel}`);
+  const waiting = [...lanes.values()];
+  const lane = async () => {
+    for (let rows = waiting.shift(); rows; rows = waiting.shift()) {
+      for (const row of rows) {
+        await attempt(env, email, { ...guards, resolve }, reach, row, now).then(
+          (result) => settled.push({ orgId: row.orgId, id: row.id, attempt: row.attempts, result }),
+          (e: unknown) => failed.push(e),
+        );
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENT_LANES, waiting.length) }, lane));
   await settleAlertDeliveries(env.DB, now, settled);
   if (failed.length) throw new AggregateError(failed, 'alert deliveries failed');
 }
@@ -115,7 +134,7 @@ export async function deliverAlert(env: DeliveryEnv, email: EmailSender, orgId: 
 async function attempt(env: DeliveryEnv, email: EmailSender, guards: FetchGuards, reach: Reach, row: AlertDeliveryRow, now: number): Promise<AttemptResult> {
   const event: AlertEvent = JSON.parse(row.eventJson);
   try {
-    return { ok: true, httpStatus: await send(env, email, guards, reach, row, event) };
+    return { ok: true, httpStatus: await send(env, email, guards, reach, row, event, now) };
   } catch (e) {
     const failure =
       e instanceof Undeliverable
@@ -134,11 +153,41 @@ async function attempt(env: DeliveryEnv, email: EmailSender, guards: FetchGuards
 }
 
 /** Send it on its channel; the receiver's HTTP status, or null for email. */
-async function send(env: DeliveryEnv, email: EmailSender, guards: FetchGuards, reach: Reach, row: AlertDeliveryRow, event: AlertEvent): Promise<number | null> {
+async function send(
+  env: DeliveryEnv,
+  email: EmailSender,
+  guards: FetchGuards,
+  reach: Reach,
+  row: AlertDeliveryRow,
+  event: AlertEvent,
+  now: number,
+): Promise<number | null> {
   if (row.channel === 'email') {
-    const member = (await reach.members(row.orgId)).find((m) => m.userId === row.toUserId);
+    const members = await reach.members(row.orgId);
+    if (row.toUserId === null) {
+      // Addressed to those who may approve now: one delivery each, queued in one batch, each sent and
+      // retried on its own, so one mailbox that fails stops no other, and a retry sends to no one twice.
+      // A run's worth go now, claimed as they are queued and settled in one batch; the rest at the runs
+      // after, FANOUT_PER_DELIVERY a run (#396). This one is then done. At least once, as every delivery: a settle that
+      // fails or is cut off leaves these claimed, and a run after the lease sends them again.
+      const to = await approversOf(env, members, event);
+      if (!to.length) throw new Undeliverable('no-member');
+      const claimed = await scoped(env.DB, row.orgId).alertDeliveries.queueEmails(
+        { id: event.id, type: event.type, json: row.eventJson },
+        to.map((m) => m.userId),
+        now,
+        row.giveUpAt,
+        { claim: FANOUT_PER_DELIVERY, leaseMs: LEASE_MS },
+      );
+      const settled: { orgId: string; id: string; attempt: number; result: AttemptResult }[] = [];
+      for (const one of claimed)
+        settled.push({ orgId: one.orgId, id: one.id, attempt: one.attempts, result: await attempt(env, email, guards, reach, one, now) });
+      await settleAlertDeliveries(env.DB, now, settled);
+      return null;
+    }
+    const member = members.find((m) => m.userId === row.toUserId);
     if (!member) throw new Undeliverable('no-member');
-    await email.send({ to: member.email, subject: `SignForge: ${summary(event)}`, text: summary(event) });
+    await email.send({ to: member.email, subject: `SignForge: ${summary(event)}`, text: emailText(event) });
     return null;
   }
   const channel = reach.channel(row.orgId, row.channel);
@@ -166,6 +215,25 @@ async function hmacHex(secret: string, message: string): Promise<string> {
   return Array.from(mac, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * An email delivery addressed to no one member (`publish.requested`, M4-09): the members its rule
+ * names who may approve now, not the asker. Read when it is sent, so asking costs the same however
+ * many members the org has.
+ */
+async function approversOf(env: DeliveryEnv, members: { userId: string; email: string; role: string }[], event: AlertEvent) {
+  if (event.type !== 'publish.requested') return [];
+  const settings = await orgSettings(scoped(env.DB, event.org.id));
+  const roles: readonly string[] = AUDIENCE_ROLES[settings.alerts.publish_requested.who];
+  return members.filter((m) => roles.includes(m.role) && approves(m.role, settings.editorsPublish) && m.userId !== event.data.by.id);
+}
+
+/** An email's text: its summary, and what a person does about it. */
+function emailText(event: AlertEvent): string {
+  if (event.type !== 'publish.requested') return summary(event);
+  const until = event.data.request.expiresAt;
+  return `${summary(event)}. Approve or decline it in SignForge before ${until} (UTC); after that it expires.\n\nWho gets these is in Settings, Notifications.`;
+}
+
 /** One line for an email subject and Slack's notification text. */
 function summary(event: AlertEvent): string {
   switch (event.type) {
@@ -179,10 +247,20 @@ function summary(event: AlertEvent): string {
         ? `v${publish.revision} reached every screen in ${event.org.name}`
         : `v${publish.revision} finished in ${event.org.name}: playing on ${playing} of ${screens} screens`;
     }
+    case 'agent.refused':
+      return `${agentName(event.data.grant.client)} in ${event.org.name} was refused ${event.data.refusals} times this hour`;
+    case 'publish.requested': {
+      const { request, by } = event.data;
+      const who = by.kind === 'agent' ? agentName(by) : (by.name ?? 'A member');
+      return `${who} asks to publish ${request.drafts === 1 ? '1 draft' : `${request.drafts} drafts`} in ${event.org.name}`;
+    }
     case 'test':
       return event.data.message;
   }
 }
+
+/** An agent's client as an alert names it: its name when a page may show it (`shownClient`), else not at all. */
+export const agentName = (client: { name: string | null }) => (client.name === null ? 'An unverified agent' : `The agent “${client.name}”`);
 
 /** `&`, `<` and `>` are Slack's control characters: names are escaped, as the docs ask. */
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -222,6 +300,21 @@ function slackMessage(event: AlertEvent) {
       const state = playing === screens ? `:white_check_mark: ${name} reached *every screen*` : `:white_check_mark: ${name} *finished*`;
       const blocks: object[] = [{ type: 'section', text: mrkdwn(state), fields: [org, reach, at] }];
       if (publish.url) blocks.push({ type: 'context', elements: [mrkdwn(`<${publish.url}|Open the rollout in SignForge>`)] });
+      return { text: esc(summary(event)), blocks };
+    }
+    case 'agent.refused': {
+      const { grant, refusals, tool, needs } = event.data;
+      const state = `:no_entry: ${esc(agentName(grant.client))} was *refused* ${refusals} times this hour`;
+      const latest = mrkdwn(`*Latest*\n${esc(tool)}${needs ? `, which needs ${esc(needs)}` : ''}`);
+      const blocks: object[] = [{ type: 'section', text: mrkdwn(state), fields: [org, latest] }];
+      if (grant.url) blocks.push({ type: 'context', elements: [mrkdwn(`<${grant.url}|Open the agent in SignForge>`)] });
+      return { text: esc(summary(event)), blocks };
+    }
+    case 'publish.requested': {
+      const { request } = event.data;
+      const until = mrkdwn(`*Decide by*\n${slackTime(request.expiresAt)}`);
+      const blocks: object[] = [{ type: 'section', text: mrkdwn(`:raised_hand: ${esc(summary(event))}`), fields: [org, until] }];
+      if (request.url) blocks.push({ type: 'context', elements: [mrkdwn(`<${request.url}|Approve or decline it in SignForge>`)] });
       return { text: esc(summary(event)), blocks };
     }
   }

@@ -1,29 +1,24 @@
-import { expect, test, type Request } from '@playwright/test';
-import { axe, fillUntilEnabled, hydrated, screenshot, signInAs, tool } from './helpers';
+import { expect, test, type Request, type Route } from '@playwright/test';
+import { accountMenu, axe, createOrg, hydrated, screenshot, signInAs, tool, toolResponse } from './helpers';
 import { API_PORT } from './servers';
 
 /** This spec's own client address, for its own sign-in rate limit. */
 const ADDRESS = '192.0.2.13';
 
-test('the command menu, keyboard only: open, filter, run a tool with and without a form, see a refusal, go to a page, close', async ({ page, request }) => {
+test("the command menu, keyboard only: the page's own actions, each its page's dialog; pages and actions when typed; close", async ({ page, request }) => {
+  // 34-39 s on CI at 3 workers (runs 45146239608, 45147142350, 45147984299), over half the 60 s default.
+  test.setTimeout(90_000);
   await page.goto('/sign-in');
   await hydrated(page);
   await signInAs(page, `e2e-command-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Riverside Deli', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Riverside Deli', level: 1 })).toBeVisible();
+  await createOrg(page, 'Riverside Deli', ADDRESS);
   await hydrated(page);
 
   const menu = page.getByRole('dialog', { name: 'Command menu' });
   const search = menu.getByRole('combobox', { name: 'Search pages, screens and actions' });
   const toast = (text: string | RegExp) => page.locator('[data-sonner-toast]').filter({ hasText: text });
   /** The screens list's read (`getScreens`), which a test holds or fails by its route. */
-  const listRead = (url: URL) =>
-    url.pathname.startsWith('/_serverFn/') &&
-    Buffer.from(url.pathname.split('/')[2] ?? '', 'base64url')
-      .toString()
-      .includes('getScreens_');
+  const listRead = (url: URL) => url.pathname.startsWith('/_serverFn/getScreens_');
   // An opening joins a list read already on its way (begun leaving Screens, say), so a test that routes the next read
   // first waits for those to finish, by their own events.
   const reading = new Set<Request>();
@@ -31,76 +26,147 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   page.on('requestfinished', (r) => void reading.delete(r));
   page.on('requestfailed', (r) => void reading.delete(r));
   const listReadsDone = () => expect.poll(() => reading.size).toBe(0);
+  const forThisPage = menu.getByRole('group', { name: 'For this page' });
 
-  // Open with Ctrl+K: focus is in the search, every tool an owner may use is listed.
+  // A new org has no screen: the Screens page is its own pairing form, so Pair a screen focuses its code there,
+  // with no dialog to open, and leaves no pair in the URL (#358).
   await page.keyboard.press('ControlOrMeta+k');
   await expect(search).toBeFocused();
-  await expect(menu.getByRole('option', { name: /claim_screen/ })).toBeVisible();
-  await expect(menu.getByRole('option', { name: /revoke_screen_credential/ })).toHaveCount(1);
-  await axe(page);
-  await screenshot(page, '30-command-menu');
+  await page.keyboard.type('pair a screen');
+  await expect(menu.getByRole('option', { selected: true })).toHaveText('Pair a screen…');
+  await page.keyboard.press('Enter');
+  await expect(page.getByLabel('Character 1 of 6')).toBeFocused();
+  await expect(page).toHaveURL(/\/screens$/);
 
-  // Filter to a tool that needs input, run it from its form: pair a screen a player started.
+  // A screen to pair, and one paired by a player's code, so the Screens page has its Pair dialog.
   const start = await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': '192.0.2.14' } });
   const { code, pollToken } = (await start.json()) as { code: string; pollToken: string };
-  await page.keyboard.type('pair a screen');
-  await expect(menu.getByRole('option', { selected: true })).toContainText('Pair a screen');
-  await page.keyboard.press('Enter');
-  await expect(menu.getByLabel('code')).toBeFocused();
-  await page.keyboard.type(code);
-  await page.keyboard.press('Tab');
-  await page.keyboard.type('Deli counter');
-  await page.keyboard.press('Tab');
-  await page.keyboard.type('Europe/London');
+  await tool(page, 'claim_screen', { code, name: 'Deli counter', timezone: 'Europe/London', orientation: 'landscape' });
+
+  // Opened on Screens: its own actions, then the questions for the agent; no page the sidebar lists, no tool by its API name (#358).
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Screens' }).click();
+  await hydrated(page);
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await expect(forThisPage.getByRole('option')).toHaveText(['Pair a screen…', 'Take over screens now…']);
+  await expect(menu.getByRole('group', { name: 'Go to' })).toHaveCount(0);
+  await expect(menu.getByRole('option', { name: /_screen|list_|tool registry/ })).toHaveCount(0);
   await axe(page);
-  await screenshot(page, '31-command-form');
-  await page.keyboard.press('Enter');
-  await expect(toast('Deli counter')).toBeVisible();
-  await expect(menu).toBeHidden();
+  await screenshot(page, '30-command-menu');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
 
-  // A tool that needs no input runs at once.
-  await page.keyboard.press('ControlOrMeta+k');
-  await page.keyboard.type('list_screens');
+  // Pair a screen opens the Screens page's own dialog, not a form of the tool's fields.
   await page.keyboard.press('Enter');
-  await expect(toast('1 screens')).toBeVisible();
-
-  // A refusal is a toast with the tool's own message, and the form stays open to fix.
-  await page.keyboard.press('ControlOrMeta+k');
-  await page.keyboard.type('rename_screen');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type('scr_missing');
-  await page.keyboard.press('Tab');
-  await page.keyboard.type('Nowhere');
-  await page.keyboard.press('Enter');
-  await expect(toast(/not found/)).toBeVisible();
-  await expect(menu.getByLabel('name')).toBeVisible();
-
-  // A field the menu cannot read is refused before anything is sent: focus leaves Run for that
-  // field, which reads out the error as its description.
+  const pair = page.getByRole('dialog', { name: 'Pair a screen' });
+  await expect(pair.getByLabel('Name it')).toBeVisible();
+  await expect(page).toHaveURL(/[?&]pair=true/);
   await page.keyboard.press('Escape');
+  await expect(pair).toBeHidden();
+  await expect(page).not.toHaveURL(/pair=/);
+
+  // Typed on another page: every action the role allows, found by its words; New spot opens the Spots page's dialog.
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Overview' }).click();
+  await hydrated(page);
   await page.keyboard.press('ControlOrMeta+k');
-  await page.keyboard.type('pair a screen');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('new spot');
+  await expect(menu.getByRole('option', { selected: true })).toHaveText('New spot…');
+  await axe(page);
+  await screenshot(page, '31-command-menu-typed');
   await page.keyboard.press('Enter');
-  await expect(menu.getByLabel('code')).toBeFocused();
-  await page.keyboard.type('ABC234');
-  await page.keyboard.press('Tab');
-  await page.keyboard.type('Back office');
-  await page.keyboard.press('Tab');
-  await page.keyboard.type('UTC');
-  const hours = menu.getByLabel('displayHours');
-  await hours.fill('{"mon": [');
-  const run = menu.getByRole('button', { name: 'Run' });
-  await run.focus();
+  const newSpot = page.getByRole('dialog', { name: 'New spot' });
+  await expect(newSpot).toBeVisible();
+  await expect(page).toHaveURL(/\/spots$/);
+  await page.keyboard.press('Escape');
+  await expect(newSpot).toBeHidden();
+
+  // With a change unpublished, every page offers Publish all, which asks with the sidebar's own question (#361).
+  const { templates } = await tool(page, 'list_templates', { status: 'approved' });
+  const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
+  await tool(page, 'save_spot', { name: 'Lobby clock', kind: 'template', templateVersionId: clock });
+  await page.reload();
+  await hydrated(page);
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(forThisPage.getByRole('option')).toHaveText(['New spot…', 'Publish all changes…']);
+  await page.keyboard.type('publish all');
+  await expect(menu.getByRole('option', { selected: true })).toHaveText('Publish all changes…');
   await page.keyboard.press('Enter');
-  await expect(hours).toBeFocused();
-  await expect(hours).toHaveAttribute('aria-invalid', 'true');
-  await expect(hours).toHaveAccessibleDescription(/must be JSON/);
-  // Refused again after a move back to Run: focus returns to the field.
-  await run.focus();
-  await page.keyboard.press('Enter');
-  await expect(hours).toBeFocused();
+  const publishAll = page.getByRole('alertdialog');
+  await expect(publishAll).toContainText('Publish 1 unpublished change?');
+  await publishAll.getByRole('button', { name: 'Cancel' }).click();
+  await expect(publishAll).toBeHidden();
+
+  // The count read again on opening fails: Publish all is not offered from the count read before, which said 1.
+  // The sidebar read it already and reads again only each minute, so the read refused here is the menu's own, sent as it opened.
+  let refused = 0;
+  const countsRead = (url: URL) => url.pathname.startsWith('/_serverFn/getNavCounts');
+  await page.route(countsRead, (route) => {
+    refused += 1;
+    return route.abort('connectionrefused');
+  });
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await expect.poll(() => refused).toBeGreaterThanOrEqual(1);
+  await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toHaveCount(0);
+  await page.keyboard.type('publish all');
+  await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.unroute(countsRead);
+
+  // Nor while this opening's read is on its way, though the count cached before says 1 and was written at the
+  // same instant as the opening (the clock fixed): only this opening's own read, come back, offers it.
+  await page.clock.setFixedTime(new Date());
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  const held: Route[] = [];
+  await page.route(countsRead, (route) => void held.push(route));
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await expect.poll(() => held.length).toBe(1);
+  await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toHaveCount(0);
+  await held[0]!.continue();
+  await page.unroute(countsRead);
+  await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Nor by an earlier opening's read, held up until after the change it predates (review of #430): its answer
+  // (1 change) lands while the next opening is open, after the draft was deleted. That read is not joined.
+  const stale: Route[] = [];
+  const counted = new Set<Request>();
+  const settled = new Set<Request>();
+  const onCounts = (r: Request) => void (countsRead(new URL(r.url())) && counted.add(r));
+  const onSettled = (r: Request) => void (countsRead(new URL(r.url())) && settled.add(r));
+  page.on('request', onCounts);
+  page.on('requestfinished', onSettled);
+  page.on('requestfailed', onSettled);
+  await page.route(countsRead, (route) => (stale.length === 0 ? void stale.push(route) : route.continue()));
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await expect.poll(() => stale.length).toBe(1);
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  const { spots: drafts } = await tool(page, 'list_spots', {});
+  await tool(page, 'delete_spot', { spotId: drafts.find((sp: { name: string }) => sp.name === 'Lobby clock').id });
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await stale[0]!.continue().catch(() => {});
+  // Every count read sent has come back (or was dropped), and the page has taken their answers.
+  await expect.poll(() => settled.size === counted.size && counted.size >= 2).toBe(true);
+  await page.evaluate(() => new Promise((r) => setTimeout(r)));
+  await expect(menu.getByRole('option', { name: 'Publish all changes…' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.unroute(countsRead);
+  page.off('request', onCounts);
+  page.off('requestfinished', onSettled);
+  page.off('requestfailed', onSettled);
 
   // Escape closes it; Ctrl+K again, a page by name, Enter goes there.
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
   await page.keyboard.press('ControlOrMeta+k');
@@ -120,7 +186,7 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   // for the option it means to be selected: cmdk moves the selection in a step of its own after each keystroke.
   const { screens } = await tool(page, 'list_screens', {});
   const deli = screens.find((s: { name: string }) => s.name === 'Deli counter').id;
-  const { group } = await tool(page, 'create_group', { name: 'Front of house', screenIds: [deli] });
+  const { group } = await tool(page, 'save_group', { name: 'Front of house', screenIds: [deli] });
   const actions = menu.getByRole('option');
   const selected = menu.getByRole('option', { selected: true });
   const actionsSearch = menu.getByRole('combobox', { name: 'Actions for Deli counter' });
@@ -133,7 +199,9 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await screenshot(page, '32-command-menu-screen');
   await page.keyboard.press('Enter');
   await expect(actionsSearch).toBeFocused();
-  await expect(actions).toHaveText(['Open', 'Play a playlist here…', 'Take over…', 'Identify (10 s)', 'Restart player']);
+  // Paired and not heard from yet: no restart could reach it, so it offers none, and says why (#253).
+  await expect(actions).toHaveText(['Open', 'Play a playlist here…', 'Take over…', 'Identify (10 s)']);
+  await expect(menu.getByRole('status')).toHaveText('Restart is off: Deli counter cannot be reached now, and a restart only reaches a screen in touch.');
   await axe(page);
   await screenshot(page, '33-command-menu-screen-actions');
   await page.keyboard.type('identify');
@@ -164,6 +232,19 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
     // ⌘K closed as it opened: focus goes to the page's main region, not nowhere.
     await expect(page.locator('#main')).toBeFocused();
   }
+
+  // The takeover tool opens the same dialog, which sends it at once: ⌘K never calls a takeover a draft (#253).
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.type('take over screens now');
+  await expect(selected).toContainText('Take over screens now…');
+  await page.keyboard.press('Enter');
+  const takeover = page.getByRole('dialog', { name: 'Take over screens' });
+  await expect(takeover.getByText(/^Sent now:/)).toBeVisible();
+  await takeover.getByRole('button', { name: 'Cancel' }).click();
+  await expect(takeover).toBeHidden();
+  // Its focus goes back a task after it closes: a ⌘K before that has the next keys typed into the page (#310).
+  await expect(page.locator('#main')).toBeFocused();
 
   // Enter on Back goes back, to what was found, and does not run the selected action; Open goes to the screen's page.
   await page.keyboard.press('ControlOrMeta+k');
@@ -226,9 +307,9 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/poll`, { data: { pollToken }, headers: { 'cf-connecting-ip': '192.0.2.14' } });
   const { credentials } = await tool(page, 'get_screen', { screenId: deli });
   await tool(page, 'revoke_screen_credential', { screenId: deli, credentialId: credentials[0].id });
-  await tool(page, 'create_group', { name: 'Kiosk 9' });
+  await tool(page, 'save_group', { name: 'Kiosk 9' });
   // The server refuses a command to a revoked screen too.
-  expect((await page.request.post('/api/tools/identify_screen', { data: { screenId: deli } })).status()).toBe(409);
+  expect((await toolResponse(page, 'screen_command', { screenId: deli, command: 'identify' })).status()).toBe(409);
   /** Holds the list's reads until `release`. */
   const holdListRead = async () => {
     let release = () => {};
@@ -270,13 +351,13 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await expect(search).toBeFocused();
   await page.keyboard.type('deli');
   await expect(listStatus).toHaveText('Looking for screens…');
-  // Neither is the member choosing: a pointer over the search or the footer selects nothing, and cmdk ignores PageDown.
-  const centre = async (target: ReturnType<typeof menu.getByText>) => {
+  // Neither is the member choosing: a pointer over the search or the status line selects nothing, and cmdk ignores PageDown.
+  const centre = async (target: ReturnType<typeof menu.getByRole>) => {
     const box = (await target.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   };
   await centre(search);
-  await centre(menu.getByText(/These actions are the tool registry/));
+  await centre(listStatus);
   await page.keyboard.press('PageDown');
   release();
   await expect(selected).toContainText('Deli counter');
@@ -297,4 +378,89 @@ test('the command menu, keyboard only: open, filter, run a tool with and without
   await expect(menu.getByRole('option', { name: /Deli counter/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.unroute(listRead);
+});
+
+test('the command menu tells a screen reader the row that is selected, after each key that moves or filters (#209)', async ({ page }) => {
+  await page.goto('/sign-in');
+  await hydrated(page);
+  await signInAs(page, `e2e-command-pointer-${Date.now()}@example.com`, '192.0.2.19');
+  await createOrg(page, 'Lantern Lane Pointer', '192.0.2.19');
+
+  const menu = page.getByRole('dialog', { name: 'Command menu' });
+  const search = menu.getByRole('combobox', { name: 'Search pages, screens and actions' });
+  const selected = menu.getByRole('option', { selected: true });
+  /** The row the search's `aria-activedescendant` names, as "<selected>:<disabled>:<text>", or why there is none. */
+  const pointedAt = () =>
+    search.evaluate((input) => {
+      const id = input.getAttribute('aria-activedescendant');
+      const row = id ? document.getElementById(id) : null;
+      if (!row) return `no row for ${id}`;
+      return `${row.getAttribute('aria-selected')}:${row.getAttribute('aria-disabled')}:${row.textContent}`;
+    });
+  /** The pointer names the selected row, rendered and enabled: what Enter would run. */
+  const pointsAtSelected = async (text: string) => {
+    await expect(selected).toHaveText(text);
+    await expect.poll(pointedAt).toBe(`true:false:${text}`);
+  };
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  // Empty, the page's questions for the agent come first (#270, #358).
+  await pointsAtSelected('Which screens need me, and why?');
+  // Moved by key onto a row, then typing filters that row out: the pointer follows the selection to a row still listed.
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await pointsAtSelected('What is on screen now?');
+  await page.keyboard.type('go to playl');
+  await pointsAtSelected('Go to Playlists');
+  await axe(page);
+  // Cleared, the first row is selected again, and named.
+  await search.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await pointsAtSelected('Which screens need me, and why?');
+  await page.keyboard.press('End');
+  await page.keyboard.type('go to spots');
+  await pointsAtSelected('Go to Spots');
+  await axe(page);
+});
+
+test('closing it gives focus back to what had it, while that is shown; else to the main region (#358)', async ({ page }) => {
+  await page.goto('/sign-in');
+  await hydrated(page);
+  await signInAs(page, `e2e-command-focus-${Date.now()}@example.com`, '192.0.2.20');
+  await createOrg(page, 'Lantern Lane Focus', '192.0.2.20');
+  await hydrated(page);
+  const menu = page.getByRole('dialog', { name: 'Command menu' });
+  const search = menu.getByRole('combobox', { name: 'Search pages, screens and actions' });
+
+  // The account button, its menu closed (`data-state="closed"`): focus goes back to it.
+  await accountMenu(page).focus();
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(accountMenu(page)).toBeFocused();
+
+  // Hidden while the menu was open (the sidebar, at a phone's width): to the main region, not the page's body.
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(search).toBeFocused();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(page.locator('#main')).toBeFocused();
+});
+
+test("New playlist opens its dialog wherever the page's own button does: an empty playlist and no spot (review of #458)", async ({ page }) => {
+  await page.goto('/sign-in');
+  await hydrated(page);
+  await signInAs(page, `e2e-command-new-playlist-${Date.now()}@example.com`, ADDRESS);
+  await createOrg(page, 'Quayside Prints', ADDRESS);
+  await tool(page, 'save_playlist', { name: 'Window loop', spotIds: [] });
+  await hydrated(page);
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('new playlist');
+  await expect(page.getByRole('option', { selected: true })).toHaveText('New playlist…');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/playlists$/);
+  await expect(page.getByRole('dialog', { name: 'New playlist' })).toBeVisible();
 });

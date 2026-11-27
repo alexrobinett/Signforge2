@@ -1,13 +1,16 @@
 // The device tree against local D1 and R2: credentials, the three content routes, and what a
 // screen may not reach.
-import { MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
+import { MANIFEST_SCHEMA, parsePlayerReleaseOffer, type ScreenManifest } from '@signforge/contract';
 import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { registerRelease, seedOrg, testScope, type SeededOrg } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
 import { FONTS } from '@signforge/compiler';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { mintCredential, parseCredential } from '../src/device/credential';
-import { baseBlobKey, manifestKey, orgBlobKey } from '../src/r2';
+import { feedBlobKey } from '../src/data/feed-photos';
+import { baseBlobKey, manifestKey, orgBlobKey, playerReleaseKey } from '../src/r2';
+import { device } from '../src/device';
+import { counted } from './counting';
 
 const BASE = 'https://api.test/v1/device';
 const sha = (c: string) => c.repeat(64);
@@ -153,12 +156,19 @@ describe('device auth', () => {
     for (const [path, status] of [
       ['/api/screens', 401],
       ['/api/v1/device/manifest.json', 401],
-      ['/mcp', 404],
       ['/manifest.json', 404],
     ] as const) {
       const res = await exports.default.fetch(`https://api.test${path}`, { headers: { authorization: `Bearer ${a.credential}` } });
       expect(res.status, path).toBe(status);
     }
+    // The agents' tree (M4-06) takes only an agent's OAuth token.
+    const mcp = await exports.default.fetch('https://api.test/mcp', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${a.credential}`, 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    expect(mcp.status).toBe(401);
+    expect(mcp.headers.get('www-authenticate')).toContain('error="invalid_token"');
   });
 
   it('answers a CORS preflight without a token', async () => {
@@ -316,6 +326,142 @@ describe('GET /v1/device/blobs/:sha256', () => {
     expect((await get(`/blobs/${BLOB1}`, o.credential)).status).toBe(404);
     expect((await get(`/blobs/${blobs[0]}`, o.credential)).status).toBe(404);
   });
+
+  it('serves feed image blobs only from this org when referenced by a snapshot of a bound list-image source (#196)', async () => {
+    const o = await setUp('dev-feed-a');
+    const other = await setUp('dev-feed-b');
+    const [feedFile, feedThumb, otherSrcBlob, otherOrgBlob, plainBlob] = [sha('1'), sha('2'), sha('3'), sha('4'), sha('5')];
+    const src = o.seed.dataSource;
+    const otherSrc = (await o.seed.scope.dataSources.insert({ name: 'Unbound news', format: 'rss', urlEncrypted: 'enc:u', refreshS: 300 })).id;
+
+    const newsTpl = (withImage: boolean) => ({
+      html: BASE_HTML,
+      manifest: {
+        id: 'news',
+        version: withImage ? '2.0.0' : '1.4.1',
+        name: 'News',
+        fields: {
+          items: {
+            type: 'list' as const,
+            label: 'Headlines',
+            default: [],
+            item: {
+              title: { type: 'text' as const, label: 'Title' },
+              ...(withImage ? { image: { type: 'image' as const, label: 'Photo' } } : {}),
+            },
+          },
+        },
+        duration: { defaultMs: 10_000, minMs: 4000, maxMs: 60_000 },
+        orientations: ['landscape' as const],
+        uses: [],
+        background: '#000',
+        protocol: 2,
+      },
+    });
+
+    const mImg = sha('a');
+    await env.BLOBS.put(
+      manifestKey(o.seed.orgId, o.seed.screen, mImg),
+      JSON.stringify(
+        manifest(mImg, [BASE_HTML], {
+          templates: { 'base/news@2.0.0': newsTpl(true) },
+          spots: {
+            n: {
+              id: 'n',
+              name: 'News',
+              kind: 'template',
+              template: 'base/news@2.0.0',
+              durationMs: 10_000,
+              data: { items: [] },
+              assets: {},
+              bindings: { items: { source: src, path: 'items' } },
+            },
+          },
+          dataSources: { [src]: { id: src, refreshS: 300 } },
+        }),
+      ),
+    );
+    await o.seed.scope.screens.setDesiredManifest(o.seed.screen, mImg);
+
+    await o.seed.scope.dataSources.putSnapshot(src, {
+      version: 'v1',
+      fetchedAt: Date.now(),
+      checkedAt: Date.now(),
+      dataJson: JSON.stringify({
+        items: [
+          { title: 'Story 1', image: { file: feedFile, thumb: feedThumb } },
+          // Even if a snapshot names another org's hash, feedBlobKey reads only this org's prefix.
+          { title: 'Cross-org', image: { file: otherOrgBlob, thumb: otherOrgBlob } },
+        ],
+      }),
+    });
+    await o.seed.scope.dataSources.putSnapshot(otherSrc, {
+      version: 'v1',
+      fetchedAt: Date.now(),
+      checkedAt: Date.now(),
+      dataJson: JSON.stringify({ items: [{ title: 'Other source', image: { file: otherSrcBlob, thumb: otherSrcBlob } }] }),
+    });
+    await env.BLOBS.put(feedBlobKey(o.seed.orgId, feedFile), 'jpeg-lead', { httpMetadata: { contentType: 'image/jpeg' } });
+    await env.BLOBS.put(feedBlobKey(o.seed.orgId, feedThumb), 'webp-thumb', { httpMetadata: { contentType: 'image/webp' } });
+    await env.BLOBS.put(feedBlobKey(o.seed.orgId, otherSrcBlob), 'other-source-blob', { httpMetadata: { contentType: 'image/jpeg' } });
+    await env.BLOBS.put(feedBlobKey(other.seed.orgId, otherOrgBlob), 'other-org-secret', { httpMetadata: { contentType: 'image/jpeg' } });
+    // Stored under orgBlobKey (not feedBlobKey) and unlisted in manifest.files: must NOT be served via feed path.
+    await env.BLOBS.put(orgBlobKey(o.seed.orgId, plainBlob), 'org-asset-not-feed');
+
+    const lead = await get(`/blobs/${feedFile}`, o.credential);
+    expect(lead.status).toBe(200);
+    expect(lead.headers.get('content-type')).toBe('image/jpeg');
+    expect(lead.headers.get('cache-control')).toBe('private, max-age=31536000, immutable');
+    expect(lead.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(await lead.text()).toBe('jpeg-lead');
+
+    const thumb = await get(`/blobs/${feedThumb}`, o.credential);
+    expect(thumb.status).toBe(200);
+    expect(thumb.headers.get('content-type')).toBe('image/webp');
+    expect(await thumb.text()).toBe('webp-thumb');
+
+    // Another source in the same org (not in this screen's manifest): 404.
+    expect((await get(`/blobs/${otherSrcBlob}`, o.credential)).status).toBe(404);
+    // Another org's feed blob: 404, even when referenced by hash in this org's snapshot.
+    expect((await get(`/blobs/${otherOrgBlob}`, o.credential)).status).toBe(404);
+    // Another org's screen cannot read org A's feed blob.
+    expect((await get(`/blobs/${feedFile}`, other.credential)).status).toBe(404);
+
+    // A text-only template (news 1.4.1) cannot fetch feed blobs even when its source's snapshot holds them.
+    const oPlain = await setUp('dev-feed-plain');
+    const plainSrc = oPlain.seed.dataSource;
+    const mPlain = sha('b');
+    await env.BLOBS.put(
+      manifestKey(oPlain.seed.orgId, oPlain.seed.screen, mPlain),
+      JSON.stringify(
+        manifest(mPlain, [BASE_HTML], {
+          templates: { 'base/news@1.4.1': newsTpl(false) },
+          spots: {
+            n: {
+              id: 'n',
+              name: 'News',
+              kind: 'template',
+              template: 'base/news@1.4.1',
+              durationMs: 10_000,
+              data: { items: [] },
+              assets: {},
+              bindings: { items: { source: plainSrc, path: 'items' } },
+            },
+          },
+          dataSources: { [plainSrc]: { id: plainSrc, refreshS: 300 } },
+        }),
+      ),
+    );
+    await oPlain.seed.scope.screens.setDesiredManifest(oPlain.seed.screen, mPlain);
+    await oPlain.seed.scope.dataSources.putSnapshot(plainSrc, {
+      version: 'v1',
+      fetchedAt: Date.now(),
+      checkedAt: Date.now(),
+      dataJson: JSON.stringify({ items: [{ title: 'Story', image: { file: feedFile, thumb: feedThumb } }] }),
+    });
+    await env.BLOBS.put(feedBlobKey(oPlain.seed.orgId, feedFile), 'jpeg-lead', { httpMetadata: { contentType: 'image/jpeg' } });
+    expect((await get(`/blobs/${feedFile}`, oPlain.credential)).status).toBe(404);
+  });
 });
 
 describe('GET /v1/device/data/:id.json', () => {
@@ -345,5 +491,86 @@ describe('GET /v1/device/data/:id.json', () => {
     expect((await get('/data/dev-b-source.json', a.credential)).status).toBe(404);
     expect((await get('/data/nope.json', a.credential)).status).toBe(404);
     expect((await get('/data/dev-a-source', a.credential)).status).toBe(404);
+  });
+});
+
+// #628: a device supervisor asks for its screen's channel's release, and fetches its tarball by hash. The channel is
+// the screen's own, read with its credential; a tarball comes only from the release prefix, and only for a release
+// the channel is offered.
+describe('player releases (#628)', () => {
+  const STABLE = sha('5');
+  const CANARY = sha('7');
+  const UNREGISTERED = sha('9');
+  const offerFor = async (credential: string) => {
+    const res = await get('/player-release', credential);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body: unknown = await res.json();
+    // What a supervisor reads: the contract's own parser takes it.
+    const read = parsePlayerReleaseOffer(body);
+    expect(read.ok, JSON.stringify(read)).toBe(true);
+    return body;
+  };
+
+  it('offers nothing before any release, with the schema the server compiles', async () => {
+    expect(await offerFor(a.credential)).toEqual({ manifestSchema: MANIFEST_SCHEMA, channel: 'stable', release: null });
+  });
+
+  it('offers a stable screen the newest promoted release, and a canary screen the newest of all, as CI signed it', async () => {
+    const stable = await registerRelease(env.DB, { version: 5, sha256: STABLE }, 'stable');
+    const canary = await registerRelease(env.DB, { version: 7, sha256: CANARY }, 'canary');
+    // The release prefix only: a tarball's hash names no other key.
+    await env.PLAYER_RELEASES.put(playerReleaseKey(STABLE), 'tar5', { httpMetadata: { contentType: 'application/gzip' } });
+    await env.PLAYER_RELEASES.put(playerReleaseKey(CANARY), 'tar7');
+    await env.PLAYER_RELEASES.put(playerReleaseKey(UNREGISTERED), 'tar9');
+    await testScope(env.DB, b.seed.orgId).screens.update(b.seed.screen, { playerChannel: 'canary' });
+    // The text and signature exactly as CI registered them, byte for byte.
+    expect(await offerFor(a.credential)).toEqual({
+      manifestSchema: MANIFEST_SCHEMA,
+      channel: 'stable',
+      release: { manifest: stable.manifest, signature: stable.signature },
+    });
+    expect(await offerFor(b.credential)).toEqual({
+      manifestSchema: MANIFEST_SCHEMA,
+      channel: 'canary',
+      release: { manifest: canary.manifest, signature: canary.signature },
+    });
+  });
+
+  it("streams a release's tarball to a screen whose channel is offered it, and nothing else", async () => {
+    const fetched = async (credential: string, hash: string) => {
+      const res = await get(`/player-release/${hash}`, credential);
+      return res.status === 200 ? `200 ${await res.text()} ${res.headers.get('content-type')}` : String(res.status);
+    };
+    expect(await fetched(a.credential, STABLE)).toBe('200 tar5 application/gzip');
+    expect(await fetched(b.credential, STABLE)).toBe('200 tar5 application/gzip');
+    expect(await fetched(b.credential, CANARY)).toBe('200 tar7 application/gzip');
+    // A canary build is never a stable screen's, though the screen knows its hash.
+    expect(await fetched(a.credential, CANARY)).toBe('404');
+    // In R2 under the prefix, but no release names it; another prefix's object; not a hash at all.
+    expect(await fetched(b.credential, UNREGISTERED)).toBe('404');
+    expect(await fetched(a.credential, BLOB2)).toBe('404');
+    expect(await fetched(a.credential, '..%2Fb%2Fx')).toBe('404');
+  });
+
+  it('asks for the credential, as every device route does', async () => {
+    expect((await get('/player-release')).status).toBe(401);
+    expect((await get(`/player-release/${STABLE}`)).status).toBe(401);
+  });
+
+  it('costs one D1 query more than the credential check, and writes nothing, polled every 15 minutes', async () => {
+    const cost = async (path: string) => {
+      const { result, bindings } = counted();
+      await device.request(path, { headers: { authorization: `Bearer ${a.credential}` } }, bindings);
+      return result();
+    };
+    // A credential's first use is marked once, ever (`markUsed`): spent here, so what is pinned is every later poll.
+    await get('/player-release', a.credential);
+    // Measured, as the most each may take: the credential's screen, its channel with it, then the release. No write, so
+    // a fleet's polls cost the Free plan's 100,000 daily writes nothing.
+    expect({ offer: await cost('/player-release'), tarball: await cost(`/player-release/${STABLE}`) }).toEqual({
+      offer: { statements: 2, queries: 2, rpcs: [] },
+      tarball: { statements: 2, queries: 2, rpcs: [] },
+    });
   });
 });

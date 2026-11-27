@@ -1,5 +1,5 @@
-import { expect, test, type Frame, type Page } from '@playwright/test';
-import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, stageShows, tool } from './helpers';
+import { expect, test, type Frame, type Locator, type Page } from '@playwright/test';
+import { axe, createOrg, deleteQuestionGivesFocusBack, disabledOnServer, hydrated, innerCorner, shots, signInAs, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.44';
@@ -14,7 +14,7 @@ let playlistId = '';
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-playlists-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Cinema', ADDRESS);
   // Spots to put in order: three short clocks, and a photo promo with no photo yet.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const version = (key: string) => templates.find((t: { key: string }) => t.key.endsWith(`/${key}`) || t.key === key).versions.at(-1).id;
@@ -24,20 +24,19 @@ test.beforeAll(async ({ browser }) => {
     ['Closing', 'See you tomorrow'],
   ];
   for (const [name, greeting] of clocks) {
-    const { spot } = await tool(page, 'create_spot', { name, kind: 'template', templateVersionId: version('clock'), durationMs: 4000, data: { greeting } });
+    const { spot } = await tool(page, 'save_spot', { name, kind: 'template', templateVersionId: version('clock'), durationMs: 4000, data: { greeting } });
     spots[name] = spot.id;
   }
-  const { spot } = await tool(page, 'create_spot', { name: 'Berries', kind: 'template', templateVersionId: version('photo-promo') });
+  const { spot } = await tool(page, 'save_spot', { name: 'Berries', kind: 'template', templateVersionId: version('photo-promo') });
   spots.Berries = spot.id;
 });
 
 test.afterAll(() => page.context().close());
 
 test('make a playlist, add spots, and see the real player play the loop', async () => {
-  test.setTimeout(120_000);
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Playlists' }).click();
   await hydrated(page);
-  await expect(page.getByRole('heading', { name: 'No playlists yet' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Put your spots in a playlist' })).toBeVisible();
   await axe(page);
   await shots(page, '40-playlists-empty');
 
@@ -59,13 +58,13 @@ test('make a playlist, add spots, and see the real player play the loop', async 
 
   const list = page.getByRole('list', { name: 'Spots in play order' });
   await expect(list.getByRole('listitem')).toHaveCount(4);
-  // The photo promo has no photo: the stage plays the rest, and says why it left it out.
-  await expect(list.getByRole('listitem').nth(3)).toContainText('Not in the preview yet:');
+  // The photo promo has no photo: the stage plays the rest, and says why it left it out, in words (#359).
+  await expect(list.getByRole('listitem').nth(3)).toContainText('Not in the preview yet. No image for Background photo: choose one.');
   // Three 4 s clocks, and the promo's 8 s default: 20 s.
   await expect(page.getByText('4 spots · 20 s loop', { exact: false })).toBeVisible();
 
   const stage = page.getByRole('region', { name: 'Live preview' });
-  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(stage.getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   await expect.poll(() => stageShows(page, 'Good morning, Northside'), { timeout: 10_000 }).toBe(true);
   // The loop moves on to the next spot after 4 s.
   await expect.poll(() => stageShows(page, 'Lunch is served'), { timeout: 15_000 }).toBe(true);
@@ -75,7 +74,6 @@ test('make a playlist, add spots, and see the real player play the loop', async 
 });
 
 test('reorder by dragging and with the move buttons, remove and undo, and choose the transition', async () => {
-  test.setTimeout(60_000);
   const list = page.getByRole('list', { name: 'Spots in play order' });
   const names = () => list.getByRole('listitem').evaluateAll((items) => items.map((li) => li.querySelector('.font-medium')?.textContent));
 
@@ -89,6 +87,9 @@ test('reorder by dragging and with the move buttons, remove and undo, and choose
 
   // Removed, and put back from its toast's Undo at once: the toast goes on its own after a few
   // seconds, so nothing is checked in between. Then removed for good.
+  // Remove sits in its row's corner: its corner fits the row's, the row's radius less its padding (#383).
+  const removeCorner = await innerCorner(page.getByRole('button', { name: 'Remove Berries' }), list.getByRole('listitem').filter({ hasText: 'Berries' }));
+  expect(removeCorner.radius).toBe(removeCorner.fits);
   await page.getByRole('button', { name: 'Remove Berries' }).click();
   await page.locator('[data-sonner-toast]').filter({ hasText: 'Removed Berries' }).getByRole('button', { name: 'Undo' }).click();
   await expect.poll(names).toEqual(['Opening', 'Closing', 'Berries', 'Lunch']);
@@ -99,14 +100,14 @@ test('reorder by dragging and with the move buttons, remove and undo, and choose
   // Undo pressed after the removal has autosaved (re-check of #153): the spot comes back once, on the
   // version that save made. With the pointer held down on the toast its timer stays paused, even if
   // sonner's toast list changes meanwhile, so it waits for the save.
-  const removalSaved = page.waitForResponse((r) => r.url().endsWith('/api/tools/update_playlist') && r.ok());
+  const removalSaved = page.waitForResponse((r) => r.url().endsWith('/api/tools/save_playlist') && r.ok());
   await page.getByRole('button', { name: 'Remove Lunch' }).click();
   const removed = page.locator('[data-sonner-toast]').filter({ hasText: 'Removed Lunch' });
   await removed.hover();
   await page.mouse.down();
   await removalSaved;
   await page.mouse.up();
-  const undoSaved = page.waitForResponse((r) => r.url().endsWith('/api/tools/update_playlist'));
+  const undoSaved = page.waitForResponse((r) => r.url().endsWith('/api/tools/save_playlist'));
   await removed.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(names).toEqual(['Opening', 'Closing', 'Lunch']);
   expect((await undoSaved).status()).toBe(200);
@@ -155,7 +156,7 @@ test('reorder by dragging and with the move buttons, remove and undo, and choose
 test('a change someone else made while the editor was open is not overwritten', async () => {
   const { playlist } = await tool(page, 'get_playlist', { playlistId });
   // Stands in for an agent: a reorder lands after the page read the playlist.
-  await tool(page, 'update_playlist', { playlistId, spotIds: [spots.Closing], ifVersion: playlist.version });
+  await tool(page, 'save_playlist', { playlistId, spotIds: [spots.Closing], ifVersion: playlist.version });
   await page.getByRole('radio', { name: /^Cut/ }).check();
   await expect(page.getByText('This changed since you opened it.')).toBeVisible();
   await page.getByRole('button', { name: 'Reload' }).click();
@@ -168,6 +169,9 @@ test('the list shows each playlist, and a playlist can be deleted', async () => 
   await hydrated(page);
   const row = page.getByRole('link', { name: /Lunch loop/ });
   await expect(row).toContainText('1 spot · 4 s loop · Crossfade 0.8 s · Draft, never published');
+  // Its first spot, small: the clock the player drew, and in words (#362).
+  await expect(row.locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
+  await expect(row).toContainText(/ · starts with \S/);
   await axe(page);
   await shots(page, '45-playlists');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -176,15 +180,23 @@ test('the list shows each playlist, and a playlist can be deleted', async () => 
 
   await row.click();
   await hydrated(page);
-  await page.getByRole('button', { name: 'Delete' }).click();
+  // From the editor's ⋯ menu (#378), not beside Publish.
+  await page.getByRole('button', { name: 'More actions: delete' }).click();
+  await page.getByRole('menuitem', { name: 'Delete…' }).click();
   await expect(page.getByRole('alertdialog')).toContainText('Delete Lunch loop?');
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
   await expect(page).toHaveURL(/\/playlists$/);
-  await expect(page.getByRole('heading', { name: 'No playlists yet' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Put your spots in a playlist' })).toBeVisible();
+});
+
+test('the delete question, opened from ⋯ by keyboard, gives focus back to ⋯ on Escape and on Cancel (#378)', async () => {
+  const { playlist } = await tool(page, 'save_playlist', { name: 'Keyboard loop', spotIds: [spots.Opening], idempotencyKey: `keyboard-loop-${Date.now()}` });
+  await page.goto(`/playlists/${playlist.id}`);
+  await hydrated(page);
+  await deleteQuestionGivesFocusBack(page);
 });
 
 test('axe reads the stage only once a fade between spots is over (#95)', async () => {
-  test.setTimeout(150_000);
   // A loop of its own: a 4 s clock, then a 4 s fade into a 60 s one. After the fade the stage is
   // still for most of a minute, however slow the machine: no play, fade or prepare comes sooner.
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
@@ -195,8 +207,8 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
     ['Doors close', 60_000],
   ];
   for (const [greeting, durationMs] of loop)
-    spotIds.push((await tool(page, 'create_spot', { name: greeting, kind: 'template', templateVersionId: clock, durationMs, data: { greeting } })).spot.id);
-  const { playlist } = await tool(page, 'create_playlist', {
+    spotIds.push((await tool(page, 'save_spot', { name: greeting, kind: 'template', templateVersionId: clock, durationMs, data: { greeting } })).spot.id);
+  const { playlist } = await tool(page, 'save_playlist', {
     name: 'Fade check',
     transition: { type: 'fade', ms: 4000 },
     spotIds,
@@ -204,7 +216,7 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
   });
   await page.goto(`/playlists/${playlist.id}`);
   await hydrated(page);
-  await expect(page.getByRole('region', { name: 'Live preview' }).getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('region', { name: 'Live preview' }).getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   // The player's own document on the stage: the frame that holds the slots.
   let stage: Frame | undefined;
   await expect
@@ -258,8 +270,9 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
     )
     .toBe(true);
   await axe(page);
-  const scans = (await stage!.evaluate(() => document.documentElement.dataset.scans ?? '')).split(' ');
-  expect(scans.length).toBeGreaterThanOrEqual(2);
+  // The light pass reads the stage; the dark leaves the player's frames out.
+  const scans = (await stage!.evaluate(() => document.documentElement.dataset.scans ?? '')).split(' ').filter(Boolean);
+  expect(scans.length).toBeGreaterThanOrEqual(1);
   // Every scan saw each slot fully shown or fully hidden, and one shown.
   for (const scan of scans) {
     const opacities = scan.split('/').map(Number);
@@ -274,13 +287,145 @@ test('axe reads the stage only once a fade between spots is over (#95)', async (
 test("the editor's fields and actions are disabled in the server's HTML, until the editor has hydrated (#136)", async () => {
   // The editor hydrates after the page (body[data-hydrated]): a field changed in between was set
   // back by React, and the old value autosaved.
-  const { playlist } = await tool(page, 'create_playlist', { name: 'Server loop', spotIds: [spots.Opening], idempotencyKey: `server-loop-${Date.now()}` });
+  const { playlist } = await tool(page, 'save_playlist', { name: 'Server loop', spotIds: [spots.Opening], idempotencyKey: `server-loop-${Date.now()}` });
   const path = `/playlists/${playlist.id}`;
-  const names = ['Name', 'Remove Opening', 'Add spots', 'Play on every screen', 'Save draft', 'Delete', 'Publish'];
+  const names = ['Name', 'Remove Opening', 'Add spots', 'Play on every screen', 'Publish', 'More actions: delete'];
   expect(await disabledOnServer(page, path, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
-  // Rendered by the server, they are enabled once the editor has hydrated (Save draft waits for a change).
+  // Rendered by the server, they are enabled once the editor has hydrated.
   await page.goto(path);
   await hydrated(page);
   await expect(page.getByLabel('Name', { exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
+});
+
+/** A playlist made for one test, open in its editor (#385): its list, and the names in it in order. */
+async function openPlaylist(name: string, spotIds: (string | undefined)[]) {
+  const { playlist } = await tool(page, 'save_playlist', { name, spotIds, idempotencyKey: `${name.replaceAll(' ', '-')}-${Date.now()}` });
+  await page.goto(`/playlists/${playlist.id}`);
+  await hydrated(page);
+  const list = page.getByRole('list', { name: 'Spots in play order' });
+  return { list, names: () => list.getByRole('listitem').evaluateAll((items) => items.map((li) => li.querySelector('.font-medium')?.textContent)) };
+}
+
+/** Rows still sliding (#385) are where they were drawn, not where they are: a drag waits for them, as a person's would. */
+const slid = (list: Locator) =>
+  expect
+    .poll(() =>
+      list
+        .getByRole('listitem')
+        .evaluateAll(
+          (items) =>
+            items.flatMap((li) => li.getAnimations()).filter((a) => a.effect instanceof KeyframeEffect && a.effect.getKeyframes().some((k) => 'transform' in k))
+              .length,
+        ),
+    )
+    .toBe(0);
+
+test('a move is made at once, then the rows slide and the moved one is ringed; under reduced motion it is just made (#385)', async () => {
+  const { list, names } = await openPlaylist('Motion loop', [spots.Opening, spots.Lunch, spots.Closing]);
+  // What the editor asked the browser to draw, kept on the page: each row it slid and the one it ringed, by place and name.
+  await page.evaluate(() => {
+    const log = (entry: string) => void (document.body.dataset.motion = `${document.body.dataset.motion ?? ''}${entry};`);
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (frames, options) {
+      if (this instanceof HTMLLIElement && Array.isArray(frames)) {
+        const at = [...(this.parentElement?.children ?? [])].indexOf(this);
+        log(`${'boxShadow' in (frames[0] ?? {}) ? 'ring' : 'slide'} ${at} ${this.querySelector('.font-medium')?.textContent}`);
+      }
+      return animate.call(this, frames, options);
+    };
+  });
+  const motion = () =>
+    page.evaluate(() => {
+      const seen = (document.body.dataset.motion ?? '').split(';').filter(Boolean);
+      document.body.dataset.motion = '';
+      return seen.toSorted();
+    });
+
+  // By its button: the two rows that swapped slide, and the moved one, now second, is ringed.
+  await page.getByRole('button', { name: 'Move Closing up' }).click();
+  await expect.poll(names).toEqual(['Opening', 'Closing', 'Lunch']);
+  expect(await motion()).toEqual(['ring 1 Closing', 'slide 1 Closing', 'slide 2 Lunch']);
+  await slid(list);
+  // By a drag: Lunch onto the first row.
+  await list.getByRole('listitem').nth(2).dragTo(list.getByRole('listitem').nth(0));
+  await expect.poll(names).toEqual(['Lunch', 'Opening', 'Closing']);
+  expect(await motion()).toEqual(['ring 0 Lunch', 'slide 0 Lunch', 'slide 1 Opening', 'slide 2 Closing']);
+  await slid(list);
+
+  // A second move while the first still slides, by keyboard (focus stays on the moved row's button, and a key does
+  // not wait for it to stop): the first slide stops, so no row has two at once (review of #449).
+  await page.getByRole('button', { name: 'Move Lunch down' }).focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await expect.poll(names).toEqual(['Opening', 'Closing', 'Lunch']);
+  expect(
+    await list
+      .getByRole('listitem')
+      .evaluateAll((items) =>
+        Math.max(
+          ...items.map(
+            (li) => li.getAnimations().filter((a) => a.effect instanceof KeyframeEffect && a.effect.getKeyframes().some((k) => 'transform' in k)).length,
+          ),
+        ),
+      ),
+  ).toBeLessThanOrEqual(1);
+  await motion();
+  await slid(list);
+
+  // Under reduced motion it is just made: nothing slides, nothing is ringed.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByRole('button', { name: 'Move Opening down' }).click();
+  await expect.poll(names).toEqual(['Closing', 'Opening', 'Lunch']);
+  await list.getByRole('listitem').nth(2).dragTo(list.getByRole('listitem').nth(0));
+  await expect.poll(names).toEqual(['Lunch', 'Closing', 'Opening']);
+  expect(await motion()).toEqual([]);
+  await page.emulateMedia({ reducedMotion: null });
+});
+
+test('a spot listed twice: the row moved is the one ringed, at its new place (review of #449)', async () => {
+  const { list, names } = await openPlaylist('Twice loop', [spots.Opening, spots.Lunch, spots.Opening]);
+  await page.evaluate(() => {
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (frames, options) {
+      if (this instanceof HTMLLIElement && Array.isArray(frames) && 'boxShadow' in (frames[0] ?? {}))
+        document.body.dataset.ringed = String([...(this.parentElement?.children ?? [])].indexOf(this));
+      return animate.call(this, frames, options);
+    };
+  });
+  // The second Opening, third, moved up: the row ringed is the one now second, not the first Opening.
+  await list.getByRole('listitem').nth(2).getByRole('button', { name: 'Move Opening up' }).click();
+  await expect.poll(names).toEqual(['Opening', 'Opening', 'Lunch']);
+  expect(await page.evaluate(() => document.body.dataset.ringed)).toBe('1');
+  // Moved up past its own copy: React keeps each row's node in place (rows are keyed by copy), so the node pressed
+  // stays second; the row ringed is the first, where the moved one now is.
+  await list.getByRole('listitem').nth(1).getByRole('button', { name: 'Move Opening up' }).click();
+  await expect.poll(() => page.evaluate(() => document.body.dataset.ringed)).toBe('0');
+});
+
+test('a move lands though the browser cannot draw it: no view transitions, or an animation that throws (review of #449)', async () => {
+  const { list, names } = await openPlaylist('Plain loop', [spots.Opening, spots.Lunch, spots.Closing]);
+  const errors: Error[] = [];
+  const onError = (e: Error) => void errors.push(e);
+  page.on('pageerror', onError);
+  // A browser without view transitions.
+  await page.evaluate(() => Reflect.deleteProperty(Document.prototype, 'startViewTransition'));
+  await page.getByRole('button', { name: 'Move Closing up' }).click();
+  await expect.poll(names).toEqual(['Opening', 'Closing', 'Lunch']);
+  await slid(list);
+  await list.getByRole('listitem').nth(2).dragTo(list.getByRole('listitem').nth(0));
+  await expect.poll(names).toEqual(['Lunch', 'Opening', 'Closing']);
+  await slid(list);
+  // One whose animations throw.
+  await page.evaluate(() => {
+    Element.prototype.animate = () => {
+      throw new Error('no animations here');
+    };
+  });
+  await page.getByRole('button', { name: 'Move Lunch down' }).click();
+  await expect.poll(names).toEqual(['Opening', 'Lunch', 'Closing']);
+  await list.getByRole('listitem').nth(2).dragTo(list.getByRole('listitem').nth(0));
+  await expect.poll(names).toEqual(['Closing', 'Opening', 'Lunch']);
+  expect(errors).toEqual([]);
+  page.off('pageerror', onError);
 });

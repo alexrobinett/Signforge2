@@ -28,6 +28,7 @@ const playlist = (id: string, version: number, spotIds: string[]): PlaylistView 
   isDefault: false,
   published: false,
   draftChanged: true,
+  publishedSpotCount: 0,
   publishedAt: null,
   createdAt: 0,
   updatedAt: 0,
@@ -45,10 +46,13 @@ let calls: Call[] = [];
 const org = { id: ORG };
 
 function setup() {
+  let visits = 0;
   const queryClient = new QueryClient();
   const router = {
-    navigate: vi.fn(async () => {}),
+    // Each navigation is a new history entry with its own key, as in the browser.
+    navigate: vi.fn(async ({ to }: { to: string }) => void (router.state.location = { pathname: to, state: { __TSR_key: `k${++visits}` } })),
     state: {
+      location: { pathname: '/spots', state: { __TSR_key: 'k0' } },
       get matches() {
         return [{ routeId: '/_app', loaderData: { organization: { id: org.id } } }];
       },
@@ -59,7 +63,7 @@ function setup() {
     redrawStage: () => {},
   }));
   const open = (p: PlaylistView) => queryClient.setQueryData(playlistKeys.one(ORG, p.id), p);
-  return { store, queryClient, open, editor: () => store.getState().playlistEditor };
+  return { store, router, queryClient, open, editor: () => store.getState().playlistEditor };
 }
 
 /** Let the store's awaits run. */
@@ -95,7 +99,7 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     store.getState().editPlaylist(ORG, a.id, (d) => ({ ...d, spotIds: [] }));
     void store.getState().savePlaylistDraft('pls_a');
     await settle();
-    expect(calls).toMatchObject([{ name: 'update_playlist', input: { playlistId: 'pls_a', ifVersion: 4 } }]);
+    expect(calls).toMatchObject([{ name: 'save_playlist', input: { playlistId: 'pls_a', ifVersion: 4 } }]);
 
     store.getState().editPlaylist(ORG, b.id, (d) => ({ ...d, name: 'B, renamed' }));
     calls[0]!.answer({ playlist: playlist('pls_a', 5, []) });
@@ -104,7 +108,7 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     expect(editor().drafts.pls_b).toMatchObject({ version: 1, status: 'unsaved', error: null, stale: false });
 
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { playlistId: 'pls_b', name: 'B, renamed', ifVersion: 1 } });
+    expect(calls.at(-1)).toMatchObject({ name: 'save_playlist', input: { playlistId: 'pls_b', name: 'B, renamed', ifVersion: 1 } });
   });
 
   it("saves A's waiting edit when B is opened, at the version A's save in flight returns", async () => {
@@ -122,7 +126,7 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     calls[0]!.answer({ playlist: playlist('pls_a', 5, ['s2', 's1']) });
     await settle();
 
-    expect(calls[1]).toMatchObject({ name: 'update_playlist', input: { playlistId: 'pls_a', spotIds: ['s2'], ifVersion: 5 } });
+    expect(calls[1]).toMatchObject({ name: 'save_playlist', input: { playlistId: 'pls_a', spotIds: ['s2'], ifVersion: 5 } });
     calls[1]!.answer({ playlist: playlist('pls_a', 6, ['s2']) });
     await settle();
     expect(queryClient.getQueryData(playlistKeys.one(ORG, 'pls_a'))).toMatchObject({ version: 6, spotIds: ['s2'] });
@@ -155,7 +159,7 @@ describe('saves belong to the playlist they were made for (review 2)', () => {
     await settle();
     expect(editor().deleting.error).toBe('playlist pls_a is the default playlist');
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { playlistId: 'pls_a', name: 'Renamed' } });
+    expect(calls.at(-1)).toMatchObject({ name: 'save_playlist', input: { playlistId: 'pls_a', name: 'Renamed' } });
   });
 
   it('says so, and stops saving, when someone else deleted the playlist', async () => {
@@ -228,7 +232,7 @@ describe('Undo pressed after the removal autosaved (re-check of #153, 2)', () =>
     open(a);
     store.getState().removeSpotFromPlaylist(ORG, a.id, 1, 'Lunch');
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { spotIds: ['opening', 'closing'], ifVersion: 1 } });
+    expect(calls.at(-1)).toMatchObject({ name: 'save_playlist', input: { spotIds: ['opening', 'closing'], ifVersion: 1 } });
     calls.at(-1)!.answer({ playlist: playlist('pls_a', 2, ['opening', 'closing']) });
     await settle();
     expect(queryClient.getQueryData(playlistKeys.one(ORG, 'pls_a'))).toMatchObject({ version: 2 });
@@ -236,6 +240,44 @@ describe('Undo pressed after the removal autosaved (re-check of #153, 2)', () =>
     toasts[0]!.undo();
     expect(editor().drafts.pls_a?.edit.spotIds).toEqual(['opening', 'lunch', 'closing']);
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_playlist', input: { spotIds: ['opening', 'lunch', 'closing'], ifVersion: 2 } });
+    expect(calls.at(-1)).toMatchObject({ name: 'save_playlist', input: { spotIds: ['opening', 'lunch', 'closing'], ifVersion: 2 } });
+  });
+});
+
+describe('New playlist from elsewhere (#367, review of #458)', () => {
+  /** Starts New playlist from elsewhere with the org's playlists and spots answered as given. */
+  async function start(playlists: unknown[], spots: unknown[]) {
+    const { getPlaylists } = await import('../src/server/playlists.functions');
+    const { getSpots } = await import('../src/server/spots.functions');
+    vi.mocked(getPlaylists).mockResolvedValueOnce({ playlists } as never);
+    vi.mocked(getSpots).mockResolvedValueOnce({ spots } as never);
+    const { store } = setup();
+    await store.getState().startNewPlaylist(ORG);
+    return store.getState().playlistEditor.newPlaylist.open;
+  }
+
+  it('goes to Playlists and opens its dialog wherever the page shows New playlist', async () => {
+    // Neither a playlist nor a spot: the page offers New spot instead, and nothing is left asked for.
+    expect(await start([], [])).toBe(false);
+    // An empty playlist and no spot: the page's own button is there, so is ⌘K's.
+    expect(await start([playlist('pls_a', 1, [])], [])).toBe(true);
+    expect(await start([], [{ id: 'spt_1' }])).toBe(true);
+  });
+
+  it('asks for nothing once the member has navigated, even back to Playlists, before its reads came back', async () => {
+    const { getPlaylists } = await import('../src/server/playlists.functions');
+    const { getSpots } = await import('../src/server/spots.functions');
+    let answer: (v: unknown) => void = () => {};
+    vi.mocked(getPlaylists).mockResolvedValueOnce({ playlists: [] } as never);
+    vi.mocked(getSpots).mockImplementationOnce(() => new Promise((r) => (answer = r)) as never);
+    const { store, router } = setup();
+    const starting = store.getState().startNewPlaylist(ORG);
+    await settle();
+    // Away to Spots and straight back while the read is on its way: the same page, a later visit.
+    await router.navigate({ to: '/spots' });
+    await router.navigate({ to: '/playlists' });
+    answer({ spots: [{ id: 'spt_1' }] });
+    await starting;
+    expect(store.getState().playlistEditor.newPlaylist.open).toBe(false);
   });
 });

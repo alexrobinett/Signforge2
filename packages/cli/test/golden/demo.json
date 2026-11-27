@@ -1,5 +1,5 @@
 {
-  "schema": 7,
+  "schema": 8,
   "screen": {
     "id": "demo-counter",
     "name": "Demo counter screen",
@@ -48,13 +48,13 @@
     "id": "local",
     "colors": {
       "primary": "#1d4ed8",
+      "onPrimary": "#ffffff",
       "accent": "#f97316",
+      "onAccent": "#000000",
       "background": "#0b1020",
       "surface": "#18213a",
       "text": "#f8fafc",
-      "muted": "#a5b4cb",
-      "onPrimary": "#ffffff",
-      "onAccent": "#000000"
+      "muted": "#a5b4cb"
     },
     "shape": "soft",
     "fonts": {
@@ -101,8 +101,16 @@
     }
   },
   "files": {
-    "1a4020bbad33d42b78a5bc6a531ef7115d4295c59317935eff06618f7fe384e7": {
-      "size": 77514,
+    "059222a8db2e43b51c8efdb91f468fdccbcd9a1027ed5b2e53d8d9f8900f78bc": {
+      "size": 400117,
+      "type": "text/html"
+    },
+    "2991bdec140b5f8187bcad78707d4a4c8c51568329319c8c6f9130eb0fdf0a5f": {
+      "size": 393933,
+      "type": "text/html"
+    },
+    "0e0b07ca8f7a4fc404a51dfbdf96ade6e8e215e6832d160245d917d5e60de3ba": {
+      "size": 399841,
       "type": "text/html"
     },
     "3280490f2c962ba8e241b1b6593a3b400df88a2f9f1d0b50fc7442d9029d4a04": {
@@ -117,32 +125,32 @@
       "size": 1042,
       "type": "image/svg+xml"
     },
+    "4ffbf3c61194060f103b63a6a8c7c2b310c949dc87bce1d3ba9697d9acb9978e": {
+      "size": 125411,
+      "type": "text/html"
+    },
     "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a": {
       "size": 12704,
       "type": "font/woff2"
+    },
+    "6bcd4825d33a5ace4f02834dee50a5230e7560b61e4fac8933067e3babee0b5b": {
+      "size": 395173,
+      "type": "text/html"
     },
     "8117fc0a9d2206bd96f80e2d51bfd660dbb9502496f7c90b9ea9098e956bc6e9": {
       "size": 639,
       "type": "image/svg+xml"
     },
-    "86db477d83c1112ac2dbc301a5f073252e0d4f0d8e110b002785e3cd6a3adb59": {
-      "size": 396142,
-      "type": "text/html"
-    },
     "8909904ab6c872eb994093482a88a28eca2cd95912d7b6fecd72103b0dc07edc": {
       "size": 23664,
       "type": "font/woff2"
-    },
-    "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402": {
-      "size": 122679,
-      "type": "text/html"
     },
     "97ab0b392649893157c056a93afbb2e1d4075235c8f91342f7dbb3010c513cf3": {
       "size": 639,
       "type": "image/svg+xml"
     },
-    "9c0d59d32ce322a23c554c82143522c60b574b82b834789b0411cfc3393f0f88": {
-      "size": 398098,
+    "9f552bd465aae774f17d500819a28ef6c94521a01160e9aac448b71ed8b30ea6": {
+      "size": 80449,
       "type": "text/html"
     },
     "a7d0a50f15d389cad679238466bdb5fc9787aa0715719064ce25abaff042820d": {
@@ -161,24 +169,20 @@
       "size": 639,
       "type": "image/svg+xml"
     },
-    "af8ba99270dd87ecfaaab6219d79f3a4d1115b49bcab3a9272948bd7900d270e": {
-      "size": 401771,
-      "type": "text/html"
-    },
-    "c677c828d7360043afae135ed594a8202245f4a74710caec915d6ee406aadd62": {
-      "size": 403207,
-      "type": "text/html"
-    },
     "f9a06e79cd3a2a20951c0f0e28f66dd0e6d3fda73911d640a2125c8fcb78f21a": {
       "size": 24452,
       "type": "font/woff2"
+    },
+    "fec736de4497f3e58e35bf9c17a8e65450a9beb5d5bd42d73a7e65770762e63a": {
+      "size": 383739,
+      "type": "text/html"
     }
   },
   "templates": {
-    "base/announcement@1.0.0": {
+    "base/announcement@1.2.1": {
       "manifest": {
         "id": "announcement",
-        "version": "1.0.0",
+        "version": "1.2.1",
         "name": "Announcement",
         "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
         "fields": {
@@ -220,7 +224,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -233,11 +236,16 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": []
           },
           "photo": {
             "type": "image",
-            "label": "Photo"
+            "label": "Photo",
+            "portraitBox": {
+              "w": 1120,
+              "h": 1750
+            }
           },
           "qrUrl": {
             "type": "url",
@@ -300,12 +308,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "9c0d59d32ce322a23c554c82143522c60b574b82b834789b0411cfc3393f0f88"
+      "html": "6bcd4825d33a5ace4f02834dee50a5230e7560b61e4fac8933067e3babee0b5b"
     },
-    "base/countdown@1.0.0": {
+    "base/countdown@1.2.1": {
       "manifest": {
         "id": "countdown",
-        "version": "1.0.0",
+        "version": "1.2.1",
         "name": "Countdown",
         "description": "The days to go to a date and time, or the days since one (a safety record), in four looks.",
         "fields": {
@@ -374,7 +382,6 @@
           "facts": {
             "type": "list",
             "label": "Facts",
-            "maxItems": 3,
             "item": {
               "label": {
                 "type": "text",
@@ -387,6 +394,7 @@
                 "maxLength": 32
               }
             },
+            "maxItems": 3,
             "default": [
               {
                 "label": "Where",
@@ -428,12 +436,12 @@
         "background": "#000000",
         "protocol": 2
       },
-      "html": "86db477d83c1112ac2dbc301a5f073252e0d4f0d8e110b002785e3cd6a3adb59"
+      "html": "2991bdec140b5f8187bcad78707d4a4c8c51568329319c8c6f9130eb0fdf0a5f"
     },
-    "base/cstore-promo@1.2.4": {
+    "base/cstore-promo@1.4.1": {
       "manifest": {
         "id": "cstore-promo",
-        "version": "1.2.4",
+        "version": "1.4.1",
         "name": "C-Store Promo",
         "description": "Multi-buy price promotion with three product shots and a loyalty points badge.",
         "fields": {
@@ -481,15 +489,27 @@
           },
           "imageLeft": {
             "type": "image",
-            "label": "Left product"
+            "label": "Left product",
+            "portraitBox": {
+              "w": 290,
+              "h": 800
+            }
           },
           "imageCenter": {
             "type": "image",
-            "label": "Centre product"
+            "label": "Centre product",
+            "portraitBox": {
+              "w": 290,
+              "h": 800
+            }
           },
           "imageRight": {
             "type": "image",
-            "label": "Right product"
+            "label": "Right product",
+            "portraitBox": {
+              "w": 290,
+              "h": 800
+            }
           }
         },
         "duration": {
@@ -505,12 +525,12 @@
         "background": "#06122b",
         "protocol": 2
       },
-      "html": "1a4020bbad33d42b78a5bc6a531ef7115d4295c59317935eff06618f7fe384e7"
+      "html": "9f552bd465aae774f17d500819a28ef6c94521a01160e9aac448b71ed8b30ea6"
     },
-    "base/alert@1.0.0": {
+    "base/alert@1.3.1": {
       "manifest": {
         "id": "alert",
-        "version": "1.0.0",
+        "version": "1.3.1",
         "name": "Alert",
         "description": "A takeover for emergencies and notices: the severity in a band, a headline, what to do, who issued it, when it ends and a QR code for updates.",
         "fields": {
@@ -529,37 +549,42 @@
             "type": "text",
             "label": "Headline",
             "default": "Evacuate the building now",
-            "maxLength": 60
+            "maxLength": 40,
+            "maxMarks": 4
           },
           "instructions": {
             "type": "text",
             "label": "Instructions",
             "default": "Use the nearest stairway. Do not use the elevators. Gather at the north car park and wait for your floor warden.",
-            "maxLength": 240
+            "maxLength": 240,
+            "maxMarks": 4
           },
           "issuedBy": {
             "type": "text",
             "label": "Issued by",
             "default": "Issued by Building Safety",
-            "maxLength": 48
+            "maxLength": 48,
+            "maxMarks": 4
           },
           "endsAt": {
             "type": "text",
             "label": "Ends at",
             "default": "4:00 PM",
-            "maxLength": 24
+            "maxLength": 24,
+            "maxMarks": 4
           },
           "qrUrl": {
             "type": "url",
             "label": "QR code address",
             "default": "",
-            "maxLength": 200
+            "maxBytes": 213
           },
           "qrLabel": {
             "type": "text",
             "label": "QR code label",
             "default": "Scan for updates",
-            "maxLength": 32
+            "maxLength": 32,
+            "maxMarks": 4
           },
           "showQr": {
             "type": "boolean",
@@ -590,12 +615,12 @@
         "background": "#111827",
         "protocol": 2
       },
-      "html": "974ead5bedd3bfa95fb08db214bcc20cb294289ae220005447e3d5ef01144402"
+      "html": "4ffbf3c61194060f103b63a6a8c7c2b310c949dc87bce1d3ba9697d9acb9978e"
     },
-    "base/info-frame@1.0.0": {
+    "base/info-frame@1.4.0": {
       "manifest": {
         "id": "info-frame",
-        "version": "1.0.0",
+        "version": "1.4.0",
         "name": "Info frame",
         "description": "A main photo with a caption, framed by a clock, the weather with a three-day forecast, the logo and a news crawl. Bind the weather to a place and the crawl to an RSS feed; the rail and the crawl go where you put them, and each part can be switched off.",
         "fields": {
@@ -730,8 +755,6 @@
           "items": {
             "type": "list",
             "label": "Headlines",
-            "maxItems": 30,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -748,7 +771,9 @@
                 "label": "Source",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 30,
+            "default": []
           },
           "crawlLabel": {
             "type": "text",
@@ -839,10 +864,10 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "sources": {
             "weather": {
-              "label": "Weather",
               "source": "open-meteo",
               "fields": {
                 "weatherTimezone": "timezone",
@@ -867,25 +892,144 @@
               "place": "city",
               "units": {
                 "temperature": "unit"
-              }
+              },
+              "label": "Weather"
             },
             "headlines": {
-              "label": "Headlines",
               "source": "rss",
               "fields": {
                 "items": "items"
-              }
+              },
+              "label": "Headlines"
             }
           }
-        },
-        "protocol": 2
+        }
       },
-      "html": "c677c828d7360043afae135ed594a8202245f4a74710caec915d6ee406aadd62"
+      "html": "0e0b07ca8f7a4fc404a51dfbdf96ade6e8e215e6832d160245d917d5e60de3ba"
     },
-    "base/room-status@1.0.0": {
+    "base/news@2.2.0": {
+      "manifest": {
+        "id": "news",
+        "version": "2.2.0",
+        "name": "News",
+        "description": "The lead story large, its headline in a fixed column beside its photo (above it in portrait), turning through the latest stories, with a strip along the foot that marks the one on screen. Bind the headlines to an RSS data source.",
+        "fields": {
+          "title": {
+            "type": "text",
+            "label": "Title",
+            "default": "Latest news",
+            "maxLength": 32
+          },
+          "source": {
+            "type": "text",
+            "label": "Source credit",
+            "default": "",
+            "maxLength": 40
+          },
+          "items": {
+            "type": "list",
+            "label": "Headlines",
+            "item": {
+              "title": {
+                "type": "text",
+                "label": "Headline",
+                "maxLength": 200
+              },
+              "published": {
+                "type": "text",
+                "label": "Published (ISO time)",
+                "default": ""
+              },
+              "source": {
+                "type": "text",
+                "label": "Source",
+                "default": ""
+              },
+              "summary": {
+                "type": "text",
+                "label": "Summary",
+                "default": "",
+                "maxLength": 240
+              },
+              "image": {
+                "type": "image",
+                "label": "Photo"
+              }
+            },
+            "maxItems": 30,
+            "default": []
+          },
+          "language": {
+            "type": "text",
+            "label": "Feed language (BCP 47, e.g. fr-FR)",
+            "default": "",
+            "maxLength": 35
+          },
+          "rotationSeconds": {
+            "type": "number",
+            "label": "Seconds per lead story",
+            "default": 8,
+            "min": 4,
+            "max": 30
+          },
+          "look": {
+            "type": "select",
+            "label": "Look",
+            "options": [
+              "pop",
+              "poster",
+              "night",
+              "corporate"
+            ],
+            "default": "pop"
+          },
+          "showImages": {
+            "type": "boolean",
+            "label": "Show photos",
+            "default": true
+          },
+          "showSummary": {
+            "type": "boolean",
+            "label": "Show the summary",
+            "default": true
+          },
+          "showList": {
+            "type": "boolean",
+            "label": "Show the story strip",
+            "default": true
+          },
+          "showMeta": {
+            "type": "boolean",
+            "label": "Show the source and age",
+            "default": true
+          }
+        },
+        "duration": {
+          "defaultMs": 32000,
+          "minMs": 6000,
+          "maxMs": 300000
+        },
+        "orientations": [
+          "landscape",
+          "portrait"
+        ],
+        "uses": [],
+        "background": "#000000",
+        "protocol": 2,
+        "live": {
+          "source": "rss",
+          "fields": {
+            "items": "items",
+            "language": "language"
+          }
+        }
+      },
+      "html": "fec736de4497f3e58e35bf9c17a8e65450a9beb5d5bd42d73a7e65770762e63a"
+    },
+    "base/room-status@1.3.0": {
       "manifest": {
         "id": "room-status",
-        "version": "1.0.0",
+        "version": "1.3.0",
         "name": "Room status",
         "description": "Whether a meeting room or class is free or busy now, until when, and the rest of its day. Bind the events field to the room's iCal calendar.",
         "fields": {
@@ -928,8 +1072,6 @@
           "events": {
             "type": "list",
             "label": "Bookings",
-            "maxItems": 25,
-            "default": [],
             "item": {
               "title": {
                 "type": "text",
@@ -954,7 +1096,9 @@
                 "label": "Organiser",
                 "default": ""
               }
-            }
+            },
+            "maxItems": 25,
+            "default": []
           },
           "showSchedule": {
             "type": "boolean",
@@ -998,15 +1142,15 @@
         ],
         "uses": [],
         "background": "#000000",
+        "protocol": 2,
         "live": {
           "source": "ical",
           "fields": {
             "events": "events"
           }
-        },
-        "protocol": 2
+        }
       },
-      "html": "af8ba99270dd87ecfaaab6219d79f3a4d1115b49bcab3a9272948bd7900d270e"
+      "html": "059222a8db2e43b51c8efdb91f468fdccbcd9a1027ed5b2e53d8d9f8900f78bc"
     }
   },
   "spots": {
@@ -1014,7 +1158,7 @@
       "id": "announcement",
       "name": "Announcement",
       "kind": "template",
-      "template": "base/announcement@1.0.0",
+      "template": "base/announcement@1.2.1",
       "data": {
         "look": "pop",
         "eyebrow": "Company news",
@@ -1049,7 +1193,7 @@
       "id": "countdown",
       "name": "Days without an accident",
       "kind": "template",
-      "template": "base/countdown@1.0.0",
+      "template": "base/countdown@1.2.1",
       "data": {
         "look": "poster",
         "mode": "up",
@@ -1077,7 +1221,7 @@
       "id": "energy",
       "name": "Energy drinks 3 for $7",
       "kind": "template",
-      "template": "base/cstore-promo@1.2.4",
+      "template": "base/cstore-promo@1.4.1",
       "data": {
         "quantity": "3",
         "price": "7",
@@ -1098,7 +1242,7 @@
       "id": "fire-drill",
       "name": "Fire drill notice",
       "kind": "template",
-      "template": "base/alert@1.0.0",
+      "template": "base/alert@1.3.1",
       "data": {
         "severity": "notice",
         "headline": "Fire drill at 2 PM today",
@@ -1118,7 +1262,7 @@
       "id": "info-frame",
       "name": "Coffee info frame",
       "kind": "template",
-      "template": "base/info-frame@1.0.0",
+      "template": "base/info-frame@1.4.0",
       "data": {
         "captionTitle": "Large coffee and a pastry",
         "captionLine": "Every weekday until 11 am",
@@ -1177,11 +1321,101 @@
       },
       "durationMs": 15000
     },
+    "news-guardian": {
+      "id": "news-guardian",
+      "name": "The Guardian (live)",
+      "kind": "template",
+      "template": "base/news@2.2.0",
+      "data": {
+        "title": "Latest news",
+        "source": "The Guardian",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "corporate",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true
+      },
+      "assets": {},
+      "durationMs": 32000,
+      "bindings": {
+        "items": {
+          "source": "news-guardian",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-guardian",
+          "path": "language"
+        }
+      }
+    },
+    "news-nyt": {
+      "id": "news-nyt",
+      "name": "New York Times (live)",
+      "kind": "template",
+      "template": "base/news@2.2.0",
+      "data": {
+        "title": "Latest news",
+        "source": "The New York Times",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "poster",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true
+      },
+      "assets": {},
+      "durationMs": 32000,
+      "bindings": {
+        "items": {
+          "source": "news-nyt",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-nyt",
+          "path": "language"
+        }
+      }
+    },
+    "news-verge": {
+      "id": "news-verge",
+      "name": "The Verge (live)",
+      "kind": "template",
+      "template": "base/news@2.2.0",
+      "data": {
+        "title": "Latest news",
+        "source": "The Verge",
+        "items": [],
+        "language": "",
+        "rotationSeconds": 8,
+        "look": "night",
+        "showImages": true,
+        "showSummary": true,
+        "showList": true,
+        "showMeta": true
+      },
+      "assets": {},
+      "durationMs": 32000,
+      "bindings": {
+        "items": {
+          "source": "news-verge",
+          "path": "items"
+        },
+        "language": {
+          "source": "news-verge",
+          "path": "language"
+        }
+      }
+    },
     "room-status": {
       "id": "room-status",
       "name": "Harbour Room status",
       "kind": "template",
-      "template": "base/room-status@1.0.0",
+      "template": "base/room-status@1.3.0",
       "data": {
         "room": "Harbour Room",
         "seats": 8,
@@ -1203,7 +1437,7 @@
       "id": "sport-drinks",
       "name": "Sport drinks 2 for $4",
       "kind": "template",
-      "template": "base/cstore-promo@1.2.4",
+      "template": "base/cstore-promo@1.4.1",
       "data": {
         "quantity": "2",
         "price": "4",
@@ -1252,6 +1486,15 @@
           "spot": "info-frame"
         },
         {
+          "spot": "news-nyt"
+        },
+        {
+          "spot": "news-guardian"
+        },
+        {
+          "spot": "news-verge"
+        },
+        {
           "spot": "fire-drill"
         }
       ]
@@ -1272,7 +1515,20 @@
       ]
     }
   },
-  "dataSources": {},
+  "dataSources": {
+    "news-nyt": {
+      "id": "news-nyt",
+      "refreshS": 300
+    },
+    "news-guardian": {
+      "id": "news-guardian",
+      "refreshS": 300
+    },
+    "news-verge": {
+      "id": "news-verge",
+      "refreshS": 300
+    }
+  },
   "schedule": [
     {
       "id": "breakfast",
@@ -1284,5 +1540,5 @@
     }
   ],
   "defaultPlaylist": "all-day",
-  "id": "290232c9e58a2217a6e9e3cd58058875240e3abcab26c6755bc219bdc12dbe2c"
+  "id": "e5157fa4c72bede8e58e7df064ff6b5e9e339770df2a208ed72694c4d1b4b496"
 }

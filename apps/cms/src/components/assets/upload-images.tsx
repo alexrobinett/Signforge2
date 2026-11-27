@@ -22,6 +22,8 @@ export function UploadButton({ id }: { id: string }) {
     <EditorFields>
       <label
         htmlFor={id}
+        data-slot="button"
+        data-variant="default"
         className={buttonVariants({
           size: 'lg',
           className:

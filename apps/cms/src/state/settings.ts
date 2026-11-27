@@ -14,15 +14,26 @@ import type { AnyRouter } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import { authClient, authErrorMessage } from '~/lib/auth-client';
 import { orgOnScreen } from '~/lib/live';
-import type { AlertChannel, AlertDelivery, AlertKind, AlertRule, Member, OrgSettings } from '~/lib/settings';
-import type { DisplayHours } from '~/lib/screen-types';
+import {
+  aiTestProblem,
+  type AiProvider,
+  type AlertChannel,
+  type AlertDelivery,
+  type AlertKind,
+  type AlertRule,
+  type Member,
+  type OrgSettings,
+} from '~/lib/settings';
+import type { ConnectScope } from '~/lib/connect';
+import { hoursProblems, type DisplayHours } from '~/lib/screen-types';
 import { callTool, isStale, toolMessage } from '~/lib/tools';
 import type { Role } from '~/server/shell.functions';
+import { changingOrg } from './orgs';
 import type { SliceCreator } from './store';
-import { createVersionedDrafts, realClock, shown, type Drafts } from './versioned-draft';
+import { createVersionedDrafts, noteSaved, noteUnsaved, realClock, shown, type Drafts } from './versioned-draft';
 
 /** A page whose actions run one at a time. Account and the invitation page belong to no org. */
-type SettingsPage = 'general' | 'screens' | 'notifications' | 'members' | 'account' | 'invitation';
+type SettingsPage = 'general' | 'screens' | 'notifications' | 'members' | 'ai' | 'agents' | 'account' | 'invitation';
 /** Where an action runs: its page, in the org it was started in (null for Account and the invitation page). */
 export interface SettingsScope {
   page: SettingsPage;
@@ -73,7 +84,39 @@ interface SettingsState {
    * and SignForge keeps it only sealed. Not kept anywhere else.
    */
   signingSecret: { orgId: string; secret: string } | null;
+  /** The models the org's key may use, from its last test: what the model choices offer. Not kept anywhere else. */
+  aiModels: { orgId: string; models: string[] } | null;
+  /** The AI settings' model choices and ceiling as changed here and not yet saved, over the provider as read (#366). */
+  aiEdit: { orgId: string; choices: Partial<AiChoices> } | null;
+  /** When each action that saves quietly (the AI choices, the account's name) last saved, by its name: the page says Saved. */
+  savedAt: Record<string, number>;
+  /** The org whose model key's Remove is waiting for its confirmation. */
+  removingAiKey: string | null;
+  /** The scopes an agent's running change gives it, so its toggles show where they are going. */
+  agentScopes: { grantId: string; scopes: ConnectScope[] } | null;
+  /** The agent whose Disconnect is waiting for its confirmation. */
+  disconnecting: { orgId: string; grantId: string } | null;
 }
+
+/**
+ * The key form, as it sends it: the provider, the key ('' to keep the saved one), and for an
+ * OpenAI-compatible endpoint its address and what it supports.
+ */
+interface AiKeyForm {
+  provider: AiProvider['provider'];
+  apiKey: string;
+  baseUrl: string;
+  acceptsImages: boolean;
+  jsonSchemaOutput: boolean;
+}
+
+/** The AI settings' model choices and daily ceiling, as the form sends them: '' for none. */
+interface AiChoices {
+  fastModel: string;
+  capableModel: string;
+  dailyTurnCeiling: string;
+}
+const AI_CHOICES: (keyof AiChoices)[] = ['fastModel', 'capableModel', 'dailyTurnCeiling'];
 
 export interface SettingsSlice {
   settings: SettingsState;
@@ -103,6 +146,28 @@ export interface SettingsSlice {
   /** Send a test alert now; email goes to the member asking. */
   testAlertChannel: (orgId: string, channel: AlertDelivery['channel']) => Promise<void>;
   retryAlertDelivery: (orgId: string, deliveryId: string) => Promise<void>;
+  /** Save the org's model key, sealed by the API and never shown again; `ifVersion` when replacing one. True once saved, so the form can clear. */
+  saveAiKey: (orgId: string, key: AiKeyForm, ifVersion?: number) => Promise<boolean>;
+  /** Reach the provider with the saved key: the models it offers become the choices, or the page says why not. */
+  testAiProvider: (orgId: string) => Promise<void>;
+  /** Changes the AI choices shown in `orgId`, over the provider as read; `saveAiChoices` sends them. */
+  editAiChoices: (orgId: string, change: Partial<AiChoices>) => void;
+  saveAiChoices: (orgId: string, provider: AiProvider['provider'], choices: AiChoices, ifVersion: number) => Promise<void>;
+  /** Opens or closes the key's removal confirmation, as `askToRemoveAlertChannel` does. */
+  askToRemoveAiKey: (orgId: string, open: boolean) => void;
+  /**
+   * A ref callback for what takes focus when the element that had it is replaced (#289): a Remove by
+   * its confirmation, the confirmation by Remove again on Keep it, or, once removed, by the form that
+   * adds one. It focuses the element once, when it mounts as the one `key` names.
+   */
+  focusWhenReplaced: (key: string) => (el: HTMLElement | null) => void;
+  removeAiKey: (orgId: string) => Promise<void>;
+  /** Sets an agent's scopes from its next call (`update_agent_grant_scopes`), with the version the page read. */
+  setAgentScopes: (orgId: string, grantId: string, scopes: ConnectScope[], ifVersion: number) => Promise<void>;
+  /** Opens or closes an agent's Disconnect confirmation, as `askToRemoveAlertChannel` does. */
+  askToDisconnectAgent: (orgId: string, grantId: string | null) => void;
+  /** Disconnects an agent (`revoke_agent_grant`): its next call is refused. Then back to the list. */
+  disconnectAgent: (orgId: string, grantId: string) => Promise<void>;
   /** After a stale save of `at`: reads the settings again, dropping that form's edits and error. */
   reloadSettings: (orgId: string | null, at: string) => Promise<void>;
   /** After a switch: the old org's edits and confirmations go. Its running actions finish, and change nothing here. */
@@ -144,6 +209,34 @@ export const hasEdits = (settings: SettingsState, at: string, orgId: string | nu
   return draft?.orgId === orgId && draft.status !== 'saved' && Object.keys(draft.edit).length > 0;
 };
 
+/** A typed field of a form, as `settingsProblems` names it. */
+type TypedField = 'name' | 'auditRetentionDays' | 'updateFrom' | 'updateTo' | 'unreachableAfterMinutes' | 'displayHours';
+
+const whole = (typed: string, min: number, max: number) => /^\d+$/.test(typed.trim()) && Number(typed) >= min && Number(typed) <= max;
+
+/**
+ * Why each typed field the server would refuse would be refused (its ranges): the field says so,
+ * and the form is not sent until it is fixed. `settings` fills the update window's other end.
+ */
+export function settingsProblems(edits: SettingsEdits, settings: OrgSettings): Partial<Record<TypedField, string>> {
+  const from = edits.updateFrom ?? settings.updateWindow.from;
+  const to = edits.updateTo ?? settings.updateWindow.to;
+  return {
+    ...(edits.name !== undefined && !edits.name.trim() ? { name: 'Enter a name.' } : {}),
+    ...(edits.auditRetentionDays !== undefined && !whole(edits.auditRetentionDays, 30, 3650)
+      ? { auditRetentionDays: 'A whole number of days, 30 to 3,650.' }
+      : {}),
+    ...(edits.unreachableAfterMinutes !== undefined && !whole(edits.unreachableAfterMinutes, 5, 1440)
+      ? { unreachableAfterMinutes: 'A whole number of minutes, 5 to 1,440.' }
+      : {}),
+    ...(!from ? { updateFrom: 'Enter a time.' } : {}),
+    ...(!to ? { updateTo: 'Enter a time.' } : {}),
+    ...(from && from === to ? { updateTo: 'The window must end at another time than it starts.' } : {}),
+    // Said in the hours' own editor; here so a later change does not send them with it (review of #466).
+    ...(edits.displayHours !== undefined && hoursProblems(edits.displayHours).length ? { displayHours: 'Fix the display hours.' } : {}),
+  };
+}
+
 /** The error of the action `at`, if it failed in the org on screen (or belongs to none): a form's save's, else the action's. */
 export function errorOf(settings: SettingsState, at: string, orgId: string | undefined) {
   const draft = settings.drafts[at];
@@ -178,7 +271,7 @@ async function auth<T extends { error: { message?: string; code?: string; status
   return res;
 }
 
-/** `whsec_` and 32 random bytes in base64url: what `set_webhook_alert_channel` asks for. */
+/** `whsec_` and 32 random bytes in base64url: what `set_alert_channel` asks of a webhook. */
 function newSigningSecret(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   return `whsec_${btoa(String.fromCharCode(...bytes))
@@ -193,24 +286,42 @@ const onScreen = (router: AnyRouter, scope: SettingsScope) => scope.orgId === nu
 export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { router }) => {
   const patch = (change: (s: SettingsState) => SettingsState) => set((s) => ({ settings: change(s.settings) }));
   const withoutKey = <T>(record: Record<string, T>, key: string) => Object.fromEntries(Object.entries(record).filter(([k]) => k !== key));
+  /** Whether `scope` is still the tab's to act in: shown, and its org not being left (`changingOrg`, as the drawer's). */
+  const here = (scope: SettingsScope) => onScreen(router, scope) && (scope.orgId === null || !changingOrg(get().orgs));
+
+  /** The name this tab last gave each org, and the name it was given over, until the page reads another (#479). */
+  const renamedTo = new Map<string, { to: string; from: string }>();
+  /** The settings each form's last save was asked with, which `invalid` judges the edits against. */
+  const savingWith = new Map<string, OrgSettings>();
+  /** The action running on each page, by scope key: a form's save waits for it. */
+  const actions = new Map<string, Promise<unknown>>();
 
   /** The forms' edits. A save stays pending until the page's loaders have finished, as `run`'s actions do. */
   const drafts = createVersionedDrafts<SettingsEdits, { settings: OrgSettings; renamed: { id: string; name: string } | undefined }>({
     state: { read: () => get().settings.drafts, write: (change) => patch((s) => ({ ...s, drafts: change(s.drafts) })) },
     async save({ draft, context: { settings, renamed }, moved }) {
       const { name, ...fields } = draft.edit;
-      if (name !== undefined && !name.trim()) throw new Error('The organization needs a name.');
       const change = changeOf(fields, settings);
       // The versioned write first: a stale save changes nothing, the name included.
-      if (Object.keys(change).length) moved((await callTool('update_org_settings', { ...change, ifVersion: draft.version })).settings.version);
-      if (name !== undefined && renamed && name.trim() !== renamed.name)
+      if (Object.keys(change).length) moved((await callTool('update_org_settings', { ...change, ifVersion: draft.version! }, draft.orgId)).settings.version);
+      // Against the name this tab last gave it, until the page reads another than the one it renamed over: a name put back
+      // while its rename is on its way is a rename (#466), and so is one put back after someone else's (#479).
+      const sent = renamed && renamedTo.get(renamed.id);
+      if (renamed && sent && renamed.name !== sent.from) renamedTo.delete(renamed.id);
+      const now = renamed && (renamedTo.get(renamed.id)?.to ?? renamed.name);
+      if (name !== undefined && renamed && name.trim() !== now) {
         await auth(authClient.organization.update({ organizationId: renamed.id, data: { name: name.trim() } }), 'Could not rename the organization.');
-      if (orgOnScreen(router) === draft.orgId) {
-        toast.success('Saved');
-        await router.invalidate({ sync: true });
+        renamedTo.set(renamed.id, { to: name.trim(), from: renamed.name });
       }
+      // Saved quietly (#366): the form says Saved where it is, as an editor does.
+      if (orgOnScreen(router) === draft.orgId) await router.invalidate({ sync: true });
       // The name is not under the settings' version: once renamed, the page shows the org's name as read.
       return { edit: fields };
+    },
+    // Marked on its field and not sent: the server would refuse it as it is.
+    invalid: (draft, form) => {
+      const settings = savingWith.get(form);
+      return settings !== undefined && Object.keys(settingsProblems(draft.edit, settings)).length > 0;
     },
     makeId: () => crypto.randomUUID(),
     currentOrg: () => orgOnScreen(router),
@@ -224,56 +335,119 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
    * takes another change, in between. Every way out releases it. Other pages, and other orgs, are
    * not held up by it.
    */
-  async function run(scope: SettingsScope, at: string, work: () => Promise<unknown>, done: string) {
+  async function run(scope: SettingsScope, at: string, work: () => Promise<unknown>, done: string | null) {
     const key = scopeKey(scope);
     if (runningIn(get().settings, scope) !== undefined) return false;
     patch((s) => ({ ...s, pending: { ...s.pending, [key]: at }, errors: withoutKey(s.errors, at) }));
-    try {
-      await work();
-      if (onScreen(router, scope)) {
-        toast.success(done);
-        await router.invalidate({ sync: true });
+    const running = (async () => {
+      try {
+        await work();
+        if (onScreen(router, scope)) {
+          if (done) toast.success(done);
+          else patch((s) => ({ ...s, savedAt: { ...s.savedAt, [at]: Date.now() } }));
+          await router.invalidate({ sync: true });
+        }
+        return true;
+      } catch (err) {
+        const error = { orgId: scope.orgId, text: isStale(err) ? 'This changed since you opened it.' : toolMessage(err), stale: isStale(err) };
+        patch((s) => ({ ...s, errors: { ...s.errors, [at]: error } }));
+        return false;
+      } finally {
+        patch((s) => ({ ...s, pending: withoutKey(s.pending, key) }));
       }
-      return true;
-    } catch (err) {
-      const error = { orgId: scope.orgId, text: isStale(err) ? 'This changed since you opened it.' : toolMessage(err), stale: isStale(err) };
-      patch((s) => ({ ...s, errors: { ...s.errors, [at]: error } }));
-      return false;
-    } finally {
-      patch((s) => ({ ...s, pending: withoutKey(s.pending, key) }));
-    }
+    })();
+    actions.set(key, running);
+    return running;
   }
+
+  /**
+   * The AI settings' version each org's last choices save from this tab made (`to`), and the version the page showed
+   * when the first of them was made (`from`): a choice made on `from` while they saved is not a change made since. Any
+   * other version is someone's, and the key's save or removal starts the provider over (review of #466).
+   */
+  const aiSaved = new Map<string, { from: number; to: number }>();
+
+  /**
+   * Runs one action as `run` does, once no action runs in `scope`, rather than being dropped: a change saved as it is
+   * made. The check and the start are in one step, so two waiting run one after the other.
+   */
+  async function runNext(...[scope, ...rest]: Parameters<typeof run>) {
+    const key = scopeKey(scope);
+    while (get().settings.pending[key] !== undefined) await actions.get(key);
+    // The tab left its org while it waited (or is leaving it): it was that org's change, and is not sent (review of #466).
+    if (!here(scope)) return false;
+    return run(scope, ...rest);
+  }
+
+  /**
+   * What takes focus next, by its `focusWhenReplaced` key, in the org and on the page it was named on: outside state, as
+   * nothing renders it. Only that page in that org takes it (review of #421): one left meanwhile, or another org, never does.
+   */
+  let focusNext: { orgId: string; key: string; at: string } | null = null;
+  const aim = (orgId: string, key: string) => {
+    focusNext = { orgId, key, at: router.state.location.href };
+  };
+  /** Drops what was named for `key`, unless something since named another. */
+  const unaim = (orgId: string, key: string) => {
+    if (focusNext?.orgId === orgId && focusNext.key === key) focusNext = null;
+  };
+  /** Still on the page, in the org, focus was named on: else nothing there takes it. */
+  const aimedHere = () => focusNext !== null && router.state.location.href === focusNext.at && orgOnScreen(router) === focusNext.orgId;
+  const focusRefs = new Map<string, (el: HTMLElement | null) => void>();
 
   const org = (page: SettingsPage, orgId: string): SettingsScope => ({ page, orgId });
   const notifications = (orgId: string) => org('notifications', orgId);
+  const ai = (orgId: string) => org('ai', orgId);
+  const agents = (orgId: string) => org('agents', orgId);
   const members = (orgId: string) => org('members', orgId);
   const account: SettingsScope = { page: 'account', orgId: null };
   const invitation: SettingsScope = { page: 'invitation', orgId: null };
 
   return {
-    settings: { pending: {}, errors: {}, drafts: {}, roleChange: null, removing: null, removingChannel: null, signingSecret: null },
+    settings: {
+      pending: {},
+      errors: {},
+      drafts: {},
+      roleChange: null,
+      removing: null,
+      removingChannel: null,
+      signingSecret: null,
+      aiModels: null,
+      aiEdit: null,
+      savedAt: {},
+      removingAiKey: null,
+      agentScopes: null,
+      disconnecting: null,
+    },
 
     editSettings: (orgId, form, version, change) => drafts.edit(form, { orgId, record: 'settings', version, edit: {} }, (e) => ({ ...e, ...change })),
 
     async saveSettings(orgId, form, settings, renamed) {
-      if (!hasEdits(get().settings, form, orgId)) {
-        toast('Nothing to save');
-        return;
-      }
-      // Its page's other actions wait for it, as it waits for them. The forms' fields are each one
-      // form's: a save moves every other form's draft on its version to the one it made.
-      if (runningIn(get().settings, org(FORM_PAGE[form], orgId)) !== undefined) return;
+      // Asked on every change and every field left (#366): with nothing edited, there is nothing to say.
+      if (!hasEdits(get().settings, form, orgId)) return;
+      // An action running on its page (a channel's, a test) goes first. A save asked for while this form's own runs
+      // follows it with the latest edits, and moves every other form's draft on its version to the one it made.
+      const scope = org(FORM_PAGE[form], orgId);
+      const key = scopeKey(scope);
+      while (get().settings.pending[key] !== undefined) await actions.get(key);
+      if (!here(scope)) return;
+      savingWith.set(form, settings);
       await drafts.save(form, { settings, renamed });
     },
 
     connectSlack: (orgId, webhookUrl, ifVersion) =>
-      run(notifications(orgId), 'slack', () => callTool('set_slack_alert_channel', { webhookUrl: webhookUrl.trim(), ifVersion }), 'Slack connected'),
+      run(
+        notifications(orgId),
+        'slack',
+        () => callTool('set_alert_channel', { kind: 'slack', webhookUrl: webhookUrl.trim(), ifVersion }, orgId),
+        'Slack connected',
+      ),
     async setWebhook(orgId, webhookUrl, ifVersion) {
       const secret = ifVersion === undefined ? newSigningSecret() : undefined;
       const saved = await run(
         notifications(orgId),
         'webhook',
-        () => callTool('set_webhook_alert_channel', { webhookUrl: webhookUrl.trim(), signingSecret: secret, ifVersion }),
+        () => callTool('set_alert_channel', { kind: 'webhook', webhookUrl: webhookUrl.trim(), signingSecret: secret, ifVersion }, orgId),
         'Webhook saved',
       );
       if (saved && secret) patch((s) => ({ ...s, signingSecret: { orgId, secret } }));
@@ -284,52 +458,234 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       const saved = await run(
         notifications(orgId),
         'webhook',
-        () => callTool('set_webhook_alert_channel', { signingSecret: secret, ifVersion }),
+        () => callTool('set_alert_channel', { kind: 'webhook', signingSecret: secret, ifVersion }, orgId),
         'New signing secret set',
       );
       if (saved) patch((s) => ({ ...s, signingSecret: { orgId, secret } }));
     },
     dismissSigningSecret: () => patch((s) => ({ ...s, signingSecret: null })),
-    askToRemoveAlertChannel: (orgId, kind) =>
+    askToRemoveAlertChannel: (orgId, kind) => {
+      const was = get().settings.removingChannel;
       patch((s) => {
         const running = runningIn(s, notifications(orgId));
         if (kind ? running !== undefined : running === `remove:${s.removingChannel?.kind}`) return s;
         return { ...s, removingChannel: kind && { orgId, kind }, errors: withoutKey(s.errors, `remove:${kind ?? s.removingChannel?.kind}`) };
-      }),
+      });
+      // Compared by value: asked again for the one already open, nothing moves.
+      const now = get().settings.removingChannel;
+      if (now?.orgId !== was?.orgId || now?.kind !== was?.kind) aim(orgId, kind ? `confirm:${kind}` : `remove:${was?.kind}`);
+    },
     async removeAlertChannel(orgId, kind) {
+      // Another action runs on the page: this press is refused, and touches nothing of the one under way (review of #421).
+      if (runningIn(get().settings, notifications(orgId)) !== undefined) return;
+      const at = `form:${kind}`;
       const removed = await run(
         notifications(orgId),
         `remove:${kind}`,
-        () => callTool('remove_alert_channel', { channel: kind }),
+        // Named once the removal is under way, never by a press refused as another runs (review of #421): its card goes back
+        // to the form that sets one, which can mount as the removal reads the page again.
+        () => {
+          aim(orgId, at);
+          return callTool('remove_alert_channel', { channel: kind }, orgId);
+        },
         kind === 'slack' ? 'Slack removed' : 'Webhook removed',
       );
-      if (removed) patch((s) => (s.removingChannel?.orgId === orgId && s.removingChannel.kind === kind ? { ...s, removingChannel: null } : s));
+      // Refused, the confirmation stays and keeps focus; done on a page left meanwhile, nothing there takes it.
+      if (!removed || !aimedHere()) unaim(orgId, at);
+      if (!removed) return;
+      patch((s) => (s.removingChannel?.orgId === orgId && s.removingChannel.kind === kind ? { ...s, removingChannel: null } : s));
     },
     testAlertChannel: async (orgId, channel) =>
       void (await run(
         notifications(orgId),
         `test:${channel}`,
-        () => callTool('test_alert_channel', { channel }),
+        () => callTool('test_alert_channel', { channel }, orgId),
         'Test sent. How it went shows under Recent deliveries.',
       )),
     retryAlertDelivery: async (orgId, deliveryId) =>
       void (await run(
         notifications(orgId),
         `retry:${deliveryId}`,
-        () => callTool('retry_alert_delivery', { alertDeliveryId: deliveryId }),
+        () => callTool('retry_alert_delivery', { alertDeliveryId: deliveryId }, orgId),
         'Sending it again',
       )),
+
+    saveAiKey(orgId, { provider, apiKey, baseUrl, acceptsImages, jsonSchemaOutput }, ifVersion) {
+      return run(
+        ai(orgId),
+        'key',
+        async () => {
+          await callTool(
+            'save_ai_provider',
+            {
+              provider,
+              apiKey: apiKey.trim() || undefined,
+              ...(provider === 'openai-compatible' && { baseUrl: baseUrl.trim(), acceptsImages, jsonSchemaOutput }),
+              ifVersion,
+            },
+            orgId,
+          );
+          // A new key starts the provider over: a version this tab made before is no longer one to build on. Only once
+          // saved: a refused press changed nothing, and the next choice still builds on that version (#479).
+          aiSaved.delete(orgId);
+        },
+        apiKey.trim() ? 'Key saved. Test it to choose the models.' : 'Saved',
+      );
+    },
+    testAiProvider: async (orgId) =>
+      void (await run(
+        ai(orgId),
+        'test',
+        async () => {
+          const result = await callTool('test_ai_provider', {}, orgId);
+          if (!result.ok) {
+            // A refused key lost its verified mark: the page reads the provider again before it says why.
+            if (onScreen(router, ai(orgId))) await router.invalidate({ sync: true });
+            throw new Error(aiTestProblem(result.problem ?? 'unreachable', result.provider.provider));
+          }
+          patch((s) => ({ ...s, aiModels: { orgId, models: result.models } }));
+        },
+        'Connected',
+      )),
+    editAiChoices: (orgId, change) =>
+      patch((s) => ({ ...s, aiEdit: { orgId, choices: { ...(s.aiEdit?.orgId === orgId ? s.aiEdit.choices : {}), ...change } } })),
+    saveAiChoices: async (orgId, provider, choices, ifVersion) => {
+      const { fastModel, capableModel, dailyTurnCeiling } = choices;
+      const saved = await runNext(
+        ai(orgId),
+        'choices',
+        async () => {
+          const known = aiSaved.get(orgId);
+          const out = await callTool(
+            'save_ai_provider',
+            {
+              provider,
+              fastModel: fastModel || null,
+              capableModel: capableModel || null,
+              dailyTurnCeiling: dailyTurnCeiling.trim() ? Number(dailyTurnCeiling) : null,
+              ifVersion: known?.from === ifVersion ? known.to : ifVersion,
+            },
+            orgId,
+          );
+          aiSaved.set(orgId, { from: known?.from === ifVersion ? known.from : ifVersion, to: out.provider.version });
+        },
+        // Saved as each is chosen, quietly (#366).
+        null,
+      );
+      // What this save sent is the provider as read now: those edits go, and a change made meanwhile stays.
+      if (saved)
+        patch((s) => {
+          if (s.aiEdit?.orgId !== orgId) return s;
+          const left: Partial<AiChoices> = {};
+          for (const k of AI_CHOICES) {
+            const v = s.aiEdit.choices[k];
+            if (v !== undefined && v !== choices[k]) left[k] = v;
+          }
+          return { ...s, aiEdit: Object.keys(left).length ? { orgId, choices: left } : null };
+        });
+      // A choice that got no answer, or was refused, is unsaved: closing the tab asks, while it is still this org's (#479).
+      const id = `ai-choices:${orgId}`;
+      if (saved || get().settings.aiEdit?.orgId !== orgId) noteSaved(id);
+      else noteUnsaved(id, () => get().settings.aiEdit?.orgId === orgId && orgOnScreen(router) === orgId);
+    },
+    askToRemoveAiKey: (orgId, open) => {
+      const was = get().settings.removingAiKey;
+      patch((s) => {
+        const running = runningIn(s, ai(orgId));
+        if (open ? running !== undefined : running === 'remove') return s;
+        return { ...s, removingAiKey: open ? orgId : null, errors: withoutKey(s.errors, 'remove') };
+      });
+      if (get().settings.removingAiKey !== was) aim(orgId, open ? 'confirm:key' : 'remove:key');
+    },
+    async removeAiKey(orgId) {
+      if (runningIn(get().settings, ai(orgId)) !== undefined) return;
+      // The form is read afresh without a key, as the removal reads the page again: its key field takes focus. Named as
+      // the removal channel's is (review of #421).
+      const removed = await run(
+        ai(orgId),
+        'remove',
+        async () => {
+          aim(orgId, 'form:key');
+          await callTool('remove_ai_provider', {}, orgId);
+          // As a new key's save: only once removed (#479).
+          aiSaved.delete(orgId);
+        },
+        'Key removed. The agent uses the demo model.',
+      );
+      if (!removed || !aimedHere()) unaim(orgId, 'form:key');
+      if (!removed) return;
+      patch((s) => ({ ...s, removingAiKey: s.removingAiKey === orgId ? null : s.removingAiKey, aiModels: null }));
+    },
+    focusWhenReplaced(key) {
+      // One callback a key, so React calls it as its element mounts, not again on every render.
+      let ref = focusRefs.get(key);
+      if (!ref) {
+        ref = (el) => {
+          if (!el || focusNext?.key !== key || !aimedHere()) return;
+          focusNext = null;
+          el.focus();
+        };
+        focusRefs.set(key, ref);
+      }
+      return ref;
+    },
+
+    async setAgentScopes(orgId, grantId, scopes, ifVersion) {
+      if (runningIn(get().settings, agents(orgId)) !== undefined) return;
+      const change = { grantId, scopes };
+      patch((s) => ({ ...s, agentScopes: change }));
+      await run(
+        agents(orgId),
+        `scopes:${grantId}`,
+        () => callTool('update_agent_grant_scopes', { grantId, scopes, ifVersion }, orgId),
+        'Applies from its next call',
+      );
+      // Another change may have started once this one let go.
+      patch((s) => (s.agentScopes === change ? { ...s, agentScopes: null } : s));
+    },
+    askToDisconnectAgent: (orgId, grantId) =>
+      patch((s) => {
+        const running = runningIn(s, agents(orgId));
+        if (grantId ? running !== undefined : running?.startsWith('disconnect:')) return s;
+        return { ...s, disconnecting: grantId ? { orgId, grantId } : null, errors: grantId ? withoutKey(s.errors, `disconnect:${grantId}`) : s.errors };
+      }),
+    async disconnectAgent(orgId, grantId) {
+      const done = await run(
+        agents(orgId),
+        `disconnect:${grantId}`,
+        async () => {
+          await callTool('revoke_agent_grant', { grantId }, orgId);
+          // To the list before the reload: the agent's own page has nothing to show once it is gone.
+          if (orgOnScreen(router) === orgId) await router.navigate({ to: '/settings/api' });
+        },
+        'Disconnected',
+      );
+      if (done) patch((s) => (s.disconnecting?.grantId === grantId ? { ...s, disconnecting: null } : s));
+    },
 
     async reloadSettings(orgId, at) {
       await router.invalidate({ sync: true });
       // Only the refused form's edits go: another page's are kept, and its own save says if they conflict.
       if (get().settings.drafts[at]?.orgId === orgId) drafts.drop(at);
-      patch((s) => ({ ...s, errors: withoutKey(s.errors, at) }));
+      // The AI choices as changed here go too: the page shows the provider as it is now (review of #466).
+      patch((s) => ({ ...s, errors: withoutKey(s.errors, at), aiEdit: at === 'choices' ? null : s.aiEdit }));
       toast('Reloaded. Make your change again on what is there now.');
     },
     forgetOrgSettings() {
       drafts.forget();
-      patch((s) => ({ ...s, removing: null, removingChannel: null, signingSecret: null }));
+      focusNext = null;
+      patch((s) => ({
+        ...s,
+        removing: null,
+        removingChannel: null,
+        signingSecret: null,
+        aiModels: null,
+        aiEdit: null,
+        removingAiKey: null,
+        disconnecting: null,
+        // When an org's quiet saves last saved is that org's (#479): only the account's own, its name, stays.
+        savedAt: Object.fromEntries(Object.entries(s.savedAt).filter(([at]) => at === 'profile')),
+      }));
     },
 
     inviteMembers(orgId, emails, role) {
@@ -386,16 +742,18 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       if (removed) patch((s) => (s.removing?.member.id === memberId ? { ...s, removing: null } : s));
     },
 
-    saveProfile: async (name) =>
-      void (await run(
+    saveProfile: async (name) => {
+      await runNext(
         account,
         'profile',
         async () => {
           if (!name.trim()) throw new Error('Enter your name.');
           await auth(authClient.updateUser({ name: name.trim() }), 'Could not save your name.');
         },
-        'Saved',
-      )),
+        // Saved on leaving the field, quietly (#366).
+        null,
+      );
+    },
     signOutSession: async (token) =>
       void (await run(account, `session:${token}`, () => auth(authClient.revokeSession({ token }), 'Could not sign it out.'), 'Signed out')),
     signOutOtherSessions: async () =>
@@ -404,15 +762,20 @@ export const createSettingsSlice: SliceCreator<SettingsSlice> = (set, get, { rou
       const key = scopeKey(account);
       if (runningIn(get().settings, account) !== undefined) return;
       patch((s) => ({ ...s, pending: { ...s.pending, [key]: 'github' }, errors: withoutKey(s.errors, 'github') }));
-      try {
-        // On success the browser leaves for GitHub and comes back to the account page.
-        await auth(authClient.linkSocial({ provider: 'github', callbackURL: '/account' }), 'Could not connect GitHub.');
-      } catch (err) {
-        patch((s) => ({ ...s, errors: { ...s.errors, github: { orgId: null, text: toolMessage(err), stale: false } } }));
-      } finally {
-        // Released as the browser leaves too: a page the back button restores from its cache is not locked.
-        patch((s) => ({ ...s, pending: withoutKey(s.pending, key) }));
-      }
+      const running = (async () => {
+        try {
+          // On success the browser leaves for GitHub and comes back to the account page.
+          await auth(authClient.linkSocial({ provider: 'github', callbackURL: '/account' }), 'Could not connect GitHub.');
+        } catch (err) {
+          patch((s) => ({ ...s, errors: { ...s.errors, github: { orgId: null, text: toolMessage(err), stale: false } } }));
+        } finally {
+          // Released as the browser leaves too: a page the back button restores from its cache is not locked.
+          patch((s) => ({ ...s, pending: withoutKey(s.pending, key) }));
+        }
+      })();
+      // A name saved meanwhile waits for it, as for any action on the page (review of #466).
+      actions.set(key, running);
+      await running;
     },
 
     async acceptInvitation(invitationId) {

@@ -2,10 +2,11 @@
  * Your account (canvas board Account): profile, sign-in methods, where you are signed in, and the
  * CMS theme. It applies in every organization you belong to.
  */
+import { choiceVariants } from '~/components/ui/choice';
 import { createFileRoute, getRouteApi, Link } from '@tanstack/react-router';
 import { MonitorIcon, MoonIcon, SunIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
-import { EditorFields } from '~/components/editor';
+import { EditorFields, saveWord } from '~/components/editor';
 import { PageHeader } from '~/components/page';
 import { ActionError, SettingsSection, useRunning } from '~/components/settings/parts';
 import { Button } from '~/components/ui/button';
@@ -14,7 +15,6 @@ import { Label } from '~/components/ui/label';
 import { ago } from '~/lib/screen-status';
 import { describeAgent } from '~/lib/settings';
 import type { Theme } from '~/lib/theme';
-import { cn } from '~/lib/utils';
 import { backToPage } from '~/server/form-post.server';
 import { getAccount } from '~/server/settings.functions';
 import { useAppStore } from '~/state/provider';
@@ -38,7 +38,9 @@ function AccountPage() {
   const { sessions, github, at } = Route.useLoaderData();
   const { user } = app.useLoaderData();
   const id = useId();
-  const busy = useRunning({ page: 'account', orgId: null }) !== undefined;
+  const running = useRunning({ page: 'account', orgId: null });
+  const savedAt = useAppStore((s) => s.settings.savedAt.profile ?? null);
+  const busy = running !== undefined;
   const saveProfile = useAppStore((s) => s.saveProfile);
   const signOutSession = useAppStore((s) => s.signOutSession);
   const signOutOtherSessions = useAppStore((s) => s.signOutOtherSessions);
@@ -69,21 +71,27 @@ function AccountPage() {
           <EditorFields>
             <div className="grid gap-1.5">
               <Label htmlFor={`${id}-name`}>Name</Label>
-              <Input id={`${id}-name`} name="name" defaultValue={user.name} maxLength={100} autoComplete="name" />
+              <Input
+                id={`${id}-name`}
+                name="name"
+                defaultValue={user.name}
+                maxLength={100}
+                autoComplete="name"
+                // Saved once it is left, if it changed (#366).
+                onBlur={(e) => e.currentTarget.value !== user.name && e.currentTarget.form?.requestSubmit()}
+              />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor={`${id}-email`}>Email</Label>
               <Input id={`${id}-email`} value={user.email} readOnly aria-describedby={`${id}-email-help`} />
-              <p id={`${id}-email-help`} className="text-[13px] text-muted-foreground">
+              <p id={`${id}-email-help`} className="text-meta text-muted-foreground">
                 Your sign-in address. Changing it is not offered yet.
               </p>
             </div>
             <ActionError at="profile" />
-            <div>
-              <Button type="submit" aria-disabled={busy || undefined}>
-                Save
-              </Button>
-            </div>
+            <p className="text-sm text-muted-foreground" aria-live="polite">
+              {running === 'profile' ? 'Saving…' : savedAt ? saveWord('saved', savedAt) : 'Changes save as you make them.'}
+            </p>
           </EditorFields>
         </form>
       </SettingsSection>
@@ -156,13 +164,7 @@ function AccountPage() {
           <div className="flex flex-wrap gap-2">
             <EditorFields>
               {THEMES.map(({ value, label, icon: Icon }) => (
-                <label
-                  key={value}
-                  className={cn(
-                    'flex h-10 cursor-pointer items-center gap-2 rounded-full border px-4 text-sm has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50',
-                    theme === value ? 'border-foreground bg-foreground text-background' : 'border-border-strong bg-card hover:bg-accent',
-                  )}
-                >
+                <label key={value} className={choiceVariants({ className: 'flex h-10 cursor-pointer items-center gap-2 rounded-full px-4 text-sm' })}>
                   <input type="radio" name="theme" value={value} checked={theme === value} onChange={() => setTheme(value)} className="sr-only" />
                   <Icon className="size-4" aria-hidden /> {label}
                 </label>

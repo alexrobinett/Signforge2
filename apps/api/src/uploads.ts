@@ -1,5 +1,5 @@
 /**
- * The presigner for direct asset uploads (`create_asset_upload`), from the Worker's settings.
+ * The presigner for direct asset uploads (`start_upload`), from the Worker's settings.
  *
  * Deployed: R2's S3 API, `R2_S3_ENDPOINT` (`https://<account>.r2.cloudflarestorage.com`) and
  * `R2_BUCKET_NAME`, signed with an R2 API token's `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`

@@ -2,7 +2,7 @@
 import { scoped } from '@signforge/db';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
-import { Client, email, testApp } from './client';
+import { Client, email, nextIp, testApp } from './client';
 
 async function team() {
   const t = testApp();
@@ -70,7 +70,7 @@ describe('roles', () => {
       expect((await m.c.tool('get_org_settings')).status).toBe(200);
     }
     // A viewer changes nothing at all.
-    expect((await viewer.c.tool('create_group', { name: 'Mine' })).status).toBe(403);
+    expect((await viewer.c.tool('save_group', { name: 'Mine' })).status).toBe(403);
   });
 
   it('an owner changes roles, removes members and settings; the removed member is out at once', async () => {
@@ -86,6 +86,137 @@ describe('roles', () => {
     // The only owner cannot step down and leave the org without one.
     expect((await owner.post('/api/auth/organization/update-member-role', { memberId: ownerMemberId, role: 'editor' })).status).toBe(400);
     expect(await role(owner)).toBe('owner');
+  });
+});
+
+/**
+ * The bindings, with the first statement that changes a `member` row held until `release`: a request
+ * made with them stops after Better Auth's checks, just before its write, while another runs.
+ */
+function holdingMemberWrite() {
+  let reached = () => {};
+  const atWrite = new Promise<void>((r) => {
+    reached = r;
+  });
+  let release = () => {};
+  const released = new Promise<void>((r) => {
+    release = r;
+  });
+  let held = false;
+  const wait = async (sql: string) => {
+    if (held || !/^\s*(update|delete\s+from)\s+["`]?member["`]?\s/i.test(sql)) return;
+    held = true;
+    reached();
+    await released;
+  };
+  const statement = (sql: string, s: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(s, {
+      get(target, key) {
+        const v = Reflect.get(target, key);
+        if (key === 'bind') return (...args: unknown[]) => statement(sql, target.bind(...args));
+        if (typeof v !== 'function') return v;
+        if (key === 'first' || key === 'run' || key === 'all' || key === 'raw') {
+          return async (...args: unknown[]) => {
+            await wait(sql);
+            return v.apply(target, args);
+          };
+        }
+        return v.bind(target);
+      },
+    });
+  const DB = new Proxy(env.DB, {
+    get(target, key) {
+      if (key === 'prepare') return (sql: string) => statement(sql, target.prepare(sql));
+      const v = Reflect.get(target, key);
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+  });
+  return { bindings: { ...env, DB }, atWrite, release };
+}
+
+describe('an org always keeps an owner (#292)', () => {
+  /** An org with two owners, A and B, each signed in; A's requests can be held at their write. */
+  async function twoOwners() {
+    const t = testApp();
+    const a = new Client(t);
+    const { user: aUser } = await a.signIn(email('owner-a'));
+    const org = await a.createOrg('Two Owners Co');
+    const bAddr = email('owner-b');
+    const invite = await a.ok<{ id: string }>('/api/auth/organization/invite-member', { email: bAddr, role: 'owner' });
+    const b = new Client(t);
+    const { user: bUser } = await b.signIn(bAddr);
+    const { member: bMember } = await b.ok<{ member: { id: string } }>('/api/auth/organization/accept-invitation', { invitationId: invite.id });
+    const aMember = (await scoped(env.DB, org.id).members.list()).find((m) => m.userId === aUser.id)!;
+    const hold = holdingMemberWrite();
+    const heldA = new Client(t, nextIp(), hold.bindings);
+    for (const [k, v] of a.jar) heldA.jar.set(k, v);
+    const owners = async () => (await scoped(env.DB, org.id).members.list()).filter((m) => m.role === 'owner').map((m) => m.userId);
+    /** A's request runs to its write and waits there while B's runs to the end; then A's goes on. */
+    const race = async (aCall: (c: Client) => Promise<Response>, bCall: (c: Client) => Promise<Response>) => {
+      const aRes = aCall(heldA);
+      await hold.atWrite;
+      const bRes = await bCall(b);
+      hold.release();
+      return { a: await aRes, b: bRes };
+    };
+    const audit = async (action: string) => (await scoped(env.DB, org.id).auditLog.list()).filter((r) => r.action === action);
+    return { org, a, b, aUser, bUser, aMember, bMember, owners, race, audit };
+  }
+
+  // The refusal a request gets when the other owner's change landed after Better Auth's own count.
+  const lostRace = { code: 'ORGANIZATION_NEEDS_AN_OWNER', message: expect.stringContaining('at least one owner') };
+  /** `b`'s change went in and `a`'s was refused as the lost race, leaving `owner` the one owner. */
+  const bWon = async (res: { a: Response; b: Response }, owners: () => Promise<string[]>, owner: string) => {
+    expect(res.b.status).toBe(200);
+    expect(res.a.status).toBe(400);
+    expect(await res.a.json()).toMatchObject(lostRace);
+    expect(await owners()).toEqual([owner]);
+  };
+
+  it('two owners demoting each other at once leaves exactly one owner', async () => {
+    const { org, bUser, aMember, bMember, owners, race, audit } = await twoOwners();
+    const res = await race(
+      (a) => a.post('/api/auth/organization/update-member-role', { memberId: bMember.id, role: 'editor', organizationId: org.id }),
+      (b) => b.post('/api/auth/organization/update-member-role', { memberId: aMember.id, role: 'editor', organizationId: org.id }),
+    );
+    await bWon(res, owners, bUser.id);
+    // Only the change that happened is in the log.
+    expect((await audit('update_member_role')).map((r) => r.targetId)).toEqual([aMember.id]);
+  });
+
+  it('two owners removing each other at once leaves exactly one owner', async () => {
+    const { org, bUser, aMember, bMember, owners, race, audit } = await twoOwners();
+    const res = await race(
+      (a) => a.post('/api/auth/organization/remove-member', { memberIdOrEmail: bMember.id, organizationId: org.id }),
+      (b) => b.post('/api/auth/organization/remove-member', { memberIdOrEmail: aMember.id, organizationId: org.id }),
+    );
+    await bWon(res, owners, bUser.id);
+    expect((await audit('remove_member')).map((r) => r.targetId)).toEqual([aMember.id]);
+  });
+
+  it('two owners leaving at once leaves exactly one owner', async () => {
+    const { org, aUser, bMember, owners, race, audit } = await twoOwners();
+    const res = await race(
+      (a) => a.post('/api/auth/organization/leave', { organizationId: org.id }),
+      (b) => b.post('/api/auth/organization/leave', { organizationId: org.id }),
+    );
+    await bWon(res, owners, aUser.id);
+    expect((await audit('leave_organization')).map((r) => r.targetId)).toEqual([bMember.id]);
+  });
+
+  it('refuses the last owner stepping down, leaving or being removed, with a clear error', async () => {
+    const { org, a, b, aUser, aMember, owners } = await twoOwners();
+    await b.ok('/api/auth/organization/leave', { organizationId: org.id });
+    for (const [path, body] of [
+      ['/api/auth/organization/update-member-role', { memberId: aMember.id, role: 'editor', organizationId: org.id }],
+      ['/api/auth/organization/remove-member', { memberIdOrEmail: aMember.id, organizationId: org.id }],
+      ['/api/auth/organization/leave', { organizationId: org.id }],
+    ] as const) {
+      const res = await a.post(path, body);
+      expect(res.status, path).toBe(400);
+      expect(((await res.json()) as { message: string }).message, path).toMatch(/owner/);
+    }
+    expect(await owners()).toEqual([aUser.id]);
   });
 });
 
@@ -199,6 +330,18 @@ describe('list_audit_log over /api/tools', () => {
     }
   });
 
+  it('gives a sealed cursor that holds no id in the clear, and refuses one given a part more (#345, review of #534)', async () => {
+    const { owner } = await team();
+    const first = await owner.tool('list_audit_log', { limit: 1 });
+    const { next, entries } = (await first.json()) as { next: string; entries: { actor: { id: string } }[] };
+    // Sealed by the API (cipher.ts): v1, an iv and the ciphertext, none of it the plain key's base64 JSON.
+    expect(next).toMatch(/^v1\.[\w-]+\.[\w-]+$/);
+    for (const part of next.split('.')) expect(() => JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')))).toThrow();
+    expect(next).not.toContain(entries[0]!.actor.id);
+    expect((await owner.tool('list_audit_log', { limit: 1, cursor: next })).status).toBe(200);
+    expect((await owner.tool('list_audit_log', { limit: 1, cursor: `${next}.x` })).status).toBe(400);
+  });
+
   it("refuses a cursor from the org the member switched away from, so no page mixes two orgs' rows", async () => {
     const { owner } = await team();
     const first = await owner.tool('list_audit_log', { limit: 1 });
@@ -207,6 +350,7 @@ describe('list_audit_log over /api/tools', () => {
     await owner.createOrg('Second Co');
     const res = await owner.tool('list_audit_log', { limit: 1, cursor: next });
     expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ error: 'invalid_input', message: expect.stringContaining('another organization') });
+    // Sealed for the first org (#345), it opens in no other.
+    expect(await res.json()).toMatchObject({ error: 'invalid_input', details: [{ path: 'cursor' }] });
   });
 });

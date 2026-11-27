@@ -2,7 +2,7 @@
 // for a save on its way and publishes the latest edit, and a spot left with an edit waiting is
 // saved (#150). Tool calls go through a stubbed `fetch`, held open until the test answers; the
 // autosave's second is fake time.
-import { liveSources, PREVIEW_PROTOCOL, type TemplateManifest } from '@signforge/contract';
+import { liveSources, PREVIEW_PROTOCOL, type ScreenManifest, type TemplateManifest } from '@signforge/contract';
 import news from '@signforge/template-news/template.json';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type ComponentProps, createElement } from 'react';
@@ -18,7 +18,9 @@ import { getDataSource } from '../src/server/spots.functions';
 import { createPublishingSlice, type PublishingSlice } from '../src/state/publishing';
 import { createSpotSourceSlice, sourceStateOf, type SpotSourceSlice } from '../src/state/spot-source';
 import { draftOf, fieldProblems } from '../src/lib/spots';
+import { type AgentSlice, createAgentSlice } from '../src/state/agent';
 import { createSpotEditorSlice, spotShown, type SpotEditorSlice } from '../src/state/spot-editor';
+import { initialOrgs } from '../src/state/orgs';
 
 // The tab's org comes from the page's router, which a store test has none of.
 vi.mock('~/lib/tab-org', () => ({ tabOrgHeaders: async () => ({}) }));
@@ -50,6 +52,7 @@ const spot = (id: string, version: number): SpotView => ({
   assetId: null,
   fit: null,
   url: 'https://example.com/',
+  sampleFields: null,
   version,
   published: false,
   draftChanged: true,
@@ -122,6 +125,7 @@ describe('a save on its way (#150)', () => {
     const store = createStore<SpotEditorSlice & PublishingSlice>()((set, get) => ({
       ...createSpotEditorSlice(set as never, get as never, { router, queryClient } as never),
       ...createPublishingSlice(set as never, get as never, { router, queryClient } as never),
+      orgs: initialOrgs,
     }));
     return { store, queryClient };
   }
@@ -132,14 +136,14 @@ describe('a save on its way (#150)', () => {
     queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
     store.getState().editSpot(ORG, a.id, (d) => ({ ...d, name: 'One' }));
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).toMatchObject([{ name: 'update_spot', input: { name: 'One', ifVersion: 4 } }]);
+    expect(calls).toMatchObject([{ name: 'save_spot', input: { name: 'One', ifVersion: 4 } }]);
 
     store.getState().editSpot(ORG, a.id, (d) => ({ ...d, name: 'Two' }));
     void store.getState().publishSpot(ORG, a.id);
     await vi.advanceTimersByTimeAsync(0);
     answers[0]!({ spot: { ...a, name: 'One', version: 5 } });
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls.map((c) => c.name)).toEqual(['update_spot', 'update_spot']);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot', 'save_spot']);
     expect(calls[1]!.input).toMatchObject({ name: 'Two', ifVersion: 5 });
 
     answers[1]!({ spot: { ...a, name: 'Two', version: 6 } });
@@ -155,7 +159,7 @@ describe('a save on its way (#150)', () => {
     store.getState().editSpot(ORG, a.id, (d) => ({ ...d, name: 'A, renamed' }));
     store.getState().editSpot(ORG, b.id, (d) => ({ ...d, name: 'B, renamed' }));
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls).toMatchObject([{ name: 'update_spot', input: { spotId: 'spt_a', name: 'A, renamed', ifVersion: 4 } }]);
+    expect(calls).toMatchObject([{ name: 'save_spot', input: { spotId: 'spt_a', name: 'A, renamed', ifVersion: 4 } }]);
     expect(store.getState().spotEditor.drafts.spt_a?.edit.name).toBe('A, renamed');
   });
 });
@@ -180,7 +184,11 @@ describe('the stage (review of #97)', () => {
     const queryClient = new QueryClient();
     let hear: (e: unknown) => void = () => {};
     vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
-    const store = createStore<SpotEditorSlice>()((set, get) => createSpotEditorSlice(set as never, get as never, { router: {}, queryClient } as never));
+    // The stage plays an open review of the agent's (#264): the agent's slice is there, with none open.
+    const store = createStore<SpotEditorSlice & AgentSlice>()((set, get) => ({
+      ...createSpotEditorSlice(set as never, get as never, { router: {}, queryClient } as never),
+      ...createAgentSlice(set as never, get as never, { router: {}, queryClient } as never),
+    }));
     const sha = 'b'.repeat(64);
     const image: SpotView = { ...spot('spt_img', 1), kind: 'image', url: null, assetId: 'ast_new' };
     const asset: AssetView = {
@@ -214,8 +222,85 @@ describe('the stage (review of #97)', () => {
     store.getState().attachStage({ frame, orgId: ORG, spotId: image.id, orientation: 'landscape' });
     hear({ origin: 'http://cms.test', source: frame, data: { sfPreview: PREVIEW_PROTOCOL, type: 'listening' } });
     await held;
-    expect(store.getState().spotEditor.refusals).toEqual(['asset ast_new is still being checked']);
+    expect(store.getState().spotEditor.refusals).toEqual(['Asset ast_new is still being checked']);
     expect(posted).toEqual([]);
+  });
+});
+
+describe('a stage out of view (#342)', () => {
+  it("posts only to a frame in view: a draft compiled out of view (its warnings kept current), or the player's failure there, is posted when the frame is seen", async () => {
+    const queryClient = new QueryClient();
+    let hear: (e: unknown) => void = () => {};
+    vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f) });
+    const manifest = { screen: 'preview' } as unknown as ScreenManifest;
+    let compiles = 0;
+    let finish = () => {};
+    let compiled = Promise.resolve();
+    const store = createStore<SpotEditorSlice & { playlistStageDraft: () => Promise<{ manifest: ScreenManifest; problems: string[] }> }>()((set, get) => ({
+      ...createSpotEditorSlice(set as never, get as never, { router: {}, queryClient } as never),
+      playlistStageDraft: async () => {
+        compiles++;
+        await compiled;
+        return { manifest, problems: [] };
+      },
+    }));
+    const posted: unknown[] = [];
+    // The frame's box in a 390×280 window: `top` moves it, as a scroll or a resize does.
+    let top = 0;
+    vi.stubGlobal('window', { addEventListener: (_: string, f: (e: unknown) => void) => (hear = f), innerWidth: 390, innerHeight: 280 });
+    const frame: Window = {
+      postMessage: (m: never) => posted.push(m),
+      frameElement: { getBoundingClientRect: () => ({ top, bottom: top + 100, left: 0, right: 390 }) },
+    } as never;
+    const say = (data: Record<string, unknown>) => hear({ origin: 'http://cms.test', source: frame, data: { sfPreview: PREVIEW_PROTOCOL, ...data } });
+    store.getState().attachStage({ frame, orgId: ORG, playlistId: 'pls_a', orientation: 'landscape' });
+    store.getState().seeStage(false);
+    say({ type: 'listening' });
+    await vi.advanceTimersByTimeAsync(0);
+    // Compiled, so the playlist's row warnings are current, but not posted.
+    expect([compiles, posted.length]).toEqual([1, 0]);
+
+    store.getState().seeStage(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(1);
+
+    // Moved out of view while it compiled: kept for when it is back.
+    compiled = new Promise((resolve) => (finish = resolve));
+    store.getState().redrawStage();
+    await vi.advanceTimersByTimeAsync(100);
+    store.getState().seeStage(false);
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(1);
+    compiled = Promise.resolve();
+    store.getState().seeStage(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(2);
+
+    // Resized while it compiled, the frame now below the window, before the observer says so: its box is measured, not trusted (re-check of #387).
+    compiled = new Promise((resolve) => (finish = resolve));
+    store.getState().redrawStage();
+    await vi.advanceTimersByTimeAsync(100);
+    top = 300;
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(2);
+    compiled = Promise.resolve();
+    top = 0;
+    store.getState().seeStage(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(3);
+
+    // Scrolled away while it plays: the player cannot draw there, which is not the draft's fault.
+    store.getState().seeStage(false);
+    say({ type: 'error', message: 'pls_a: not ready within 2000 ms' });
+    expect(store.getState().spotEditor.stageError).toBeNull();
+    store.getState().seeStage(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(posted).toHaveLength(4);
+    // In view, a failure is the stage's to say.
+    say({ type: 'error', message: 'pls_a: not ready within 2000 ms' });
+    expect(store.getState().spotEditor.stageError).toBe('pls_a: not ready within 2000 ms');
   });
 });
 
@@ -251,8 +336,8 @@ describe('a date not picked yet (review of #192)', () => {
     const { store, launch } = editing({ target: '' });
     store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, title: 'Doors open' } }));
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).toMatchObject([{ name: 'update_spot', input: { spotId: launch.id, data: { target: '', title: 'Doors open' }, ifVersion: 1 } }]);
-    expect(fieldProblems(countdown.fields, { data: { target: '', title: 'Doors open' }, assets: {} })).toEqual(
+    expect(calls).toMatchObject([{ name: 'save_spot', input: { spotId: launch.id, data: { target: '', title: 'Doors open' }, ifVersion: 1 } }]);
+    expect(fieldProblems(countdown.fields, { data: { target: '', title: 'Doors open' }, assets: {}, bindings: {} })).toEqual(
       new Map([['target', ['field "target" has no date and time yet']]]),
     );
 
@@ -271,14 +356,14 @@ describe('a date not picked yet (review of #192)', () => {
     expect(calls).toEqual([]);
     store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, target: '2026-12-24T18:00' } }));
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).toMatchObject([{ name: 'update_spot', input: { data: { target: '2026-12-24T18:00', title: 'Doors open' } } }]);
+    expect(calls).toMatchObject([{ name: 'save_spot', input: { data: { target: '2026-12-24T18:00', title: 'Doors open' } } }]);
   });
 
   it('saves a new list row whose datetime is not picked yet, and still holds back a row the server would refuse for another reason', async () => {
     const { store, launch } = editing({ target: '', events: [] });
     store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, events: [{ name: '', at: '' }] } }));
     await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).toMatchObject([{ name: 'update_spot', input: { data: { target: '', events: [{ name: '', at: '' }] } } }]);
+    expect(calls).toMatchObject([{ name: 'save_spot', input: { data: { target: '', events: [{ name: '', at: '' }] } } }]);
     answers[0]!({ spot: { ...launch, data: { target: '', events: [{ name: '', at: '' }] }, version: 2 } });
     await vi.advanceTimersByTimeAsync(0);
     store.getState().editSpot(ORG, launch.id, (d) => ({ ...d, data: { ...d.data, events: [{ name: 7, at: '' }] } }));
@@ -315,7 +400,7 @@ describe('an edit after a save, once someone else has saved since (review of #15
     type('!');
     void store.getState().saveSpotDraft(v4.id);
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_spot', input: { name: 'Theirs!', ifVersion: 6 } });
+    expect(calls.at(-1)).toMatchObject({ name: 'save_spot', input: { name: 'Theirs!', ifVersion: 6 } });
   });
 
   it('with nobody else saving, the next edit builds on the saved draft, at the version it saved', async () => {
@@ -334,7 +419,7 @@ describe('an edit after a save, once someone else has saved since (review of #15
     store.getState().editSpot(ORG, v5.id, (d) => ({ ...d, name: `${d.name}two` }));
     void store.getState().saveSpotDraft(v4.id);
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls.at(-1)).toMatchObject({ name: 'update_spot', input: { name: 'Mine two', ifVersion: 5 } });
+    expect(calls.at(-1)).toMatchObject({ name: 'save_spot', input: { name: 'Mine two', ifVersion: 5 } });
   });
 });
 
@@ -439,5 +524,202 @@ describe('the Source section of a template with two named sources (#193)', () =>
     const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
     expect(ids.length).toBeGreaterThan(4);
     expect(ids.filter((id, i) => ids.indexOf(id) !== i)).toEqual([]);
+  });
+});
+
+describe('deleting a spot (#242)', () => {
+  beforeEach(() => toasts.error.mockClear());
+  /** The spot editor and the agent's slices, with a router that records where it went. */
+  function deletable() {
+    const queryClient = new QueryClient();
+    const went: string[] = [];
+    const at = { ...router, navigate: async ({ to }: { to: string }) => void went.push(to) };
+    const store = createStore<SpotEditorSlice & AgentSlice>()((set, get) => ({
+      ...createSpotEditorSlice(set as never, get as never, { router: at, queryClient } as never),
+      ...createAgentSlice(set as never, get as never, { router: at, queryClient } as never),
+    }));
+    return { store, queryClient, went };
+  }
+  /** Answers tool calls with a status, as the tool route does. */
+  const withStatus = () => {
+    const pending: ((r: Response) => void)[] = [];
+    vi.stubGlobal('fetch', (url: string, init: { body: string }) => {
+      calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
+      return new Promise<Response>((resolve) => pending.push(resolve));
+    });
+    return (body: unknown, status = 200) => pending.shift()?.(new Response(JSON.stringify(body), { status }));
+  };
+
+  /**
+   * Spot A open with an edit waiting to save, and Delete confirmed: the edit's save goes first (#355), answered at
+   * version 5, and then the delete is on its way.
+   */
+  async function deleting() {
+    const d = deletable();
+    const reply = withStatus();
+    const a = spot('spt_a', 4);
+    d.queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
+    d.store.getState().editSpot(ORG, a.id, (e) => ({ ...e, name: 'Renamed' }));
+    d.store.getState().askDeleteSpot(true);
+    void d.store.getState().deleteSpot(ORG, a.id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toEqual([{ name: 'save_spot', input: expect.objectContaining({ spotId: 'spt_a', name: 'Renamed', ifVersion: 4 }) }]);
+    reply({ spot: { ...a, name: 'Renamed', version: 5 } });
+    await vi.advanceTimersByTimeAsync(0);
+    return { ...d, reply, a };
+  }
+
+  it('saves the edit waiting to save, deletes it at the version that made, and goes to the spot library (#355)', async () => {
+    const { store, queryClient, went, reply, a } = await deleting();
+    // At the version its own save left, not the one the editor loaded: no "someone saved this" for its own edit.
+    expect(calls.at(-1)).toEqual({ name: 'delete_spot', input: { spotId: 'spt_a', ifVersion: 5 } });
+    reply({ deleted: 'spt_a' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(went).toEqual(['/spots']);
+    expect(queryClient.getQueryData(spotKeys.one(ORG, a.id))).toBeUndefined();
+    expect(store.getState().spotEditor.deleting).toEqual({ open: false, pending: false, error: null, playlists: [], savedSince: false });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot', 'delete_spot']);
+  });
+
+  it('waits for an autosave already on its way, and deletes at the version it made (#355)', async () => {
+    const d = deletable();
+    const reply = withStatus();
+    const a = spot('spt_a', 4);
+    d.queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
+    d.store.getState().editSpot(ORG, a.id, (e) => ({ ...e, name: 'Renamed' }));
+    // The autosave's second passes: its save is sent, not yet answered, when Delete is pressed.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot']);
+    void d.store.getState().deleteSpot(ORG, a.id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot']);
+    reply({ spot: { ...a, name: 'Renamed', version: 5 } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.at(-1)).toEqual({ name: 'delete_spot', input: { spotId: 'spt_a', ifVersion: 5 } });
+  });
+
+  it('lets the autosave go once Delete starts: an edit whose save was refused sends nothing while the delete is on its way (#445)', async () => {
+    const d = deletable();
+    const reply = withStatus();
+    const a = spot('spt_a', 4);
+    d.queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
+    d.store.getState().editSpot(ORG, a.id, (e) => ({ ...e, name: 'Renamed' }));
+    d.store.getState().askDeleteSpot(true);
+    const deleted = d.store.getState().deleteSpot(ORG, a.id);
+    await vi.advanceTimersByTimeAsync(0);
+    // The save before the delete is refused: the delete goes at the version loaded.
+    reply({ error: 'conflict', message: 'spot spt_a has changed since you read it' }, 409);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot', 'delete_spot']);
+    // Past the autosave's second, with the delete still on its way: no save races it.
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot', 'delete_spot']);
+    reply({ error: 'conflict', message: 'spot spt_a has changed since you read it' }, 409);
+    expect(await deleted).toBe(false);
+    // Refused, the edit still unsaved waits to save again.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls.map((c) => c.name)).toEqual(['save_spot', 'delete_spot', 'save_spot']);
+  });
+
+  it('sends no delete without a version: a spot not loaded here is refused before any call (#355)', async () => {
+    const d = deletable();
+    withStatus();
+    d.store.getState().askDeleteSpot(true);
+    expect(await d.store.getState().deleteSpot(ORG, 'spt_unread')).toBe(false);
+    expect(calls).toEqual([]);
+    expect(d.store.getState().spotEditor.deleting).toMatchObject({ open: true, pending: false, error: expect.stringMatching(/not loaded here/) });
+  });
+
+  it('names the playlists that play it when refused', async () => {
+    const { store, went, reply } = await deleting();
+    reply(
+      {
+        error: 'conflict',
+        message: 'spot spt_a is in 2 playlists: "Lunch", "Main"; take it out of them first',
+        details: {
+          playlists: [
+            { id: 'pls_lunch', name: 'Lunch' },
+            { id: 'pls_main', name: 'Main' },
+          ],
+        },
+      },
+      409,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().spotEditor.deleting).toEqual({
+      open: true,
+      pending: false,
+      error: expect.stringMatching(/^Playlists play this spot/),
+      playlists: [
+        { id: 'pls_lunch', name: 'Lunch' },
+        { id: 'pls_main', name: 'Main' },
+      ],
+      savedSince: false,
+    });
+    expect(went).toEqual([]);
+  });
+
+  it('says someone saved it since, when the delete is refused at its version', async () => {
+    const { store, went, reply } = await deleting();
+    reply({ error: 'conflict', message: 'spot spt_a changed since; it is at version 5', details: { id: 'spt_a', version: 5 } }, 409);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().spotEditor.deleting).toMatchObject({
+      open: true,
+      error: expect.stringMatching(/^Someone saved this spot since you opened it/),
+      playlists: [],
+      savedSince: true,
+    });
+    expect(went).toEqual([]);
+  });
+
+  /** A fill's first try, spot A at version 1, and Try another template pressed: its delete on its way. */
+  async function tryingAnother() {
+    const d = deletable();
+    const reply = withStatus();
+    const a = spot('spt_a', 1);
+    d.queryClient.setQueryData(spotKeys.one(ORG, a.id), a);
+    d.store.setState(
+      (s) =>
+        ({
+          agent: {
+            ...s.agent,
+            filled: { spt_a: { kind: 'fill', marks: {}, photo: null, link: 'https://example.com/flyer', uploading: false, uploadError: null } },
+          },
+        }) as never,
+    );
+    void d.store.getState().fillWithAnother(ORG, a.id);
+    await vi.advanceTimersByTimeAsync(0);
+    return { ...d, reply, a };
+  }
+
+  it("deletes a fill's first try on Try another template, then opens New spot with the same material", async () => {
+    const { store, went, reply } = await tryingAnother();
+    expect(calls).toEqual([{ name: 'delete_spot', input: { spotId: 'spt_a', ifVersion: 1 } }]);
+    reply({ deleted: 'spt_a' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(went).toEqual(['/spots', '/spots']);
+    expect(store.getState().spotEditor.newSpot.open).toBe(true);
+    expect(store.getState().agent.fill).toMatchObject({ link: 'https://example.com/flyer', again: true });
+    expect(store.getState().agent.filled.spt_a).toBeUndefined();
+    expect(toasts.error).not.toHaveBeenCalled();
+  });
+
+  it('says the first try was kept, and why, when Try another template cannot delete it, then opens New spot', async () => {
+    const { store, went, reply } = await tryingAnother();
+    reply({ error: 'conflict', message: 'spot spt_a is in a playlist: "Lunch"', details: { playlists: [{ id: 'pls_lunch', name: 'Lunch' }] } }, 409);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toasts.error).toHaveBeenCalledWith('The first try was kept', { description: expect.stringMatching(/^Playlists play this spot.* Lunch\.$/) });
+    expect(store.getState().spotEditor.deleting).toEqual({ open: false, pending: false, error: null, playlists: [], savedSince: false });
+    expect(store.getState().spotEditor.newSpot.open).toBe(true);
+    expect(went).toEqual(['/spots']);
+  });
+
+  it('says where the first try is when someone saved it since: not to reload it, since they are on the spot library (#355)', async () => {
+    const { reply } = await tryingAnother();
+    reply({ error: 'conflict', message: 'spot spt_a changed since; it is at version 2', details: { id: 'spt_a', version: 2 } }, 409);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toasts.error).toHaveBeenCalledWith('The first try was kept', { description: expect.stringMatching(/find it in the spot library/) });
+    expect(toasts.error.mock.calls[0]?.[1]?.description).not.toMatch(/Reload/);
   });
 });

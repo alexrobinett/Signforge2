@@ -9,12 +9,11 @@
  * 7 days. Which alerts go to which channel is each alert rule's (./settings.ts).
  */
 import { type AlertChannelRow, type AlertDeliveryRow, newId } from '@signforge/db';
-import { feedUrlProblem, type FeedUrlProblem } from '@signforge/feeds';
-import { z } from 'zod';
-import { id, ifVersion } from './fields';
-import { keysetPage, pageInput } from './paging';
+import type { z } from 'zod';
+import { keysetPage } from './paging';
 import { defineTool, notFound, ToolError } from './tool';
-import { ALERT_CHANNEL_KINDS, ALERT_CHANNELS, type channelView, type deliveryView, outputs } from './outputs';
+import { type channelView, type deliveryView, outputs } from './outputs';
+import { inputs } from './inputs';
 
 /** How long an alert is retried before it is given up on. */
 export const ALERT_RETRY_MS = 24 * 60 * 60_000;
@@ -42,42 +41,35 @@ export type AlertEvent = { id: string; occurredAt: string; org: { id: string; na
        */
       data: { publish: { id: string; revision: number; url: string | null; publishedAt: string }; screens: number; playing: number; replaced: number };
     }
+  | {
+      type: 'agent.refused';
+      /**
+       * An agent refused `forbidden` again and again within the hour (M4-08): sent at most once per
+       * grant an hour. `client.name` is null when a page may not show it (`shownClient`). `tool` and
+       * `needs` are its latest refused call's; `url` is the agent's page in the CMS.
+       */
+      data: {
+        grant: { id: string; url: string | null; client: { id: string; name: string | null } };
+        refusals: number;
+        tool: string;
+        needs: string | null;
+      };
+    }
+  | {
+      type: 'publish.requested';
+      /**
+       * Someone asked to publish chosen drafts (M4-09), for a member who may publish to approve or
+       * decline before `expiresAt`. `by.name` is a member's name, or an agent's client name when a
+       * page may show it (`shownClient`), else null. Never the request's reason: the asker's own
+       * words are read in SignForge, beside the drafts. `url` is where to see it in the CMS.
+       */
+      data: {
+        request: { id: string; url: string | null; drafts: number; expiresAt: string };
+        by: { kind: 'user' | 'agent'; id: string; name: string | null };
+      };
+    }
   | { type: 'test'; data: { message: string } }
 );
-
-/** Slack's incoming-webhook URL (docs.slack.dev, Sending messages using incoming webhooks, read 2026-11-18). */
-const SLACK_WEBHOOK = /^https:\/\/hooks\.slack\.com\/services\/[A-Z0-9]+\/[A-Z0-9]+\/[A-Za-z0-9]+$/;
-
-const slackWebhookUrl = z
-  .string()
-  .max(2048)
-  .regex(SLACK_WEBHOOK, 'a Slack incoming-webhook URL, https://hooks.slack.com/services/T…/B…/…')
-  .describe("The incoming webhook's URL from Slack, https://hooks.slack.com/services/T…/B…/…. Stored encrypted and never shown again");
-
-const URL_PROBLEMS: Record<FeedUrlProblem, string> = {
-  'bad-url': 'not a URL',
-  'not-https': 'webhooks must be https',
-  port: 'webhooks must use the default https port',
-  'ip-literal': 'webhooks must name a host, not an IP address',
-  'private-address': 'the host is a local name',
-};
-
-/** The fetch-safety rules of feed URLs (`@signforge/feeds`); the delivery run checks the address it resolves to as well. */
-const outgoingUrl = z
-  .string()
-  .max(2048)
-  .superRefine((url, ctx) => {
-    const problem = feedUrlProblem(url);
-    if (problem) ctx.addIssue({ code: 'custom', message: URL_PROBLEMS[problem] });
-  })
-  .describe('Where to POST alerts: https, on the default port, naming a public host. Stored encrypted and never shown again');
-
-const signingSecret = z
-  .string()
-  .regex(/^[A-Za-z0-9_-]{32,128}$/, '32 to 128 characters of A-Z, a-z, 0-9, _ and -')
-  .describe(
-    'The secret each POST is signed with, which you make and keep: 32 to 128 random characters of A-Z, a-z, 0-9, _ and -, such as whsec_ and 32 random bytes in base64url. Stored encrypted and never shown again',
-  );
 
 const viewOf = (c: AlertChannelRow): z.infer<typeof channelView> => ({
   kind: c.kind,
@@ -112,7 +104,7 @@ const getAlertChannels = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({}),
+  input: inputs.get_alert_channels,
   output: outputs.get_alert_channels,
   example: {},
   handler: async ({ org }) => {
@@ -121,55 +113,42 @@ const getAlertChannels = defineTool({
   },
 });
 
-const setSlackAlertChannel = defineTool({
-  name: 'set_slack_alert_channel',
+const setAlertChannel = defineTool({
+  name: 'set_alert_channel',
   description:
-    "Post the organization's alerts to a Slack channel, through an incoming webhook made in Slack for that channel; owners only. Replaces the one set before. Which alerts go there is each alert rule's slack (update_org_settings). Pass the version you read as ifVersion to replace only that one. Returns { channel }.",
+    "Send the organization's alerts to a channel besides email; owners only. kind slack: a Slack channel, through an incoming webhook made in Slack for it (webhookUrl); it replaces the one set before. kind webhook: an outgoing webhook, each alert POSTed as JSON ({ type, id, occurredAt, org, data }) signed with HMAC-SHA256 under your signing secret, and retried for up to 24 hours while it fails; a new one needs webhookUrl and signingSecret, and afterwards either changes it alone (a new signingSecret rotates it). Secrets are never shown again. Which alerts go to each is each alert rule's (update_org_settings). Pass the version you read as ifVersion to change only that one. Returns { channel }.",
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
+  // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
+  people: true,
   needs: ['alertSecrets'],
-  input: z.object({ webhookUrl: slackWebhookUrl, ifVersion }),
-  output: outputs.set_slack_alert_channel,
-  example: { webhookUrl: 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX' },
-  target: () => channelTarget('slack'),
+  input: inputs.set_alert_channel,
+  output: outputs.set_alert_channel,
+  example: { kind: 'webhook', webhookUrl: 'https://ops.example.com/hooks/signforge', signingSecret: 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD' },
+  target: (input) => channelTarget(input.kind),
   handler: async ({ org, actor, input, write, services: { alertSecrets } }) => {
-    const urlEncrypted = await alertSecrets.seal({ orgId: org.orgId, kind: 'slack' }, 'url', input.webhookUrl);
-    const row = write(
-      await org.alertChannels.stage.put(
-        'slack',
-        { host: new URL(input.webhookUrl).hostname, urlEncrypted, secretEncrypted: null, secretSetAt: null, connectedBy: actor.id },
-        input.ifVersion,
-      ),
-    );
-    return { channel: viewOf(row) };
-  },
-});
-
-const setWebhookAlertChannel = defineTool({
-  name: 'set_webhook_alert_channel',
-  description:
-    "Send the organization's alerts to an outgoing webhook: each is POSTed as JSON ({ type, id, occurredAt, org, data }) signed with HMAC-SHA256 under your signing secret, and retried for up to 24 hours while it fails; owners only. A new webhook needs webhookUrl and signingSecret; afterwards give either to change it alone (a new signingSecret rotates it). The secret is never shown again. Pass the version you read as ifVersion to change only that one. Returns { channel }.",
-  scope: 'org:manage',
-  minRole: 'owner',
-  mutates: true,
-  needs: ['alertSecrets'],
-  input: z
-    .object({ webhookUrl: outgoingUrl.optional(), signingSecret: signingSecret.optional(), ifVersion })
-    .refine((v) => v.webhookUrl !== undefined || v.signingSecret !== undefined, 'nothing to change'),
-  output: outputs.set_webhook_alert_channel,
-  example: { webhookUrl: 'https://ops.example.com/hooks/signforge', signingSecret: 'whsec_0123456789abcdefghijklmnopqrstuvwxyzABCD' },
-  target: () => channelTarget('webhook'),
-  handler: async ({ org, actor, input, write, services: { alertSecrets } }) => {
-    const current = await org.alertChannels.get('webhook');
-    const seal = (field: 'url' | 'secret', value: string) => alertSecrets.seal({ orgId: org.orgId, kind: 'webhook' }, field, value);
+    const { kind } = input;
+    const seal = (field: 'url' | 'secret', value: string) => alertSecrets.seal({ orgId: org.orgId, kind }, field, value);
+    const current = kind === 'webhook' ? await org.alertChannels.get('webhook') : undefined;
     const url = input.webhookUrl ? { host: new URL(input.webhookUrl).hostname, urlEncrypted: await seal('url', input.webhookUrl) } : current;
-    const secret = input.signingSecret ? { secretEncrypted: await seal('secret', input.signingSecret), secretSetAt: Date.now() } : current;
-    if (!url || !secret?.secretEncrypted) throw new ToolError('invalid_input', 'a new webhook needs both webhookUrl and signingSecret');
+    const secret =
+      kind === 'slack'
+        ? { secretEncrypted: null, secretSetAt: null }
+        : input.signingSecret
+          ? { secretEncrypted: await seal('secret', input.signingSecret), secretSetAt: Date.now() }
+          : current;
+    if (!url || (kind === 'webhook' && !secret?.secretEncrypted)) throw new ToolError('invalid_input', 'a new webhook needs both webhookUrl and signingSecret');
     const row = write(
       await org.alertChannels.stage.put(
-        'webhook',
-        { host: url.host, urlEncrypted: url.urlEncrypted, secretEncrypted: secret.secretEncrypted, secretSetAt: secret.secretSetAt, connectedBy: actor.id },
+        kind,
+        {
+          host: url.host,
+          urlEncrypted: url.urlEncrypted,
+          secretEncrypted: secret?.secretEncrypted ?? null,
+          secretSetAt: secret?.secretSetAt ?? null,
+          connectedBy: actor.id,
+        },
         input.ifVersion,
       ),
     );
@@ -184,7 +163,9 @@ const removeAlertChannel = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
-  input: z.object({ channel: z.enum(ALERT_CHANNEL_KINDS) }),
+  // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
+  people: true,
+  input: inputs.remove_alert_channel,
   output: outputs.remove_alert_channel,
   example: { channel: 'slack' },
   target: (input) => channelTarget(input.channel),
@@ -202,7 +183,9 @@ const testAlertChannel = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
-  input: z.object({ channel: z.enum(ALERT_CHANNELS).describe('email goes to the member who asks') }),
+  // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
+  people: true,
+  input: inputs.test_alert_channel,
   output: outputs.test_alert_channel,
   example: { channel: 'email' },
   target: (input) => channelTarget(input.channel),
@@ -242,7 +225,7 @@ const listAlertDeliveries = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_alert_deliveries,
   output: outputs.list_alert_deliveries,
   example: {},
   handler: async ({ org, input }) => {
@@ -262,7 +245,9 @@ const retryAlertDelivery = defineTool({
   scope: 'org:manage',
   minRole: 'owner',
   mutates: true,
-  input: z.object({ alertDeliveryId: id('alert delivery') }),
+  // Where alerts go is a person's (review of #419): an agent could silence or redirect every alert, its own refusals' included.
+  people: true,
+  input: inputs.retry_alert_delivery,
   output: outputs.retry_alert_delivery,
   example: { alertDeliveryId: 'dlv_0123456789' },
   target: (input) => ({ kind: 'alert_delivery', id: input.alertDeliveryId }),
@@ -280,12 +265,4 @@ const retryAlertDelivery = defineTool({
   },
 });
 
-export const alertChannelTools = [
-  getAlertChannels,
-  setSlackAlertChannel,
-  setWebhookAlertChannel,
-  removeAlertChannel,
-  testAlertChannel,
-  listAlertDeliveries,
-  retryAlertDelivery,
-];
+export const alertChannelTools = [getAlertChannels, setAlertChannel, removeAlertChannel, testAlertChannel, listAlertDeliveries, retryAlertDelivery];

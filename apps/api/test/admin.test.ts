@@ -4,14 +4,14 @@
 import { MANIFEST_SCHEMA, manifestIdInput, type ScreenManifest } from '@signforge/contract';
 import { push, PushError, type PushOptions } from '@signforge/cli/push';
 import { scoped } from '@signforge/db';
-import { seedOrg, type SeededOrg } from '@signforge/db/testing';
+import { claimFileForSweep, seedOrg, type SeededOrg, tombstoneFile } from '@signforge/db/testing';
 import { env, exports } from 'cloudflare:workers';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/index';
 import { mintCredential } from '../src/device/credential';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../src/r2';
 
-const TOKEN = 'test-admin-token'; // vitest.config.ts
+const TOKEN = 'test-admin-token-of-32-characters'; // vitest.config.ts
 const API = 'https://api.test';
 const encoder = new TextEncoder();
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -137,6 +137,17 @@ describe('admin auth', () => {
     }
   });
 
+  // A deploy secret is 32 random bytes (`openssl rand -base64 32`, 44 characters): one a person could guess never turns the tree on.
+  it('is off while ADMIN_TOKEN is shorter than 32 characters, to its holder too, and on from 32', async () => {
+    const fetchWith = (token: string, method: string, path: string) =>
+      app.fetch(new Request(`${API}/admin${path}`, { method, body: '{}', headers: { authorization: `Bearer ${token}` } }), { ...env, ADMIN_TOKEN: token });
+    for (const [method, path] of paths) expect((await fetchWith('a'.repeat(31), method, path)).status, `${method} ${path}`).toBe(404);
+    // Its holder reaches the route, which refuses the body: not the file of that hash.
+    const reached = await fetchWith('a'.repeat(32), 'PUT', `/base/blobs/${'a'.repeat(64)}`);
+    expect(reached.status).toBe(400);
+    expect(await reached.json()).toEqual({ error: 'body does not match its sha256' });
+  });
+
   it('is not accepted on the device tree', async () => {
     const res = await exports.default.fetch(`${API}/v1/device/manifest.json`, { headers: { authorization: `Bearer ${TOKEN}` } });
     expect(res.status).toBe(401);
@@ -221,6 +232,106 @@ describe('blob upload', () => {
     const c = client(b, org.screen, { readBlob: (sha) => encoder.encode(`not ${sha}`) });
     await expect(c.run()).rejects.toThrow(PushError);
     expect((await org.scope.screens.get(org.screen))?.desiredManifestId).not.toBe(b.manifest.id);
+  });
+});
+
+describe('the storage sweep (#235, review of #429, round 2)', () => {
+  // On a fixed clock (review of #429, round 3): the API reads the same one.
+  const AT = Date.UTC(2026, 4, 1, 9);
+  beforeEach(() => void vi.useFakeTimers({ toFake: ['Date'], now: AT }));
+  afterEach(() => vi.useRealTimers());
+  /** The sweep's claim on an org's hash: held for an hour, or run out. */
+  const claimFile = (orgId: string, sha: string, held: boolean) => claimFileForSweep(env.DB, orgId, sha, held ? AT + 3_600_000 : 0);
+
+  it("refuses an org's blob while the sweep claims its hash, and stores it once the claim has run out", async () => {
+    const bytes = 'bytes the sweep is deleting';
+    const sha = await sha256(bytes);
+    await claimFile(org.orgId, sha, true);
+    for (const path of [`/screens/${org.screen}/blobs/${sha}`, `/orgs/${org.orgId}/blobs/${sha}`]) {
+      const res = await admin('PUT', path, bytes, { 'content-type': 'image/png' });
+      expect(res.status, path).toBe(409);
+      expect(await res.json()).toMatchObject({ error: expect.stringContaining('storage clean-up') });
+    }
+    expect(await env.BLOBS.head(orgBlobKey(org.orgId, sha))).toBeNull();
+    await claimFile(org.orgId, sha, false);
+    expect((await admin('PUT', `/orgs/${org.orgId}/blobs/${sha}`, bytes, { 'content-type': 'image/png' })).status).toBe(200);
+  });
+
+  it('refuses a push whose files the sweep claims after they were uploaded, and indexes the manifest of one it makes desired', async () => {
+    const b = await build('swept');
+    const image = Object.keys(b.manifest.files).find((s) => !Object.values(b.manifest.templates).some((t) => t.html === s))!;
+    // The files land, then the sweep claims the image before the manifest is pushed.
+    const raced = client(b, org.screen, {
+      fetch: async (url, init) => {
+        if (init?.method === 'PUT' && url.endsWith('/manifest')) await claimFile(org.orgId, image, true);
+        return exports.default.fetch(url, init);
+      },
+    });
+    await expect(raced.run()).rejects.toThrow(/storage clean-up/);
+    expect((await org.scope.screens.get(org.screen))?.desiredManifestId).not.toBe(b.manifest.id);
+    await claimFile(org.orgId, image, false);
+    expect(await client(b, org.screen).run()).toMatchObject({ manifestId: b.manifest.id, changed: true });
+    const row = await env.DB.prepare('SELECT files_json AS f FROM stored_manifests WHERE org_id = ? AND screen_id = ? AND manifest_id = ?')
+      .bind(org.orgId, org.screen, b.manifest.id)
+      .first<{ f: string }>();
+    expect(JSON.parse(row!.f)).toEqual(Object.keys(b.manifest.files).sort());
+  });
+
+  it('uploads again a file the sweep deleted, though a copy is back, which clears its tombstone (#432)', async () => {
+    const b = await build('tombstoned');
+    const image = Object.keys(b.manifest.files).find((s) => !Object.values(b.manifest.templates).some((t) => t.html === s))!;
+    await client(b, org.screen).run();
+    // The sweep deleted the image's earlier copy (its tombstone), and a copy is back in R2 since.
+    await tombstoneFile(env.DB, org.orgId, image, AT - 1);
+    const missing = await admin('POST', `/screens/${org.screen}/missing`, b.manifestText);
+    expect(((await missing.json()) as { missing: { sha256: string }[] }).missing).toEqual([{ sha256: image, scope: 'org' }]);
+    const again = client(b, org.screen);
+    expect(await again.run()).toMatchObject({ manifestId: b.manifest.id, uploaded: 1 });
+    expect(again.puts).toEqual([expect.stringContaining(image)]);
+    expect(await scoped(env.DB, org.orgId).storage.deleted([image], AT)).toEqual([]);
+  });
+
+  /** PUTs `bytes` as an org blob through the API, with `during` run as R2 has just stored them. */
+  async function putRacing(bytes: string, during: (sha: string) => Promise<unknown>) {
+    const sha = await sha256(bytes);
+    const blobs = new Proxy(env.BLOBS, {
+      get(target, key) {
+        if (key === 'put')
+          return async (...args: Parameters<R2Bucket['put']>) => {
+            const put = await target.put(...args);
+            await during(sha);
+            return put;
+          };
+        const v: unknown = Reflect.get(target, key, target);
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+    });
+    const res = await app.fetch(
+      new Request(`${API}/admin/orgs/${org.orgId}/blobs/${sha}`, { method: 'PUT', body: bytes, headers: { authorization: `Bearer ${TOKEN}` } }),
+      { ...env, BLOBS: blobs },
+    );
+    return { sha, res };
+  }
+
+  it('keeps a tombstone the sweep stamps as a blob is stored, or one it claims meanwhile, and says so (review of #434, 1)', async () => {
+    // The sweep deletes the fresh copy as it lands: 409, and its tombstone stays.
+    const deleted = await putRacing('stored as the sweep deleted it', async (sha) => tombstoneFile(env.DB, org.orgId, sha, AT));
+    expect(deleted.res.status).toBe(409);
+    expect(await scoped(env.DB, org.orgId).storage.deleted([deleted.sha], AT)).toEqual([deleted.sha]);
+    // The sweep claims the bytes after the PUT's check: 409, nothing cleared.
+    const claimed = await putRacing('stored as the sweep claimed it', async (sha) => {
+      await tombstoneFile(env.DB, org.orgId, sha, AT - 1);
+      await claimFile(org.orgId, sha, true);
+    });
+    expect(claimed.res.status).toBe(409);
+    const row = await env.DB.prepare('SELECT deleted_at AS d FROM blob_deletes WHERE org_id = ? AND sha256 = ?')
+      .bind(org.orgId, claimed.sha)
+      .first<{ d: number }>();
+    expect(row?.d).toBe(AT - 1);
+    // Stored again after an older deletion, with nothing in the way: the tombstone goes.
+    const fresh = await putRacing('stored after an older deletion', async (sha) => tombstoneFile(env.DB, org.orgId, sha, AT - 1));
+    expect(fresh.res.status).toBe(200);
+    expect(await scoped(env.DB, org.orgId).storage.deleted([fresh.sha], AT)).toEqual([]);
   });
 });
 

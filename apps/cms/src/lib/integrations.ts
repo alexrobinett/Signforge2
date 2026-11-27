@@ -3,7 +3,7 @@
  * `list_data_sources` shows them, a failing one in words, and the catalogue of connectors with
  * what is built and what is planned. Only the built ones do anything; the roadmap is #81.
  */
-import { SNAPSHOT_STALE_MS } from '@signforge/contract';
+import { keepsFor, keepsForWords } from './live-data';
 import type { ToolOutput } from '@signforge/tools/outputs';
 
 const DAY_MS = 86_400_000;
@@ -211,15 +211,15 @@ export function clockTime(at: number, { timezone, locale, now }: Clock): string 
 /** The source's state in a few words, for its row: its last good time, or that it is waiting or failing. */
 export function sourceState(s: ListedSource, clock: Clock): { word: string; tone: 'ok' | 'waiting' | 'failing' } {
   if (s.failures > 0) return { word: `failed ${s.failures}×`, tone: 'failing' };
-  if (s.lastCheckedAt === null || s.nextPollAt === 0) return { word: 'checking', tone: 'waiting' };
+  if (s.lastCheckedAt === null || s.nextPollAt === null) return { word: 'checking', tone: 'waiting' };
   return { word: clockTime(s.lastCheckedAt, clock), tone: 'ok' };
 }
 
 /**
  * A failing source in plain words: what its feed does, for how many checks, and what screens show
  * meanwhile ("The Break room calendar answers with an error: its last 2 checks failed. Its screens
- * show the 7:05 AM copy."). A screen drops a copy not confirmed for SNAPSHOT_STALE_MS and plays the
- * spots' fallback values, and so does the sentence.
+ * show the 7:05 AM copy."). A screen drops a copy not confirmed for as long as it keeps the source's data (a
+ * calendar's minutes, or a day: `keepsFor`) and plays the spots' fallback values, and so does the sentence.
  */
 export function failingWords(s: ListedSource, clock: Clock): string {
   const what = `The ${s.name} ${s.format === 'json' ? 'forecast' : NOUN[kindOf(s.format)][0]} ${failureWords(s.lastError)}`;
@@ -227,8 +227,8 @@ export function failingWords(s: ListedSource, clock: Clock): string {
   const meanwhile =
     s.lastCheckedAt === null
       ? 'Its spots show their fallback values until a check succeeds.'
-      : clock.now - s.lastCheckedAt > SNAPSHOT_STALE_MS
-        ? `Its spots show their fallback values: the last good copy, from ${clockTime(s.lastCheckedAt, clock)}, is more than a day old.`
+      : clock.now - s.lastCheckedAt > keepsFor(s)
+        ? `Its spots show their fallback values: the last good copy, from ${clockTime(s.lastCheckedAt, clock)}, is more than ${keepsForWords(s)} old.`
         : `Its screens show the ${clockTime(s.lastCheckedAt, clock)} copy.`;
   return `${what}: ${checks}. ${meanwhile}`;
 }

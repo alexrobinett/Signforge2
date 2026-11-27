@@ -1,6 +1,16 @@
 import type { FieldDef } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
-import { compileProbe, draftCheck, spotFromDraft, type DraftAsset, type DraftReads, type Probe, type SpotDraft } from '../src/draft';
+import {
+  compileProbe,
+  draftCheck,
+  sampleAfterEdit,
+  sampleFieldsOf,
+  spotFromDraft,
+  type DraftAsset,
+  type DraftReads,
+  type Probe,
+  type SpotDraft,
+} from '../src/draft';
 import { opts, promo } from './fixtures';
 
 const sha = (c: string) => c.repeat(64);
@@ -12,18 +22,18 @@ const photo: DraftAsset = {
   type: 'image/jpeg',
   size: 2000,
   renditions: [
-    { orientation: 'landscape', sha256: sha('b'), type: 'image/jpeg', size: 2000, sample: null },
-    { orientation: 'portrait', sha256: sha('c'), type: 'image/jpeg', size: 1500, sample: null },
+    { orientation: 'landscape', sha256: sha('b'), type: 'image/jpeg', size: 2000, width: 1920, height: 1080, sample: null },
+    { orientation: 'portrait', sha256: sha('c'), type: 'image/jpeg', size: 1500, width: 3413, height: 1920, sample: null },
   ],
 };
 const clip: DraftAsset = { kind: 'video', status: 'verified', sha256: sha('d'), type: 'video/mp4', size: 9000, renditions: [] };
 
-/** An org with the promo template (approved), a photo and a clip; `assets` overrides them by id. */
-function reads(assets: Record<string, DraftAsset | undefined> = {}): DraftReads {
+/** An org with the promo template (approved), a photo and a clip; `assets` overrides them by id, `manifest` the template's. */
+function reads(assets: Record<string, DraftAsset | undefined> = {}, manifest = promo): DraftReads {
   const all: Record<string, DraftAsset | undefined> = { photo, clip, ...assets };
   return {
     asset: (id) => all[id],
-    templateVersion: (id) => (id === 'tpv_promo' ? { key: 'base/promo@1.0.0', manifest: promo, html: sha('a'), size: 1000, status: 'approved' } : undefined),
+    templateVersion: (id) => (id === 'tpv_promo' ? { key: 'base/promo@1.0.0', manifest, html: sha('a'), size: 1000, status: 'approved' } : undefined),
   };
 }
 
@@ -127,13 +137,74 @@ describe('spotFromDraft', () => {
       ...photo,
       renditions: [
         photo.renditions[0]!,
-        { orientation: 'portrait', sha256: sha('c'), type: 'image/jpeg', size: 1500, sample: { sha256: sha('e'), size: 300 } },
+        { orientation: 'portrait', sha256: sha('c'), type: 'image/jpeg', size: 1500, width: 3413, height: 1920, sample: { sha256: sha('e'), size: 300 } },
       ],
     };
     const into = { templates: {}, files: {} };
     const { spot } = spotFromDraft(draft({ kind: 'image', assetId: 'photo' }), 'portrait', reads({ photo: sampled }), into);
     expect(spot).toMatchObject({ file: sha('c') });
     expect(into.files).toEqual({ [sha('c')]: { size: 1500, type: 'image/jpeg', sample: sha('e') }, [sha('e')]: { size: 300, type: 'image/png' } });
+  });
+
+  describe("a portrait screen's rendition, by the box the field declares (#224)", () => {
+    const boxed = (portraitBox: { w: number; h: number }) => ({
+      ...promo,
+      fields: { ...promo.fields, photo: { type: 'image' as const, label: 'Photo', portraitBox } },
+    });
+    /** The file a portrait screen gets for the template's photo. */
+    const portraitFile = (manifest = promo, asset = photo) => {
+      const { spot } = spotFromDraft(
+        draft({ kind: 'template', templateVersionId: 'tpv_promo', assets: { photo: 'photo' } }),
+        'portrait',
+        reads({ photo: asset }, manifest),
+        { templates: {}, files: {} },
+      );
+      return spot?.kind === 'template' ? spot.assets.photo : undefined;
+    };
+
+    it('is the landscape one when it covers the box with fewer pixels', () => {
+      expect(portraitFile(boxed({ w: 1120, h: 910 }))).toBe(sha('b'));
+    });
+
+    it('is the landscape one drawn at most 1.25 times its size', () => {
+      expect(portraitFile(boxed({ w: 1120, h: 1230 }))).toBe(sha('b'));
+      expect(portraitFile(boxed({ w: 1120, h: 1350 }))).toBe(sha('b'));
+    });
+
+    // Announcement 1.1.2's box: Night grows the photo into what the rest leaves (review of #537).
+    it("is Announcement's: the portrait one for a 16:9 photo, the landscape one for a 4:3", () => {
+      const box = boxed({ w: 1120, h: 1750 });
+      expect(portraitFile(box)).toBe(sha('c'));
+      const fourThree: DraftAsset = {
+        ...photo,
+        renditions: [
+          { ...photo.renditions[0]!, width: 1920, height: 1440 },
+          { ...photo.renditions[1]!, width: 2560, height: 1920 },
+        ],
+      };
+      expect(portraitFile(box, fourThree)).toBe(sha('b'));
+    });
+
+    it('is the portrait one with no box, or a box the landscape one covers only past 1.25 times', () => {
+      expect(portraitFile()).toBe(sha('c'));
+      expect(portraitFile(boxed({ w: 1080, h: 1351 }))).toBe(sha('c'));
+    });
+
+    it('is the portrait one for a tall photo, whose landscape rendition is the larger', () => {
+      const tall: DraftAsset = {
+        ...photo,
+        renditions: [
+          { ...photo.renditions[0]!, width: 1920, height: 2560 },
+          { ...photo.renditions[1]!, width: 1440, height: 1920 },
+        ],
+      };
+      expect(portraitFile(boxed({ w: 1120, h: 910 }), tall)).toBe(sha('c'));
+    });
+
+    it('is its own for an SVG, which has no pixel size', () => {
+      const svg: DraftAsset = { ...photo, renditions: photo.renditions.map((r) => ({ ...r, width: null, height: null })) };
+      expect(portraitFile(boxed({ w: 1120, h: 910 }), svg)).toBe(sha('c'));
+    });
   });
 
   it('gives a spot with no bindings none at all', () => {
@@ -228,5 +299,129 @@ describe('compileProbe', () => {
     expect(manifest).toBeUndefined();
     expect(problems).toEqual(['spot deal: field "title" is longer than 40']);
     expect(refused).toBe(false);
+  });
+});
+
+describe('a spot’s sample fields (#360)', () => {
+  const rows = [
+    { label: 'A', value: '1' },
+    { label: 'B', value: '2' },
+    { label: 'C', value: '3' },
+  ];
+  // The facts' default is the sample rows, as New spot starts a list from its template's default.
+  const fields: Record<string, FieldDef> = {
+    headline: { type: 'text', label: 'Headline', default: 'Doors open' },
+    greeting: { type: 'text', label: 'Greeting', default: '' },
+    facts: { type: 'list', label: 'Facts', item: { label: { type: 'text', label: 'Label' }, value: { type: 'text', label: 'Value' } }, default: rows },
+  };
+  const data = { headline: 'Doors open', greeting: '', facts: rows };
+  const sample = sampleFieldsOf({ fields }, data) ?? { texts: [], lists: {} };
+
+  it('are the texts holding words and every cell of every list row', () => {
+    expect(sample).toEqual({
+      texts: ['headline'],
+      lists: {
+        facts: [
+          ['label', 'value'],
+          ['label', 'value'],
+          ['label', 'value'],
+        ],
+      },
+    });
+    expect(sampleFieldsOf({ fields }, { headline: '', facts: [] })).toBeNull();
+  });
+
+  // A row's image is a feed's photo, which the form cannot edit: marked, it would hold the spot in sample text for good.
+  it('leave out a row image, which no edit could clear', () => {
+    const stories: Record<string, FieldDef> = {
+      items: { type: 'list', label: 'Stories', item: { title: { type: 'text', label: 'Title' }, image: { type: 'image', label: 'Photo' } } },
+    };
+    const sampleRows = [{ title: 'One' }, { title: 'Two' }];
+    const marked = sampleFieldsOf({ fields: stories }, { items: sampleRows });
+    expect(marked).toEqual({ texts: [], lists: { items: [['title'], ['title']] } });
+    // Rewriting each title clears the spot of sample text.
+    const after = { data: { items: [{ title: 'Real one' }, { title: 'Real two' }] }, bindings: {} };
+    expect(sampleAfterEdit(marked!, stories, { data: { items: sampleRows } }, after)).toBeNull();
+  });
+
+  it('lose a text whose saved value changed, or that is bound, and keep one saved unchanged', () => {
+    expect(sampleAfterEdit(sample, fields, { data }, { data, bindings: {} })).toEqual(sample);
+    expect(sampleAfterEdit(sample, fields, { data }, { data: { ...data, headline: 'Closed' }, bindings: {} })?.texts).toEqual([]);
+    expect(sampleAfterEdit(sample, fields, { data }, { data, bindings: { headline: {} } })?.texts).toEqual([]);
+  });
+
+  it('lose a list cell by cell, a row once every cell is edited, and a bound list whole', () => {
+    const one = sampleAfterEdit(sample, fields, { data }, { data: { ...data, facts: [{ label: 'X', value: '1' }, rows[1], rows[2]] }, bindings: {} });
+    expect(one?.lists.facts).toEqual([['value'], ['label', 'value'], ['label', 'value']]);
+    expect(sampleAfterEdit(sample, fields, { data }, { data, bindings: { facts: {} } })).toEqual({ texts: ['headline'], lists: {} });
+  });
+
+  it('drop a removed row, the rows after it moving up, and mark nothing on an added one', () => {
+    expect(sampleAfterEdit(sample, fields, { data }, { data: { ...data, facts: [rows[0], rows[2]] }, bindings: {} })?.lists.facts).toEqual([
+      ['label', 'value'],
+      ['label', 'value'],
+    ]);
+    expect(sampleAfterEdit(sample, fields, { data }, { data: { ...data, facts: [...rows, { label: 'D', value: '4' }] }, bindings: {} })?.lists.facts).toEqual([
+      ['label', 'value'],
+      ['label', 'value'],
+      ['label', 'value'],
+      [],
+    ]);
+  });
+
+  it('keep a text or list left out, which screens show as its template default, sample still', () => {
+    expect(sampleAfterEdit(sample, fields, { data }, { data: { greeting: '' }, bindings: {} })).toEqual(sample);
+  });
+
+  it('follow rows that moved, by what they hold, not where they are', () => {
+    const swapped = [{ ...rows[2], value: 'Three' }, rows[1], rows[0]];
+    expect(sampleAfterEdit(sample, fields, { data }, { data: { ...data, facts: swapped }, bindings: {} })?.lists.facts).toEqual([
+      ['label'],
+      ['label', 'value'],
+      ['label', 'value'],
+    ]);
+  });
+
+  it('keep a sample row’s marks when a row sharing a cell with it is added before it', () => {
+    const where = { label: 'A', value: 'Lobby' };
+    expect(sampleAfterEdit(sample, fields, { data }, { data: { ...data, facts: [where, ...rows] }, bindings: {} })?.lists.facts).toEqual([
+      [],
+      ['label', 'value'],
+      ['label', 'value'],
+      ['label', 'value'],
+    ]);
+  });
+
+  it('pair rows sharing a cell by the most cells held, not left to right, when they are reordered', () => {
+    const shared = [
+      { label: 'Where', value: 'Pier' },
+      { label: 'Where', value: 'Dock' },
+    ];
+    const two = {
+      lists: {
+        facts: [
+          ['label', 'value'],
+          ['label', 'value'],
+        ],
+      },
+      texts: [],
+    };
+    const before = { data: { facts: shared } };
+    // The second row edited and moved first: left to right it would take the first row's marks.
+    const after = { data: { facts: [{ label: 'Where', value: 'Lobby' }, shared[0]] }, bindings: {} };
+    expect(sampleAfterEdit(two, fields, before, after)?.lists.facts).toEqual([['label'], ['label', 'value']]);
+  });
+
+  it('keep a list cell left out, which screens show as its item default, sample still', () => {
+    const withItemDefault: Record<string, FieldDef> = {
+      facts: { type: 'list', label: 'Facts', item: { label: { type: 'text', label: 'Label', default: 'Opening hours' } } },
+    };
+    const one = { texts: [], lists: { facts: [['label']] } };
+    expect(sampleAfterEdit(one, withItemDefault, { data: { facts: [{ label: 'Opening hours' }] } }, { data: { facts: [{}] }, bindings: {} })).toEqual(one);
+  });
+
+  it('are none once every piece is edited', () => {
+    const edited = { headline: 'Closed', greeting: '', facts: rows.map((r) => ({ label: `${r.label}!`, value: `${r.value}!` })) };
+    expect(sampleAfterEdit(sample, fields, { data }, { data: edited, bindings: {} })).toBeNull();
   });
 });

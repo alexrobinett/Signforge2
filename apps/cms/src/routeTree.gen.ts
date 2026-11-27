@@ -10,9 +10,13 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
+import { Route as ConnectRouteImport } from './routes/connect'
+import { Route as McpRouteImport } from './routes/mcp'
 import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as DotwellKnownSplatRouteImport } from './routes/[.]well-known/$'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAccountRouteImport } from './routes/_app/account'
+import { Route as AppApprovalsRouteImport } from './routes/_app/approvals'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
 import { Route as AppAuditRouteImport } from './routes/_app/audit'
 import { Route as AppIntegrationsRouteImport } from './routes/_app/integrations'
@@ -21,11 +25,14 @@ import { Route as AppScheduleRouteImport } from './routes/_app/schedule'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AcceptInvitationInvitationIdRouteImport } from './routes/accept-invitation.$invitationId'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
+import { Route as AppBrandKitsIndexRouteImport } from './routes/_app/brand-kits/index'
+import { Route as AppBrandKitsKitIdRouteImport } from './routes/_app/brand-kits/$kitId'
 import { Route as AppPlaylistsIndexRouteImport } from './routes/_app/playlists/index'
 import { Route as AppPlaylistsPlaylistIdRouteImport } from './routes/_app/playlists/$playlistId'
 import { Route as AppScreensIndexRouteImport } from './routes/_app/screens/index'
 import { Route as AppScreensScreenIdRouteImport } from './routes/_app/screens/$screenId'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/index'
+import { Route as AppSettingsAiRouteImport } from './routes/_app/settings/ai'
 import { Route as AppSettingsGeneralRouteImport } from './routes/_app/settings/general'
 import { Route as AppSettingsMembersRouteImport } from './routes/_app/settings/members'
 import { Route as AppSettingsNotificationsRouteImport } from './routes/_app/settings/notifications'
@@ -33,16 +40,33 @@ import { Route as AppSettingsScreensRouteImport } from './routes/_app/settings/s
 import { Route as AppSpotsIndexRouteImport } from './routes/_app/spots/index'
 import { Route as AppSpotsSpotIdRouteImport } from './routes/_app/spots/$spotId'
 import { Route as V1DeviceSplatRouteImport } from './routes/v1/device/$'
-import { Route as AppSettingsBrandKitsIndexRouteImport } from './routes/_app/settings/brand-kits/index'
+import { Route as AppSettingsApiIndexRouteImport } from './routes/_app/settings/api/index'
+import { Route as AppSettingsApiGrantIdRouteImport } from './routes/_app/settings/api/$grantId'
+import { Route as AppSettingsBrandKitsIndexRouteImport } from './routes/_app/settings_/brand-kits/index'
 import { Route as AppSettingsBrandKitsKitIdRouteImport } from './routes/_app/settings_/brand-kits/$kitId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ConnectRoute = ConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignInRoute = SignInRouteImport.update({
   id: '/sign-in',
   path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DotwellKnownSplatRoute = DotwellKnownSplatRouteImport.update({
+  id: '/.well-known/$',
+  path: '/.well-known/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -53,6 +77,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppAccountRoute = AppAccountRouteImport.update({
   id: '/account',
   path: '/account',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppApprovalsRoute = AppApprovalsRouteImport.update({
+  id: '/approvals',
+  path: '/approvals',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAssetsRoute = AppAssetsRouteImport.update({
@@ -96,6 +125,16 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
   path: '/api/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppBrandKitsIndexRoute = AppBrandKitsIndexRouteImport.update({
+  id: '/brand-kits/',
+  path: '/brand-kits/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBrandKitsKitIdRoute = AppBrandKitsKitIdRouteImport.update({
+  id: '/brand-kits/$kitId',
+  path: '/brand-kits/$kitId',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppPlaylistsIndexRoute = AppPlaylistsIndexRouteImport.update({
   id: '/playlists/',
   path: '/playlists/',
@@ -119,6 +158,11 @@ const AppScreensScreenIdRoute = AppScreensScreenIdRouteImport.update({
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsAiRoute = AppSettingsAiRouteImport.update({
+  id: '/ai',
+  path: '/ai',
   getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppSettingsGeneralRoute = AppSettingsGeneralRouteImport.update({
@@ -157,11 +201,21 @@ const V1DeviceSplatRoute = V1DeviceSplatRouteImport.update({
   path: '/v1/device/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppSettingsApiIndexRoute = AppSettingsApiIndexRouteImport.update({
+  id: '/api/',
+  path: '/api/',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsApiGrantIdRoute = AppSettingsApiGrantIdRouteImport.update({
+  id: '/api/$grantId',
+  path: '/api/$grantId',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 const AppSettingsBrandKitsIndexRoute =
   AppSettingsBrandKitsIndexRouteImport.update({
-    id: '/brand-kits/',
-    path: '/brand-kits/',
-    getParentRoute: () => AppSettingsRoute,
+    id: '/settings_/brand-kits/',
+    path: '/settings/brand-kits/',
+    getParentRoute: () => AppRoute,
   } as any)
 const AppSettingsBrandKitsKitIdRoute =
   AppSettingsBrandKitsKitIdRouteImport.update({
@@ -172,8 +226,12 @@ const AppSettingsBrandKitsKitIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
+  '/connect': typeof ConnectRoute
+  '/mcp': typeof McpRoute
   '/sign-in': typeof SignInRoute
+  '/.well-known/$': typeof DotwellKnownSplatRoute
   '/account': typeof AppAccountRoute
+  '/approvals': typeof AppApprovalsRoute
   '/assets': typeof AppAssetsRoute
   '/audit': typeof AppAuditRoute
   '/integrations': typeof AppIntegrationsRoute
@@ -182,24 +240,33 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRouteWithChildren
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/api/$': typeof ApiSplatRoute
+  '/brand-kits/$kitId': typeof AppBrandKitsKitIdRoute
   '/playlists/$playlistId': typeof AppPlaylistsPlaylistIdRoute
   '/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/settings/ai': typeof AppSettingsAiRoute
   '/settings/general': typeof AppSettingsGeneralRoute
   '/settings/members': typeof AppSettingsMembersRoute
   '/settings/notifications': typeof AppSettingsNotificationsRoute
   '/settings/screens': typeof AppSettingsScreensRoute
   '/spots/$spotId': typeof AppSpotsSpotIdRoute
   '/v1/device/$': typeof V1DeviceSplatRoute
+  '/brand-kits/': typeof AppBrandKitsIndexRoute
   '/playlists/': typeof AppPlaylistsIndexRoute
   '/screens/': typeof AppScreensIndexRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/spots/': typeof AppSpotsIndexRoute
+  '/settings/api/$grantId': typeof AppSettingsApiGrantIdRoute
   '/settings/brand-kits/$kitId': typeof AppSettingsBrandKitsKitIdRoute
+  '/settings/api/': typeof AppSettingsApiIndexRoute
   '/settings/brand-kits/': typeof AppSettingsBrandKitsIndexRoute
 }
 export interface FileRoutesByTo {
+  '/connect': typeof ConnectRoute
+  '/mcp': typeof McpRoute
   '/sign-in': typeof SignInRoute
+  '/.well-known/$': typeof DotwellKnownSplatRoute
   '/account': typeof AppAccountRoute
+  '/approvals': typeof AppApprovalsRoute
   '/assets': typeof AppAssetsRoute
   '/audit': typeof AppAuditRoute
   '/integrations': typeof AppIntegrationsRoute
@@ -208,26 +275,35 @@ export interface FileRoutesByTo {
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/api/$': typeof ApiSplatRoute
   '/': typeof AppIndexRoute
+  '/brand-kits/$kitId': typeof AppBrandKitsKitIdRoute
   '/playlists/$playlistId': typeof AppPlaylistsPlaylistIdRoute
   '/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/settings/ai': typeof AppSettingsAiRoute
   '/settings/general': typeof AppSettingsGeneralRoute
   '/settings/members': typeof AppSettingsMembersRoute
   '/settings/notifications': typeof AppSettingsNotificationsRoute
   '/settings/screens': typeof AppSettingsScreensRoute
   '/spots/$spotId': typeof AppSpotsSpotIdRoute
   '/v1/device/$': typeof V1DeviceSplatRoute
+  '/brand-kits': typeof AppBrandKitsIndexRoute
   '/playlists': typeof AppPlaylistsIndexRoute
   '/screens': typeof AppScreensIndexRoute
   '/settings': typeof AppSettingsIndexRoute
   '/spots': typeof AppSpotsIndexRoute
+  '/settings/api/$grantId': typeof AppSettingsApiGrantIdRoute
   '/settings/brand-kits/$kitId': typeof AppSettingsBrandKitsKitIdRoute
+  '/settings/api': typeof AppSettingsApiIndexRoute
   '/settings/brand-kits': typeof AppSettingsBrandKitsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
+  '/connect': typeof ConnectRoute
+  '/mcp': typeof McpRoute
   '/sign-in': typeof SignInRoute
+  '/.well-known/$': typeof DotwellKnownSplatRoute
   '/_app/account': typeof AppAccountRoute
+  '/_app/approvals': typeof AppApprovalsRoute
   '/_app/assets': typeof AppAssetsRoute
   '/_app/audit': typeof AppAuditRoute
   '/_app/integrations': typeof AppIntegrationsRoute
@@ -237,27 +313,36 @@ export interface FileRoutesById {
   '/accept-invitation/$invitationId': typeof AcceptInvitationInvitationIdRoute
   '/api/$': typeof ApiSplatRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/brand-kits/$kitId': typeof AppBrandKitsKitIdRoute
   '/_app/playlists/$playlistId': typeof AppPlaylistsPlaylistIdRoute
   '/_app/screens/$screenId': typeof AppScreensScreenIdRoute
+  '/_app/settings/ai': typeof AppSettingsAiRoute
   '/_app/settings/general': typeof AppSettingsGeneralRoute
   '/_app/settings/members': typeof AppSettingsMembersRoute
   '/_app/settings/notifications': typeof AppSettingsNotificationsRoute
   '/_app/settings/screens': typeof AppSettingsScreensRoute
   '/_app/spots/$spotId': typeof AppSpotsSpotIdRoute
   '/v1/device/$': typeof V1DeviceSplatRoute
+  '/_app/brand-kits/': typeof AppBrandKitsIndexRoute
   '/_app/playlists/': typeof AppPlaylistsIndexRoute
   '/_app/screens/': typeof AppScreensIndexRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/spots/': typeof AppSpotsIndexRoute
+  '/_app/settings/api/$grantId': typeof AppSettingsApiGrantIdRoute
   '/_app/settings_/brand-kits/$kitId': typeof AppSettingsBrandKitsKitIdRoute
-  '/_app/settings/brand-kits/': typeof AppSettingsBrandKitsIndexRoute
+  '/_app/settings/api/': typeof AppSettingsApiIndexRoute
+  '/_app/settings_/brand-kits/': typeof AppSettingsBrandKitsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/connect'
+    | '/mcp'
     | '/sign-in'
+    | '/.well-known/$'
     | '/account'
+    | '/approvals'
     | '/assets'
     | '/audit'
     | '/integrations'
@@ -266,24 +351,33 @@ export interface FileRouteTypes {
     | '/settings'
     | '/accept-invitation/$invitationId'
     | '/api/$'
+    | '/brand-kits/$kitId'
     | '/playlists/$playlistId'
     | '/screens/$screenId'
+    | '/settings/ai'
     | '/settings/general'
     | '/settings/members'
     | '/settings/notifications'
     | '/settings/screens'
     | '/spots/$spotId'
     | '/v1/device/$'
+    | '/brand-kits/'
     | '/playlists/'
     | '/screens/'
     | '/settings/'
     | '/spots/'
+    | '/settings/api/$grantId'
     | '/settings/brand-kits/$kitId'
+    | '/settings/api/'
     | '/settings/brand-kits/'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/connect'
+    | '/mcp'
     | '/sign-in'
+    | '/.well-known/$'
     | '/account'
+    | '/approvals'
     | '/assets'
     | '/audit'
     | '/integrations'
@@ -292,25 +386,34 @@ export interface FileRouteTypes {
     | '/accept-invitation/$invitationId'
     | '/api/$'
     | '/'
+    | '/brand-kits/$kitId'
     | '/playlists/$playlistId'
     | '/screens/$screenId'
+    | '/settings/ai'
     | '/settings/general'
     | '/settings/members'
     | '/settings/notifications'
     | '/settings/screens'
     | '/spots/$spotId'
     | '/v1/device/$'
+    | '/brand-kits'
     | '/playlists'
     | '/screens'
     | '/settings'
     | '/spots'
+    | '/settings/api/$grantId'
     | '/settings/brand-kits/$kitId'
+    | '/settings/api'
     | '/settings/brand-kits'
   id:
     | '__root__'
     | '/_app'
+    | '/connect'
+    | '/mcp'
     | '/sign-in'
+    | '/.well-known/$'
     | '/_app/account'
+    | '/_app/approvals'
     | '/_app/assets'
     | '/_app/audit'
     | '/_app/integrations'
@@ -320,25 +423,33 @@ export interface FileRouteTypes {
     | '/accept-invitation/$invitationId'
     | '/api/$'
     | '/_app/'
+    | '/_app/brand-kits/$kitId'
     | '/_app/playlists/$playlistId'
     | '/_app/screens/$screenId'
+    | '/_app/settings/ai'
     | '/_app/settings/general'
     | '/_app/settings/members'
     | '/_app/settings/notifications'
     | '/_app/settings/screens'
     | '/_app/spots/$spotId'
     | '/v1/device/$'
+    | '/_app/brand-kits/'
     | '/_app/playlists/'
     | '/_app/screens/'
     | '/_app/settings/'
     | '/_app/spots/'
+    | '/_app/settings/api/$grantId'
     | '/_app/settings_/brand-kits/$kitId'
-    | '/_app/settings/brand-kits/'
+    | '/_app/settings/api/'
+    | '/_app/settings_/brand-kits/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
+  ConnectRoute: typeof ConnectRoute
+  McpRoute: typeof McpRoute
   SignInRoute: typeof SignInRoute
+  DotwellKnownSplatRoute: typeof DotwellKnownSplatRoute
   AcceptInvitationInvitationIdRoute: typeof AcceptInvitationInvitationIdRoute
   ApiSplatRoute: typeof ApiSplatRoute
   V1DeviceSplatRoute: typeof V1DeviceSplatRoute
@@ -353,11 +464,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/connect': {
+      id: '/connect'
+      path: '/connect'
+      fullPath: '/connect'
+      preLoaderRoute: typeof ConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sign-in': {
       id: '/sign-in'
       path: '/sign-in'
       fullPath: '/sign-in'
       preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known/$': {
+      id: '/.well-known/$'
+      path: '/.well-known/$'
+      fullPath: '/.well-known/$'
+      preLoaderRoute: typeof DotwellKnownSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/': {
@@ -372,6 +504,13 @@ declare module '@tanstack/react-router' {
       path: '/account'
       fullPath: '/account'
       preLoaderRoute: typeof AppAccountRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/approvals': {
+      id: '/_app/approvals'
+      path: '/approvals'
+      fullPath: '/approvals'
+      preLoaderRoute: typeof AppApprovalsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/assets': {
@@ -430,6 +569,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/brand-kits/': {
+      id: '/_app/brand-kits/'
+      path: '/brand-kits'
+      fullPath: '/brand-kits/'
+      preLoaderRoute: typeof AppBrandKitsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/brand-kits/$kitId': {
+      id: '/_app/brand-kits/$kitId'
+      path: '/brand-kits/$kitId'
+      fullPath: '/brand-kits/$kitId'
+      preLoaderRoute: typeof AppBrandKitsKitIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/playlists/': {
       id: '/_app/playlists/'
       path: '/playlists'
@@ -463,6 +616,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/settings/'
       preLoaderRoute: typeof AppSettingsIndexRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/ai': {
+      id: '/_app/settings/ai'
+      path: '/ai'
+      fullPath: '/settings/ai'
+      preLoaderRoute: typeof AppSettingsAiRouteImport
       parentRoute: typeof AppSettingsRoute
     }
     '/_app/settings/general': {
@@ -514,12 +674,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof V1DeviceSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/settings/brand-kits/': {
-      id: '/_app/settings/brand-kits/'
-      path: '/brand-kits'
+    '/_app/settings/api/': {
+      id: '/_app/settings/api/'
+      path: '/api'
+      fullPath: '/settings/api/'
+      preLoaderRoute: typeof AppSettingsApiIndexRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/api/$grantId': {
+      id: '/_app/settings/api/$grantId'
+      path: '/api/$grantId'
+      fullPath: '/settings/api/$grantId'
+      preLoaderRoute: typeof AppSettingsApiGrantIdRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings_/brand-kits/': {
+      id: '/_app/settings_/brand-kits/'
+      path: '/settings/brand-kits'
       fullPath: '/settings/brand-kits/'
       preLoaderRoute: typeof AppSettingsBrandKitsIndexRouteImport
-      parentRoute: typeof AppSettingsRoute
+      parentRoute: typeof AppRoute
     }
     '/_app/settings_/brand-kits/$kitId': {
       id: '/_app/settings_/brand-kits/$kitId'
@@ -532,21 +706,25 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppSettingsRouteChildren {
+  AppSettingsAiRoute: typeof AppSettingsAiRoute
   AppSettingsGeneralRoute: typeof AppSettingsGeneralRoute
   AppSettingsMembersRoute: typeof AppSettingsMembersRoute
   AppSettingsNotificationsRoute: typeof AppSettingsNotificationsRoute
   AppSettingsScreensRoute: typeof AppSettingsScreensRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
-  AppSettingsBrandKitsIndexRoute: typeof AppSettingsBrandKitsIndexRoute
+  AppSettingsApiGrantIdRoute: typeof AppSettingsApiGrantIdRoute
+  AppSettingsApiIndexRoute: typeof AppSettingsApiIndexRoute
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
+  AppSettingsAiRoute: AppSettingsAiRoute,
   AppSettingsGeneralRoute: AppSettingsGeneralRoute,
   AppSettingsMembersRoute: AppSettingsMembersRoute,
   AppSettingsNotificationsRoute: AppSettingsNotificationsRoute,
   AppSettingsScreensRoute: AppSettingsScreensRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
-  AppSettingsBrandKitsIndexRoute: AppSettingsBrandKitsIndexRoute,
+  AppSettingsApiGrantIdRoute: AppSettingsApiGrantIdRoute,
+  AppSettingsApiIndexRoute: AppSettingsApiIndexRoute,
 }
 
 const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
@@ -555,6 +733,7 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppAccountRoute: typeof AppAccountRoute
+  AppApprovalsRoute: typeof AppApprovalsRoute
   AppAssetsRoute: typeof AppAssetsRoute
   AppAuditRoute: typeof AppAuditRoute
   AppIntegrationsRoute: typeof AppIntegrationsRoute
@@ -562,17 +741,21 @@ interface AppRouteChildren {
   AppScheduleRoute: typeof AppScheduleRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
+  AppBrandKitsKitIdRoute: typeof AppBrandKitsKitIdRoute
   AppPlaylistsPlaylistIdRoute: typeof AppPlaylistsPlaylistIdRoute
   AppScreensScreenIdRoute: typeof AppScreensScreenIdRoute
   AppSpotsSpotIdRoute: typeof AppSpotsSpotIdRoute
+  AppBrandKitsIndexRoute: typeof AppBrandKitsIndexRoute
   AppPlaylistsIndexRoute: typeof AppPlaylistsIndexRoute
   AppScreensIndexRoute: typeof AppScreensIndexRoute
   AppSpotsIndexRoute: typeof AppSpotsIndexRoute
   AppSettingsBrandKitsKitIdRoute: typeof AppSettingsBrandKitsKitIdRoute
+  AppSettingsBrandKitsIndexRoute: typeof AppSettingsBrandKitsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAccountRoute: AppAccountRoute,
+  AppApprovalsRoute: AppApprovalsRoute,
   AppAssetsRoute: AppAssetsRoute,
   AppAuditRoute: AppAuditRoute,
   AppIntegrationsRoute: AppIntegrationsRoute,
@@ -580,20 +763,26 @@ const AppRouteChildren: AppRouteChildren = {
   AppScheduleRoute: AppScheduleRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
+  AppBrandKitsKitIdRoute: AppBrandKitsKitIdRoute,
   AppPlaylistsPlaylistIdRoute: AppPlaylistsPlaylistIdRoute,
   AppScreensScreenIdRoute: AppScreensScreenIdRoute,
   AppSpotsSpotIdRoute: AppSpotsSpotIdRoute,
+  AppBrandKitsIndexRoute: AppBrandKitsIndexRoute,
   AppPlaylistsIndexRoute: AppPlaylistsIndexRoute,
   AppScreensIndexRoute: AppScreensIndexRoute,
   AppSpotsIndexRoute: AppSpotsIndexRoute,
   AppSettingsBrandKitsKitIdRoute: AppSettingsBrandKitsKitIdRoute,
+  AppSettingsBrandKitsIndexRoute: AppSettingsBrandKitsIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
+  ConnectRoute: ConnectRoute,
+  McpRoute: McpRoute,
   SignInRoute: SignInRoute,
+  DotwellKnownSplatRoute: DotwellKnownSplatRoute,
   AcceptInvitationInvitationIdRoute: AcceptInvitationInvitationIdRoute,
   ApiSplatRoute: ApiSplatRoute,
   V1DeviceSplatRoute: V1DeviceSplatRoute,

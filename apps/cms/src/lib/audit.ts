@@ -5,7 +5,7 @@
  * the same phrases (`eventText`).
  */
 
-import type { ToolOutput } from '@signforge/tools/outputs';
+import type { CmsAgentClientId, ToolOutput } from '@signforge/tools/outputs';
 
 /** A `list_audit_log` page. */
 export type AuditPage = ToolOutput<'list_audit_log'>;
@@ -76,9 +76,11 @@ export const TARGET_KINDS: { value: string; label: string }[] = [
   { value: 'invitation', label: 'Invitation' },
   { value: 'organization', label: 'Organization' },
   { value: 'alert_channel', label: 'Alert channel' },
+  { value: 'ai_provider', label: 'AI provider' },
   { value: 'alert_delivery', label: 'Alert delivery' },
   { value: 'org', label: 'Settings' },
   { value: 'publish', label: 'Publish' },
+  { value: 'publish_request', label: 'Publish request' },
 ];
 export const targetLabel = (kind: string) => TARGET_KINDS.find((t) => t.value === kind)?.label ?? kind.replaceAll('_', ' ');
 
@@ -87,9 +89,14 @@ export const targetLabel = (kind: string) => TARGET_KINDS.find((t) => t.value ==
  * under: each tool that changes something (test/registry checks), Better Auth's membership changes
  * (apps/api src/auth/options.ts) and an agent refused for its limits.
  */
-export const ACTIONS: Record<string, { group: string; words: string }> = {
+export const ACTIONS: Record<string, { group: string; words: string; unlisted?: true }> = {
   claim_screen: { group: 'Screens', words: 'Paired' },
   update_screen_labels: { group: 'Screens', words: 'Labels changed' },
+  import_screen_labels: { group: 'Screens', words: 'Labels imported' },
+  update_screen: { group: 'Screens', words: 'Changed' },
+  // Not a What option of its own: Identified, Player restarted and Woken or put to sleep find its rows (list_audit_log).
+  screen_command: { group: 'Screens', words: 'Command sent', unlisted: true },
+  // Recorded before #345 merged them into update_screen, screen_command and save_group and the content saves: their rows keep these names.
   rename_screen: { group: 'Screens', words: 'Renamed' },
   update_screen_settings: { group: 'Screens', words: 'Settings changed' },
   set_display_override: { group: 'Screens', words: 'Woken or put to sleep' },
@@ -97,49 +104,77 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   restart_screen: { group: 'Screens', words: 'Player restarted' },
   revoke_screen_credential: { group: 'Screens', words: 'Credential revoked' },
   publish_manifest_to_screen: { group: 'Screens', words: 'Published' },
+  // The saves are not What options of their own: the tools they replaced find their rows (list_audit_log).
+  save_group: { group: 'Groups', words: 'Saved', unlisted: true },
   create_group: { group: 'Groups', words: 'Created' },
   rename_group: { group: 'Groups', words: 'Renamed' },
   delete_group: { group: 'Groups', words: 'Deleted' },
   set_group_members: { group: 'Groups', words: 'Screens set' },
   add_group_members: { group: 'Groups', words: 'Screens added' },
   remove_group_members: { group: 'Groups', words: 'Screens removed' },
+  save_spot: { group: 'Spots', words: 'Saved', unlisted: true },
   create_spot: { group: 'Spots', words: 'Created' },
   update_spot: { group: 'Spots', words: 'Draft changed' },
+  revert_spot_draft: { group: 'Spots', words: "Agent's draft rejected, or put back" },
+  keep_spot_draft: { group: 'Spots', words: "Agent's draft kept" },
+  delete_spot: { group: 'Spots', words: 'Deleted' },
+  save_playlist: { group: 'Playlists', words: 'Saved', unlisted: true },
   create_playlist: { group: 'Playlists', words: 'Created' },
   update_playlist: { group: 'Playlists', words: 'Draft changed' },
+  revert_playlist_draft: { group: 'Playlists', words: "Agent's draft rejected, or put back" },
+  keep_playlist_draft: { group: 'Playlists', words: "Agent's draft kept" },
   delete_playlist: { group: 'Playlists', words: 'Deleted' },
   set_default_playlist: { group: 'Playlists', words: 'Made the default' },
+  save_schedule_entry: { group: 'Schedule', words: 'Schedule saved', unlisted: true },
   create_schedule_entry: { group: 'Schedule', words: 'Scheduled' },
   start_takeover: { group: 'Schedule', words: 'Takeover made' },
+  // #345 PR 5's merges are not What options of their own: the tools they replaced find their rows (list_audit_log).
+  takeover: { group: 'Schedule', words: 'Takeover', unlisted: true },
+  delete: { group: 'Assets', words: 'Deleted', unlisted: true },
+  start_upload: { group: 'Assets', words: 'Upload started', unlisted: true },
+  finalize_upload: { group: 'Assets', words: 'Upload checked', unlisted: true },
+  publish_takeover: { group: 'Schedule', words: 'Takeover made and published' },
   update_schedule_entry: { group: 'Schedule', words: 'Schedule changed' },
   delete_schedule_entry: { group: 'Schedule', words: 'Unscheduled' },
   end_takeover: { group: 'Schedule', words: 'Takeover ended' },
   publish: { group: 'Publishes', words: 'Published' },
   roll_back_publish: { group: 'Publishes', words: 'Rolled back' },
+  request_publish: { group: 'Publishes', words: 'Asked to publish' },
+  approve_publish_request: { group: 'Publishes', words: 'Request approved' },
+  decline_publish_request: { group: 'Publishes', words: 'Request declined' },
+  reopen_publish_request: { group: 'Publishes', words: 'Request put back' },
   create_asset_upload: { group: 'Assets', words: 'Image upload started' },
   renew_asset_upload: { group: 'Assets', words: 'Upload renewed' },
   finalize_asset: { group: 'Assets', words: 'Image checked' },
   create_video_upload: { group: 'Assets', words: 'Video upload started' },
   finalize_video_upload: { group: 'Assets', words: 'Video checked' },
   delete_asset: { group: 'Assets', words: 'Deleted' },
+  save_brand_kit: { group: 'Brand kits', words: 'Saved', unlisted: true },
   create_brand_kit: { group: 'Brand kits', words: 'Created' },
   update_brand_kit: { group: 'Brand kits', words: 'Changed' },
   set_default_brand_kit: { group: 'Brand kits', words: 'Made the default' },
   assign_brand_kit: { group: 'Brand kits', words: 'Brand kit changed' },
+  save_data_source: { group: 'Data sources', words: 'Saved', unlisted: true },
   create_data_source: { group: 'Data sources', words: 'Created' },
   update_data_source: { group: 'Data sources', words: 'Changed' },
   delete_data_source: { group: 'Data sources', words: 'Deleted' },
+  read_table: { group: 'Data sources', words: 'Table read from an address' },
   start_connection: { group: 'Connections', words: 'Connection started' },
   finish_connection: { group: 'Connections', words: 'Connected' },
   disconnect: { group: 'Connections', words: 'Disconnected' },
   register_template_version: { group: 'Templates', words: 'Version registered' },
   set_template_version_status: { group: 'Templates', words: 'Version status changed' },
   update_org_settings: { group: 'Organization', words: 'Settings changed' },
+  // Not a What option of its own: Slack channel set and Webhook set find its rows (list_audit_log, #345).
+  set_alert_channel: { group: 'Alerts', words: 'Channel set', unlisted: true },
   set_slack_alert_channel: { group: 'Alerts', words: 'Slack channel set' },
   set_webhook_alert_channel: { group: 'Alerts', words: 'Webhook set' },
   remove_alert_channel: { group: 'Alerts', words: 'Channel removed' },
   test_alert_channel: { group: 'Alerts', words: 'Test alert sent' },
   retry_alert_delivery: { group: 'Alerts', words: 'Delivery retried' },
+  save_ai_provider: { group: 'Agents', words: 'Model key or models saved' },
+  test_ai_provider: { group: 'Agents', words: 'Model key tested' },
+  remove_ai_provider: { group: 'Agents', words: 'Model key removed' },
   create_organization: { group: 'Organization', words: 'Created' },
   update_organization: { group: 'Organization', words: 'Name changed' },
   invite_member: { group: 'Members', words: 'Invited' },
@@ -149,12 +184,16 @@ export const ACTIONS: Record<string, { group: string; words: string }> = {
   update_member_role: { group: 'Members', words: 'Role changed' },
   remove_member: { group: 'Members', words: 'Removed' },
   leave_organization: { group: 'Members', words: 'Left' },
+  create_agent_grant: { group: 'Agents', words: 'Agent connected' },
+  update_agent_grant_scopes: { group: 'Agents', words: 'Agent’s scopes changed' },
+  revoke_agent_grant: { group: 'Agents', words: 'Agent disconnected' },
   rate_limited: { group: 'Agents', words: 'Refused: over its limits' },
 };
 
 /** The What filter's options, in ACTIONS' groups. */
 export const ACTION_GROUPS = Object.entries(ACTIONS).reduce<{ group: string; actions: { value: string; label: string }[] }[]>(
-  (groups, [value, { group, words }]) => {
+  (groups, [value, { group, words, unlisted }]) => {
+    if (unlisted) return groups;
     const last = groups.at(-1);
     if (last?.group === group) last.actions.push({ value, label: words });
     else groups.push({ group, actions: [{ value, label: words }] });
@@ -170,6 +209,40 @@ const SETTINGS: [string, string][] = [
   ['locale', 'language'],
 ];
 
+/**
+ * Each content save (#345 PR 4), said as the tools it replaced said it: without its id it was their create, with it
+ * their update. A brand kit made the default by it says so.
+ */
+const SAVES: Record<string, { id: string; created: string; changed: string }> = {
+  save_spot: { id: 'spotId', created: 'create_spot', changed: 'update_spot' },
+  save_playlist: { id: 'playlistId', created: 'create_playlist', changed: 'update_playlist' },
+  save_schedule_entry: { id: 'scheduleEntryId', created: 'create_schedule_entry', changed: 'update_schedule_entry' },
+  save_brand_kit: { id: 'brandKitId', created: 'create_brand_kit', changed: 'update_brand_kit' },
+  save_data_source: { id: 'dataSourceId', created: 'create_data_source', changed: 'update_data_source' },
+};
+
+/** A delete, a takeover, an upload (#345 PR 5) and an alert channel set (PR 6), each said as the tool it replaced said it, by its type, action or kind. */
+const MERGED: Record<string, { by: string; was: Record<string, string> }> = {
+  delete: {
+    by: 'type',
+    was: { asset: 'delete_asset', data_source: 'delete_data_source', playlist: 'delete_playlist', schedule_entry: 'delete_schedule_entry' },
+  },
+  takeover: { by: 'action', was: { publish: 'publish_takeover', end: 'end_takeover' } },
+  start_upload: { by: 'kind', was: { image: 'create_asset_upload', video: 'create_video_upload' } },
+  finalize_upload: { by: 'kind', was: { image: 'finalize_asset', video: 'finalize_video_upload' } },
+  set_alert_channel: { by: 'kind', was: { slack: 'set_slack_alert_channel', webhook: 'set_webhook_alert_channel' } },
+};
+
+/** What each of `screen_command`'s commands did, as the tools it replaced said it. */
+const SCREEN_COMMANDS: Record<string, string> = {
+  identify: 'Identified',
+  restart: 'Player restarted',
+  display_on: 'Woken from the CMS',
+  display_off: 'Put to sleep from the CMS',
+  display_auto: 'Back to its display hours',
+};
+const MEMBERSHIP: Record<string, string> = { add: 'Screens added', remove: 'Screens removed', set: 'Screens set' };
+
 const capital = (s: string) => `${s[0]!.toUpperCase()}${s.slice(1)}`;
 const text = (v: unknown) => (typeof v === 'string' ? v : undefined);
 
@@ -177,16 +250,35 @@ const text = (v: unknown) => (typeof v === 'string' ? v : undefined);
 export function eventText(e: { action: string; input: Readonly<Record<string, unknown>> }): string {
   const name = text(e.input.name);
   const role = text(e.input.role);
+  const save = SAVES[e.action];
+  const merged = MERGED[e.action];
+  if (merged) return capital(ACTIONS[merged.was[text(e.input[merged.by]) ?? ''] ?? e.action]!.words);
+  if (save) {
+    const words = ACTIONS[e.input[save.id] === undefined ? save.created : save.changed]!.words;
+    // As it turned out, which the save records apart from its input (#507): the first kit too, and never one already the default.
+    return e.action === 'save_brand_kit' && e.input.madeDefault === true ? `${words} · made the default` : words;
+  }
   switch (e.action) {
+    case 'screen_command':
+      return SCREEN_COMMANDS[text(e.input.command) ?? ''] ?? ACTIONS.screen_command!.words;
     case 'set_display_override':
       return e.input.state === 'on' ? 'Woken from the CMS' : e.input.state === 'off' ? 'Put to sleep from the CMS' : 'Back to its display hours';
+    case 'save_group': {
+      const membership = text(e.input.membership);
+      const screens = MEMBERSHIP[membership ?? ''];
+      if (e.input.groupId === undefined) return name ? `Created ${name}` : 'Created';
+      if (name && screens) return `Renamed to ${name} · ${screens.toLowerCase()}`;
+      return name ? `Renamed to ${name}` : (screens ?? ACTIONS.save_group!.words);
+    }
     case 'rename_screen':
     case 'rename_group':
     case 'update_organization':
       return name ? `Renamed to ${name}` : (ACTIONS[e.action]?.words ?? 'Renamed');
+    case 'update_screen':
     case 'update_screen_settings': {
       const changed = SETTINGS.filter(([key]) => key in e.input).map(([, word]) => word);
-      if (!changed.length) return 'Settings changed';
+      if (!changed.length) return name ? `Renamed to ${name}` : 'Settings changed';
+      if (name) changed.unshift('name');
       const list = changed.length > 1 ? `${changed.slice(0, -1).join(', ')} and ${changed.at(-1)}` : changed[0]!;
       return `${capital(list)} changed`;
     }
@@ -200,14 +292,33 @@ export function eventText(e: { action: string; input: Readonly<Record<string, un
   }
 }
 
-/** The input a tool was given, or a membership change's own fields. */
+/**
+ * The input a tool was given, or a membership change's own fields; a cancel's invitee too, which the tool records apart
+ * (#321), the kind of asset a finished upload checked (#345), and whether a brand kit's save made it the default (#507).
+ */
 const inputOf = (e: AuditEntry): Record<string, unknown> => {
   const input = e.detail.input;
-  return typeof input === 'object' && input !== null && !Array.isArray(input) ? { ...input } : e.detail;
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return e.detail;
+  const more = e.detail.detail;
+  const invitee = e.action === 'cancel_invitation' && typeof more === 'object' && more !== null && 'email' in more ? { email: more.email } : {};
+  const kind = e.action === 'finalize_upload' && typeof more === 'object' && more !== null && 'kind' in more ? { kind: more.kind } : {};
+  const made = e.action === 'save_brand_kit' && typeof more === 'object' && more !== null && 'madeDefault' in more ? { madeDefault: more.madeDefault } : {};
+  return { ...input, ...invitee, ...kind, ...made };
 };
 
-/** What an entry did, in words. */
-export const whatText = (e: AuditEntry) => eventText({ action: e.action, input: inputOf(e) });
+/** The playlist a publish made the org's first default (#243), from its row's `detail`. */
+function madeDefaultOf(e: AuditEntry): string | undefined {
+  const more = e.detail.detail;
+  const made = typeof more === 'object' && more !== null && 'madeDefault' in more ? more.madeDefault : undefined;
+  return typeof made === 'object' && made !== null && 'name' in made ? text(made.name) : undefined;
+}
+
+/** What an entry did, in words: a publish, or an approved request's (M4-09), that made the default says so. */
+export function whatText(e: AuditEntry): string {
+  const made = e.action === 'publish' || e.action === 'approve_publish_request' ? madeDefaultOf(e) : undefined;
+  const words = eventText({ action: e.action, input: inputOf(e) });
+  return made ? `${words} · made ${made} the default playlist` : words;
+}
 
 /** What it was given, short: `name: Lobby · state: on`; the target's own id is left out, and a refusal says why. */
 export function detailText(e: AuditEntry): string {
@@ -226,10 +337,16 @@ function short(v: unknown): string {
 }
 
 /** Who did it: "You" (given `me`), a member's name, an agent, a screen or the system. A user no longer a member is named by id. */
+/** The built-in agent's client id (`CMS_AGENT_CLIENT_ID` in packages/tools): it acts as the member who asked it. */
+export const CMS_AGENT: CmsAgentClientId = 'cms-agent';
+
 export function whoText(e: AuditEntry, names: ReadonlyMap<string, string>, me?: string): string {
   switch (e.actor.kind) {
-    case 'user':
-      return e.actor.id === me ? 'You' : (names.get(e.actor.id) ?? `Former member ${e.actor.id}`);
+    case 'user': {
+      const who = e.actor.id === me ? 'You' : (names.get(e.actor.id) ?? `Former member ${e.actor.id}`);
+      // The built-in agent acts as the member who asked it (#263): their name, and that it was the agent.
+      return e.actor.clientId === CMS_AGENT ? `${who} via agent` : who;
+    }
     case 'agent':
       return `Agent ${e.actor.clientId ?? e.actor.id}`;
     case 'device':
@@ -237,6 +354,15 @@ export function whoText(e: AuditEntry, names: ReadonlyMap<string, string>, me?: 
     case 'system':
       return e.actor.id === 'sf-push' ? 'sf push' : 'SignForge';
   }
+}
+
+/**
+ * An agent named as a page names it (the approvals queue's `askerName`, #410): its client's plain name and ", agent";
+ * "An agent" when the name may not be shown; "An agent no longer connected" only once it is gone.
+ */
+export function agentWho(a: { name: string | null; gone: boolean } | undefined): string {
+  if (a?.name) return `${a.name}, agent`;
+  return a?.gone ? 'An agent no longer connected' : 'An agent';
 }
 
 /** What it came through: the CMS, an agent's client, a screen, or the system. */

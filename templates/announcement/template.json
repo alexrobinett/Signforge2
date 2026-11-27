@@ -1,6 +1,6 @@
 {
   "id": "announcement",
-  "version": "1.0.0",
+  "version": "1.2.1",
   "name": "Announcement",
   "description": "Company news: a headline and body, a photo, up to three facts and a QR code, in four looks.",
   "fields": {
@@ -24,7 +24,7 @@
       },
       "default": []
     },
-    "photo": { "type": "image", "label": "Photo" },
+    "photo": { "type": "image", "label": "Photo", "portraitBox": { "w": 1120, "h": 1750 } },
     "qrUrl": { "type": "url", "label": "QR code link", "default": "", "maxLength": 100 },
     "qrLabel": { "type": "text", "label": "QR code label", "default": "Scan for the floor plan", "maxLength": 40 },
     "showPhoto": { "type": "boolean", "label": "Show the photo", "default": true },

@@ -72,7 +72,7 @@ async function publish(org: OrgScope) {
   const result = await publishOrg(org, opts);
   await org.commit([
     ...result.writes,
-    ...result.screens.flatMap((s) => (s.manifest ? org.screens.stage.setDesiredManifest(s.screenId, s.manifest.id).writes : [])),
+    ...result.screens.flatMap((s) => (s.manifest ? org.screens.stage.setDesiredManifest(s.screenId, s.manifest.id, null).writes : [])),
   ]);
   return result;
 }
@@ -90,7 +90,7 @@ describe('brand tools', () => {
 
   it('creates a kit with derived on-colours and warnings, makes the first the default, and shows where it reaches', async () => {
     const { call, lobby, hall } = await setup('brand-create');
-    const { brandKit } = await call('create_brand_kit', { name: 'House', colors: { ...COLORS, muted: '#22272f' }, displayFontId: 'base/oswald' });
+    const { brandKit } = await call('save_brand_kit', { name: 'House', colors: { ...COLORS, muted: '#22272f' }, displayFontId: 'base/oswald' });
     expect(brandKit.id).toMatch(/^bk_/);
     expect(brandKit).toMatchObject({
       name: 'House',
@@ -104,7 +104,7 @@ describe('brand tools', () => {
       reach: [hall.id, lobby.id].sort(),
       warnings: ['muted on background is 1.27:1, below 4.5:1'],
     });
-    const second = await call('create_brand_kit', { name: 'Winter', colors: COLORS, shape: 'round' });
+    const second = await call('save_brand_kit', { name: 'Winter', colors: COLORS, shape: 'round' });
     expect(second.brandKit).toMatchObject({ isDefault: false, reach: [], warnings: [] });
     const { brandKits, next } = await call('list_brand_kits', {});
     expect(brandKits.map((k: { name: string }) => k.name).sort()).toEqual(['House', 'Winter']);
@@ -113,18 +113,18 @@ describe('brand tools', () => {
 
   it('refuses a font not in the catalogue and a logo that is not an image of this org', async () => {
     const { refusal } = await setup('brand-refuse');
-    expect(await refusal('create_brand_kit', { name: 'x', colors: COLORS, bodyFontId: 'base/comic-sans' })).toMatchObject({
+    expect(await refusal('save_brand_kit', { name: 'x', colors: COLORS, bodyFontId: 'base/comic-sans' })).toMatchObject({
       ok: false,
       error: 'invalid_input',
     });
-    expect(await refusal('create_brand_kit', { name: 'x', colors: { ...COLORS, accent: 'yellow' } })).toMatchObject({ ok: false, error: 'invalid_input' });
-    expect(await refusal('create_brand_kit', { name: 'x', colors: COLORS, logoOnDarkAssetId: 'ast_nothing' })).toMatchObject({ ok: false, error: 'not_found' });
+    expect(await refusal('save_brand_kit', { name: 'x', colors: { ...COLORS, accent: 'yellow' } })).toMatchObject({ ok: false, error: 'invalid_input' });
+    expect(await refusal('save_brand_kit', { name: 'x', colors: COLORS, logoOnDarkAssetId: 'ast_nothing' })).toMatchObject({ ok: false, error: 'not_found' });
   });
 
   it('assigns kits to screens and groups, and a group conflict shows on that screen only', async () => {
     const { call, refusal, lobby, hall, front, back, org } = await setup('brand-assign');
-    const house = (await call('create_brand_kit', { name: 'House', colors: COLORS })).brandKit;
-    const winter = (await call('create_brand_kit', { name: 'Winter', colors: { ...COLORS, accent: '#00aaff' } })).brandKit;
+    const house = (await call('save_brand_kit', { name: 'House', colors: COLORS })).brandKit;
+    const winter = (await call('save_brand_kit', { name: 'Winter', colors: { ...COLORS, accent: '#00aaff' } })).brandKit;
     await call('assign_brand_kit', { brandKitId: winter.id, groupId: back.id });
     await org.screenGroups.setMembers(back.id, [lobby.id]);
 
@@ -161,18 +161,18 @@ describe('brand tools', () => {
 
   it('sets the default', async () => {
     const { call } = await setup('brand-default');
-    await call('create_brand_kit', { name: 'House', colors: COLORS });
-    const winter = (await call('create_brand_kit', { name: 'Winter', colors: COLORS })).brandKit;
-    expect((await call('set_default_brand_kit', { brandKitId: winter.id })).brandKit).toMatchObject({ isDefault: true, reach: expect.any(Array) });
+    await call('save_brand_kit', { name: 'House', colors: COLORS });
+    const winter = (await call('save_brand_kit', { name: 'Winter', colors: COLORS })).brandKit;
+    expect((await call('save_brand_kit', { brandKitId: winter.id, makeDefault: true })).brandKit).toMatchObject({ isDefault: true, reach: expect.any(Array) });
     const { brandKits } = await call('list_brand_kits', {});
     expect(brandKits.filter((k: { isDefault: boolean }) => k.isDefault).map((k: { id: string }) => k.id)).toEqual([winter.id]);
   });
 
   it('updates a kit: a hand-set on-colour is kept, null derives it again', async () => {
     const { call } = await setup('brand-update');
-    const kit = (await call('create_brand_kit', { name: 'House', colors: { ...COLORS, onAccent: '#333333' } })).brandKit;
+    const kit = (await call('save_brand_kit', { name: 'House', colors: { ...COLORS, onAccent: '#333333' } })).brandKit;
     expect(kit.derived).toEqual(['onPrimary']);
-    const { brandKit } = await call('update_brand_kit', { brandKitId: kit.id, colors: { accent: '#ff0000', onAccent: null }, shape: 'square', name: 'Home' });
+    const { brandKit } = await call('save_brand_kit', { brandKitId: kit.id, colors: { accent: '#ff0000', onAccent: null }, shape: 'square', name: 'Home' });
     expect(brandKit).toMatchObject({
       name: 'Home',
       shape: 'square',
@@ -185,7 +185,7 @@ describe('brand tools', () => {
 describe('brand at publish', () => {
   it('leaves stored manifests unchanged when a kit is edited, until the next publish', async () => {
     const { call, org, lobby, spot } = await setup('brand-frozen');
-    const kit = (await call('create_brand_kit', { name: 'House', colors: COLORS })).brandKit;
+    const kit = (await call('save_brand_kit', { name: 'House', colors: COLORS })).brandKit;
     const first = await publish(org);
     expect(accentOf(first, lobby.id, spot)).toBe('#ffcc00');
     expect(first.screens.find((s) => s.screenId === lobby.id)?.manifest?.brand).toMatchObject({
@@ -195,7 +195,7 @@ describe('brand at publish', () => {
     });
     const stored = await org.screens.get(lobby.id);
 
-    await call('update_brand_kit', { brandKitId: kit.id, colors: { accent: '#ff0000' } });
+    await call('save_brand_kit', { brandKitId: kit.id, colors: { accent: '#ff0000' } });
     expect(await org.screens.get(lobby.id)).toEqual(stored);
 
     const second = await publish(org);
@@ -217,7 +217,7 @@ describe('brand at publish', () => {
     });
     await org.assets.renditions.insert({ assetId: logo.id, orientation: 'landscape', sha256: sha('c'), type: 'image/png', size: 500, width: 400, height: 200 });
     await org.assets.renditions.insert({ assetId: logo.id, orientation: 'portrait', sha256: sha('d'), type: 'image/png', size: 500, width: 400, height: 200 });
-    await call('create_brand_kit', { name: 'House', colors: COLORS, logoOnDarkAssetId: logo.id, bodyFontId: 'base/inter' });
+    await call('save_brand_kit', { name: 'House', colors: COLORS, logoOnDarkAssetId: logo.id, bodyFontId: 'base/inter' });
     const manifest = (await publishOrg(org, opts)).screens.find((s) => s.screenId === lobby.id)!.manifest!;
     expect(manifest.brand?.logo).toEqual({ onDark: sha('c') });
     expect(manifest.files[sha('c')]).toEqual({ size: 500, type: 'image/png' });
@@ -247,7 +247,7 @@ describe('brand at publish', () => {
         height: 200,
         status,
       });
-      expect(await refusal('create_brand_kit', { name: 'House', colors: COLORS, logoOnDarkAssetId: logo.id })).toMatchObject({
+      expect(await refusal('save_brand_kit', { name: 'House', colors: COLORS, logoOnDarkAssetId: logo.id })).toMatchObject({
         ok: false,
         error: 'invalid_input',
         details: [{ path: 'logoOnDarkAssetId', message: `asset ${logo.id} ${message}` }],
@@ -267,7 +267,7 @@ describe('brand at publish', () => {
       height: 0,
       status: 'verified',
     });
-    const kit = (await call('create_brand_kit', { name: 'House', colors: COLORS, logoOnDarkAssetId: logo.id })).brandKit;
-    expect(await refusal('delete_asset', { assetId: logo.id })).toMatchObject({ ok: false, error: 'conflict', details: { brandKitIds: [kit.id] } });
+    const kit = (await call('save_brand_kit', { name: 'House', colors: COLORS, logoOnDarkAssetId: logo.id })).brandKit;
+    expect(await refusal('delete', { type: 'asset', id: logo.id })).toMatchObject({ ok: false, error: 'conflict', details: { brandKitIds: [kit.id] } });
   });
 });

@@ -1,5 +1,5 @@
 /** Input fields shared by several tools. */
-import { MAX_TERMS, SELECTOR_OPS, SYSTEM_KEYS } from '@signforge/compiler/selector';
+import { LABEL_KEY, LABEL_VALUE, LABEL_WORDS, MAX_LABEL_VALUE, MAX_TERMS, REFUSED_LABEL_KEYS, SELECTOR_OPS, SYSTEM_KEYS } from '@signforge/compiler/selector';
 import { displayHoursProblems, ID_PATTERN, validTimezone } from '@signforge/contract';
 import { z } from 'zod';
 
@@ -16,23 +16,14 @@ export const idempotencyKey = z
   .max(128)
   .regex(/^[\x21-\x7e]+$/, 'printable ASCII, no spaces')
   .optional()
-  .describe(
-    'A key you choose for this one creation, such as a UUID. Retrying with the same key and input returns the first result and creates nothing more; reusing it for another input is refused',
-  );
+  .describe('A key for this one creation, such as a UUID: a retry with it creates nothing more');
 
 /**
  * On an update tool: the `version` of the row as the caller read it. The dispatcher refuses the
  * call with `conflict`, details `{ id, version }` (the version now), if the row has changed since,
  * and writes nothing. The check runs in the batch that writes the change.
  */
-export const ifVersion = z
-  .number()
-  .int()
-  .positive()
-  .optional()
-  .describe(
-    'The version you read. If the row has changed since, nothing is written and the call is refused with conflict, details { id, version }: read it again and redo the change. Omit to change it whatever its version',
-  );
+export const ifVersion = z.number().int().positive().optional().describe('The version you read; a conflict means it changed since: read it again');
 
 /** A row's version, on the view of every row an update tool changes. */
 export const version = z.number().int().describe('Moves on with every change; pass it as ifVersion to update only what you read');
@@ -84,29 +75,25 @@ export const displayHours = z
     for (const message of displayHoursProblems(hours)) ctx.addIssue({ code: 'custom', message });
   });
 
-const LABEL_KEY = /^[a-z0-9](?:[a-z0-9._-]{0,61}[a-z0-9])?$/;
-/** A screen's name, id and live status are not labels, so no label or selector names them; `sf.` keys are SignForge's. */
-const REFUSED_KEYS = new Set(['name', 'id', 'status']);
 const anyKey = z
   .string()
-  .regex(LABEL_KEY, 'a label key is 1 to 63 lowercase letters, digits, - _ or ., starting and ending with a letter or digit')
-  .refine((k) => !REFUSED_KEYS.has(k), 'name, id and status are not labels')
-  .refine((k) => !k.startsWith('sf.'), 'keys starting sf. are reserved');
+  .regex(LABEL_KEY, LABEL_WORDS.key)
+  .refine((k) => !REFUSED_LABEL_KEYS.includes(k), LABEL_WORDS.refused)
+  .refine((k) => !k.startsWith('sf.'), LABEL_WORDS.reserved);
 const SYSTEM = new Set<string>(SYSTEM_KEYS);
 
 /** A key a label may have: not a system label's, which the screen's settings give. */
 export const labelKey = anyKey
-  .refine((k) => !SYSTEM.has(k), `${SYSTEM_KEYS.join(', ')} are system labels, from the screen's settings: change them with update_screen_settings`)
+  .refine((k) => !SYSTEM.has(k), `${SYSTEM_KEYS.join(', ')} are system labels, from the screen's settings: change them with update_screen`)
   .describe('A label key, such as region or store: lowercase letters, digits, - _ and .');
 
 /** Stored as typed, less the spaces around it; compared case-insensitively. */
 const labelValue = z
   .string()
   .trim()
-  .min(1, 'a label value cannot be empty')
-  .max(63, 'a label value is at most 63 characters')
-  // \p{Cs} rejects lone surrogates, which D1 reads back as U+FFFD.
-  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}\p{Cs}]*$/u, 'a label value is printable characters, spaces allowed')
+  .min(1, LABEL_WORDS.empty)
+  .max(MAX_LABEL_VALUE, LABEL_WORDS.long)
+  .regex(LABEL_VALUE, LABEL_WORDS.printable)
   .describe('Up to 63 characters, spaces allowed; matched case-insensitively');
 
 /** Labels to set, by key, as `claim_screen` and `update_screen_labels` take them; the tools check the limits. */
@@ -127,21 +114,57 @@ export const labels = z.preprocess(
 /** How many values each op takes. */
 const valueCount = (op: (typeof SELECTOR_OPS)[number], n: number) => (op === 'eq' || op === 'neq' ? n === 1 : op === 'in' || op === 'notin' ? n >= 1 : n === 0);
 
+/**
+ * `field`'s checks as one refinement, in its words: a listed schema shows no refinement, so a rule that `list_screens`'
+ * selector already describes is listed as bare strings, and checked all the same (#186).
+ */
+const quietly = <T extends z.ZodType<unknown, string>>(field: T) =>
+  z.string().superRefine((v, ctx) => {
+    for (const issue of field.safeParse(v).error?.issues ?? []) ctx.addIssue({ code: 'custom', message: issue.message });
+  });
+
+/** A selector's term, checked: `eq` and `neq` take one value, `in` and `notin` one or more, `exists` and `missing` none. */
+const term = (described: boolean) =>
+  z
+    .object({
+      key: described ? anyKey.describe('A label key, or a system label: orientation, kind (device or browser), timezone, locale') : quietly(anyKey),
+      op: z.enum(SELECTOR_OPS),
+      values: described
+        ? z.array(labelValue).default([]).describe('One for eq and neq, one or more for in and notin, none for exists and missing')
+        : z.array(quietly(labelValue).transform((v) => v.trim())).default([]),
+    })
+    .refine((t) => valueCount(t.op, t.values.length), 'eq and neq take one value, in and notin one or more, exists and missing none');
+
+/** A smart group's rule (#186): a selector as `list_screens` describes one, so its parts are not described again. */
+export const rule = z.object({
+  // An empty rule would match every screen: that is the target org, not a group (review of #608). Refined, not a
+  // minItems the catalogue would carry.
+  all: z
+    .array(term(false))
+    .max(MAX_TERMS, `a selector has at most ${MAX_TERMS} terms`)
+    .refine((terms) => terms.length > 0, 'a rule needs at least one term'),
+});
+
 /** `@signforge/compiler/selector`'s `Selector`, checked. */
 export const selector = z
   .object({
-    all: z
-      .array(
-        z
-          .object({
-            key: anyKey.describe('A label key, or a system label: orientation, kind (device or browser), timezone, locale'),
-            op: z.enum(SELECTOR_OPS),
-            values: z.array(labelValue).default([]).describe('One for eq and neq, one or more for in and notin, none for exists and missing'),
-          })
-          .refine((t) => valueCount(t.op, t.values.length), 'eq and neq take one value, in and notin one or more, exists and missing none'),
-      )
-      .max(MAX_TERMS, `a selector has at most ${MAX_TERMS} terms`),
+    all: z.array(term(true)).max(MAX_TERMS, `a selector has at most ${MAX_TERMS} terms`),
   })
   .describe(
     'Screens whose labels match every term: { all: [{ key, op, values }] }. Values match case-insensitively; a screen without the key matches only missing, so neq and notin need it. System labels count: { key: "orientation", op: "eq", values: ["portrait"] }',
   );
+
+export const DEFAULT_PAGE_LIMIT = 50;
+export const MAX_PAGE_LIMIT = 200;
+
+/** The input fields a list tool adds to its own. */
+export const pageInput = {
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_PAGE_LIMIT)
+    .default(DEFAULT_PAGE_LIMIT)
+    .describe(`How many to return, 1 to ${MAX_PAGE_LIMIT}; default ${DEFAULT_PAGE_LIMIT}`),
+  cursor: z.string().max(2000).optional().describe("The previous page's next, to get the page after it"),
+};

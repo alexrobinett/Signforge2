@@ -3,14 +3,16 @@
 // and DNS are stubbed, and the clock is a parameter.
 import { MAX_SNAPSHOT_BYTES } from '@signforge/contract';
 import { scoped } from '@signforge/db';
+import { BACKOFF_MAX_MS, isStale, sourceStaleS } from '@signforge/player-core';
 import { seedOrg, type SeededOrg } from '@signforge/db/testing';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { feedUrlSealer, openFeedUrl } from '../src/data/cipher';
 import type { FetchGuards } from '../src/data/fetch';
-import { BACKOFF_MAX_MS, pollDataSources } from '../src/data/poller';
+import { pollDataSources, POLLS_PER_RUN } from '../src/data/poller';
 import worker from '../src/index';
+import { counted } from './counting';
 
 const NOW = Date.UTC(2026, 10, 17, 14);
 const MIN = 60_000;
@@ -54,7 +56,7 @@ async function source(format: 'json' | 'ical' | 'rss', url: string, extra: { ref
 }
 
 /** Run the poller at `at`, on this org's due sources only. A news source's photos go nowhere: test/feed-images.test.ts follows them. */
-const poll = (guards: FetchGuards, at = NOW) => pollDataSources({ ...env, FEED_IMAGES: { sendBatch: async () => {} } } as unknown as Env, { now: at, guards });
+const poll = (guards: FetchGuards, at = NOW) => pollDataSources(env, { now: at, guards, photoQueue: { enqueue: async () => {} } });
 
 beforeAll(async () => {
   o = await seedOrg(env.DB, 'poller-org');
@@ -130,11 +132,28 @@ describe('pollDataSources', () => {
     const row = await o.scope.dataSources.get(id);
     expect(row).toMatchObject({ failures: 9, lastError: 'http-status' });
     expect(JSON.stringify(row)).not.toContain('token');
-    expect((await o.scope.dataSources.snapshots([id]))[0]?.dataJson).toBe('{"ok":true}');
+    // The last good check stays where it was, so the snapshot ages on screens and goes stale at its source's age (#624).
+    expect((await o.scope.dataSources.snapshots([id]))[0]).toMatchObject({ dataJson: '{"ok":true}', checkedAt: NOW });
     // The first success clears it.
     answer = { body: '{"ok":true}' };
     await poll(feed.guards, at);
     expect(await o.scope.dataSources.get(id)).toMatchObject({ failures: 0, lastError: null, nextPollAt: at + 5 * MIN });
+  });
+
+  it('keeps a calendar live through one failed poll and its retry, and stale after a second failure (#624)', async () => {
+    const id = await source('json', 'https://blip.test/');
+    let answer: Answer = { body: '{"ok":true}' };
+    const feed = feedsAt({ 'https://blip.test/': () => answer });
+    await poll(feed.guards);
+    answer = { status: 503 };
+    await poll(feed.guards, NOW + 5 * MIN);
+    const retryAt = (await o.scope.dataSources.get(id))!.nextPollAt;
+    // A calendar's age, from the same refreshS; the backoff does not depend on the format.
+    const snapshot = { checkedAt: new Date(NOW).toISOString(), staleS: sourceStaleS('ical', 300) };
+    // A screen hears of the retry's success within ten minutes of it.
+    expect(isStale(snapshot, retryAt + 10 * MIN, true)).toBe(false);
+    await poll(feed.guards, retryAt);
+    expect(isStale(snapshot, (await o.scope.dataSources.get(id))!.nextPollAt, true)).toBe(true);
   });
 
   it('records a guard refusal as its category', async () => {
@@ -266,6 +285,31 @@ describe('pollDataSources', () => {
     while (held.length) held.shift()?.();
     await run;
     expect(feed.requests).toHaveLength(5);
+  });
+
+  it('polls POLLS_PER_RUN sources a run, within a Paid invocation: 1,000 D1 queries and 1,000 calls to services', async () => {
+    const ids: string[] = [];
+    const feeds: Record<string, Answer> = {};
+    // One host each: the per-host limit is no part of what is measured here.
+    for (let i = 0; i < POLLS_PER_RUN + 5; i++) {
+      const url = `https://host${i}.test/feed`;
+      ids.push(await source('json', url));
+      feeds[url] = { body: `{"i":${i}}` };
+    }
+    const feed = feedsAt(feeds);
+    const measured = counted();
+    await pollDataSources(measured.bindings, { now: NOW, guards: feed.guards, photoQueue: { enqueue: async () => {} } });
+    expect(feed.requests).toHaveLength(POLLS_PER_RUN);
+    expect((await o.scope.dataSources.snapshots(ids)).length).toBe(POLLS_PER_RUN);
+    // The five over the cap wait for the next run.
+    expect(await o.scope.dataSources.get(ids[POLLS_PER_RUN]!)).toMatchObject({ failures: 0, lastError: null });
+    expect(measured.result().queries).toBeLessThanOrEqual(1 + POLLS_PER_RUN * 7);
+    // The worst a source costs, with the budget in poller.ts: seven D1 queries; four hops of a redirect chain, each its
+    // request and two DNS lookups, and one queue send.
+    expect(1 + POLLS_PER_RUN * 7).toBeLessThanOrEqual(1000);
+    expect(POLLS_PER_RUN * (4 * 3 + 1)).toBeLessThanOrEqual(1000);
+    // Past what 1,000 screens in 100 orgs need of a minute (an hourly RSS source and a five-minute other: 54 a minute at 500 sources).
+    expect(POLLS_PER_RUN * 60).toBeGreaterThanOrEqual(3_600);
   });
 
   it("calls the Worker's own fetch as workerd requires, unbound from any object", async () => {

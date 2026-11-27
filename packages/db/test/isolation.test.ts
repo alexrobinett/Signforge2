@@ -1,6 +1,19 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { FEED_IMAGE_DELETE_GRACE_MS, FEED_IMAGE_TTL_MS, findMembership, NotInOrgError, organizationExists, platform, scoped } from '../src/index';
+import {
+  DEFAULT_PHOTO_BUDGET,
+  DeleteInFlightError,
+  FEED_IMAGE_DELETE_GRACE_MS,
+  FEED_IMAGE_TTL_MS,
+  findMembership,
+  NEW_PER_ORG_PER_DAY,
+  NEW_PER_SOURCE_PER_DAY,
+  NotInOrgError,
+  organizationExists,
+  platform,
+  scoped,
+  StaleVersionError,
+} from '../src/index';
 import { seedTwoOrgs, type Seeded } from '../src/testing';
 
 let s: Seeded;
@@ -14,7 +27,6 @@ describe('seed', () => {
       const r = o.scope;
       expect(await r.screens.get(o.screen)).toMatchObject({ orgId: o.orgId, status: 'active' });
       expect(await r.screenGroups.members(o.group)).toEqual([o.screen]);
-      expect(await r.screens.groupsOf(o.screen)).toEqual([o.group]);
       expect(await r.screens.labels.list()).toEqual([{ screenId: o.screen, key: 'region', value: o.orgId }]);
       expect(await r.screens.credentials.forScreen(o.screen)).toHaveLength(1);
       expect(await r.assets.renditions.forAsset(o.asset)).toHaveLength(1);
@@ -38,7 +50,6 @@ describe("a call made for org B with org A's ids", () => {
     const reads: [string, () => Promise<unknown>][] = [
       ['screens.get', () => b.screens.get(a.screen)],
       ['screens.getMany', () => b.screens.getMany([a.screen])],
-      ['screens.groupsOf', () => b.screens.groupsOf(a.screen)],
       ['screens.labels.list', () => b.screens.labels.list(a.screen)],
       ['screens.credentials.get', () => b.screens.credentials.get(a.credential)],
       ['screens.credentials.forScreen', () => b.screens.credentials.forScreen(a.screen)],
@@ -151,6 +162,7 @@ describe("a call made for org B with org A's ids", () => {
       await b.screens.sync(a.screen, {
         at: 1,
         playerVersion: 'x',
+        fallbackFrom: null,
         heartbeatJson: '{}',
         epoch: 'e',
         seq: 1,
@@ -260,6 +272,17 @@ describe('rows a scope writes', () => {
     expect(await b.alertChannels.get('slack')).toMatchObject({ orgId: 'org-b', kind: 'slack', host: 'moved.test', rowVersion: 2 });
     expect(await ra.alertChannels.get('webhook')).toBeUndefined();
 
+    const key = { provider: 'anthropic' as const, keySealed: 'sealed:key', keyLast4: 'abcd', keySavedBy: 'u', keySavedAt: 1 };
+    await b.commit((await b.aiProvider.stage.put(key)).writes);
+    await b.commit((await b.aiProvider.stage.put({ ...key, fastModel: 'moved', orgId: a.orgId } as never)).writes);
+    expect(await b.aiProvider.get()).toMatchObject({ orgId: 'org-b', fastModel: 'moved', rowVersion: 2 });
+    expect(await ra.aiProvider.get()).toBeUndefined();
+    // Removing one org's provider leaves another's.
+    await ra.commit((await ra.aiProvider.stage.put(key)).writes);
+    await b.commit(b.aiProvider.stage.remove().writes);
+    expect(await b.aiProvider.get()).toBeUndefined();
+    expect(await ra.aiProvider.get()).toMatchObject({ orgId: a.orgId });
+
     await b.commit((await b.settings.stage.set({ locale: 'en-GB', orgId: a.orgId, publishRevision: 99 } as never)).writes);
     expect(await b.settings.get()).toMatchObject({ orgId: 'org-b', locale: 'en-GB', publishRevision: 0 });
     expect(await ra.settings.get()).toBeUndefined();
@@ -292,7 +315,7 @@ describe('rows a scope writes', () => {
     await b.commit([
       ...smuggled.writes,
       ...b.screens.stage.update(aScreen, { name: 'hijacked' }).writes,
-      ...b.screens.stage.setDesiredManifest(a.screen, 'f'.repeat(64)).writes,
+      ...b.screens.stage.setDesiredManifest(a.screen, 'f'.repeat(64), null).writes,
       ...b.screenGroups.stage.delete(a.group).writes,
       ...b.assets.stage.delete(a.asset).writes,
       ...b.idempotency.stage({ key: 'k-iso', action: 'x', inputSha256: '0', outputJson: '{}' }).writes,
@@ -309,6 +332,18 @@ describe('rows a scope writes', () => {
     }
     await expect(b.screenGroups.stage.setMembers(bGroup, [a.screen]), 'stage.setMembers: A screen').rejects.toBeInstanceOf(NotInOrgError);
     await expect(b.screenGroups.stage.addMembers(bGroup, [a.screen]), 'stage.addMembers: A screen').rejects.toBeInstanceOf(NotInOrgError);
+    // A guard on A's group's screens, staged in B, reads no members of A's: it holds only for none (#408).
+    const aMembers = await s.a.scope.screenGroups.members(a.group);
+    expect(aMembers.length).toBeGreaterThan(0);
+    await expect(b.commit(b.screenGroups.stage.membersAre(a.group, aMembers).writes), 'stage.membersAre: A group').rejects.toBeInstanceOf(StaleVersionError);
+    await b.commit(b.screenGroups.stage.membersAre(a.group, []).writes);
+    await s.a.scope.commit(s.a.scope.screenGroups.stage.membersAre(a.group, [...aMembers].reverse()).writes);
+    // A smart group's guards (#186): its rule, and the labels, each read in the org that stages them, never another's.
+    const aLabels = await s.a.scope.screens.labels.list();
+    expect(aLabels.length).toBeGreaterThan(0);
+    await expect(b.commit(b.screens.labels.stage.are(['region'], aLabels).writes), 'labels.stage.are: A labels').rejects.toBeInstanceOf(StaleVersionError);
+    await s.a.scope.commit(s.a.scope.screens.labels.stage.are(['region'], [...aLabels].reverse()).writes);
+    await expect(b.commit(b.screenGroups.stage.ruleIs(a.group, '{}').writes), 'stage.ruleIs: A group').rejects.toBeInstanceOf(StaleVersionError);
     await expect(b.spots.stage.insert({ name: 'x', kind: 'template', durationMs: 1000, templateVersionId: a.templateVersion })).rejects.toBeInstanceOf(
       NotInOrgError,
     );
@@ -451,6 +486,53 @@ describe('composite foreign keys', () => {
   });
 });
 
+describe('kept drafts (#116, draft_snapshots)', () => {
+  it("are read, cleared and written by org B's scope for org B alone, whatever ids or fields it is handed", async () => {
+    const [a, b] = [s.a.scope, s.b.scope];
+    const spotA = (await a.spots.get(s.a.templateSpot))!;
+    await a.commit(a.draftSnapshots.stage.keep('spot', spotA, 'person', { contentJson: '{"name":"A"}', sampleFieldsJson: null }).writes);
+    // Read and cleared with org A's id: nothing of org A's.
+    expect(await b.draftSnapshots.get('spot', s.a.templateSpot)).toBeUndefined();
+    expect(await b.draftSnapshots.kept()).toEqual([]);
+    await b.commit(b.draftSnapshots.stage.clear('spot', s.a.templateSpot).writes);
+    expect(await a.draftSnapshots.get('spot', s.a.templateSpot)).toMatchObject({ orgId: s.a.orgId, holds: 'person' });
+    // Kept or proposed for org A's spot: refused, as org B has no such draft at that version, and org A's is untouched.
+    await expect(b.commit(b.draftSnapshots.stage.keep('spot', spotA, 'agent', { contentJson: '{}', sampleFieldsJson: null }).writes)).rejects.toThrow();
+    await expect(b.commit(b.draftSnapshots.stage.propose('spot', spotA, { contentJson: '{}', sampleFieldsJson: null }).writes)).rejects.toThrow();
+    expect(await a.draftSnapshots.get('spot', s.a.templateSpot)).toMatchObject({ contentJson: '{"name":"A"}' });
+    // Handed another org's id and keys among its content, org B's own draft is still the one written: its org and keys come last.
+    const spotB = (await b.spots.get(s.b.templateSpot))!;
+    const sneaky = {
+      contentJson: '{"name":"B"}',
+      sampleFieldsJson: null,
+      orgId: s.a.orgId,
+      spotId: s.a.templateSpot,
+      playlistId: s.a.playlist,
+      holds: 'agent',
+    };
+    await b.commit(b.draftSnapshots.stage.propose('spot', spotB, sneaky).writes);
+    expect(await b.draftSnapshots.get('spot', s.b.templateSpot)).toMatchObject({
+      orgId: s.b.orgId,
+      spotId: s.b.templateSpot,
+      playlistId: null,
+      holds: 'person',
+    });
+    expect(await a.draftSnapshots.get('spot', s.a.templateSpot)).toMatchObject({ contentJson: '{"name":"A"}' });
+    await b.commit(b.draftSnapshots.stage.keep('spot', spotB, 'person', sneaky).writes);
+    expect(await b.draftSnapshots.get('spot', s.b.templateSpot)).toMatchObject({ orgId: s.b.orgId, holds: 'person', contentJson: '{"name":"B"}' });
+    await a.commit(a.draftSnapshots.stage.clear('spot', s.a.templateSpot).writes);
+    await b.commit(b.draftSnapshots.stage.clear('spot', s.b.templateSpot).writes);
+  });
+
+  it('cannot point into another org, even written around the repository', async () => {
+    const insert = env.DB.prepare(
+      "INSERT INTO draft_snapshots (org_id, spot_id, playlist_id, holds, content_json, created_at) VALUES (?, ?, ?, 'person', '{}', 0)",
+    );
+    await expect(insert.bind(s.b.orgId, s.a.templateSpot, null).run()).rejects.toThrow(/FOREIGN KEY/);
+    await expect(insert.bind(s.b.orgId, null, s.a.playlist).run()).rejects.toThrow(/FOREIGN KEY/);
+  });
+});
+
 describe('findMembership', () => {
   it("returns a member's role and nothing for anyone else", async () => {
     const at = new Date().toISOString();
@@ -478,87 +560,113 @@ describe('the audit log', () => {
   });
 });
 
-describe('feed images', () => {
+describe('feed photos', () => {
+  const sha = (c: string) => c.repeat(64);
+  const copy = (c: string) => ({ file: sha(c), thumb: sha(c) });
+  const validators = { etag: null, lastModified: null, validatedFrom: 'https://cdn.example/a.jpg' };
+  const hold = async (org: Seeded['a'], sourceId: string, urls: { again: readonly string[]; fresh: readonly string[] }, now: number) => {
+    const row = (await org.scope.dataSources.get(sourceId))!;
+    const { held } = await org.scope.dataSources.savePoll(sourceId, {
+      source: { nextPollAt: now + 300_000, failures: 0, lastError: null },
+      photos: {
+        read: { rowVersion: row.rowVersion, generation: row.photoGeneration, now, readWhole: false, lastSeen: [] },
+        hold: { ...urls, budget: DEFAULT_PHOTO_BUDGET },
+      },
+    });
+    return held;
+  };
+  const ensureSource = async (org: Seeded['a'], id: string) => {
+    if (!(await org.scope.dataSources.get(id))) {
+      await org.scope.dataSources.insert({ id, name: id, format: 'rss', urlEncrypted: 'enc', refreshS: 300 });
+    }
+  };
+
   it("keep each org's copy of a URL both name apart", async () => {
     const url = 'https://news.example/photo.jpg';
-    const a = s.a.scope.feedImages;
-    const b = s.b.scope.feedImages;
-    await a.hold([url], { until: 10, now: 1, sourceId: 'news' });
-    await a.save(url, { fileSha256: 'a'.repeat(64), thumbSha256: 'b'.repeat(64), etag: '"a"', nextCheckAt: 20, lastError: null });
+    const a = s.a.scope.feedPhotos;
+    const b = s.b.scope.feedPhotos;
+    await ensureSource(s.b, 'news');
+    await a.put({ url, sourceId: 'news', fileSha256: sha('a'), thumbSha256: sha('b'), etag: '"a"', nextCheckAt: 20 });
     expect(await b.get([url])).toEqual([]);
     // Org B's own fetch of it, and its failures, touch only its own row.
-    await b.save(url, { fileSha256: 'c'.repeat(64), nextCheckAt: 30 });
-    await b.hold([url], { until: 40, now: 1, sourceId: 'news' });
-    await b.save(url, { lastError: 'timeout', nextCheckAt: 50 });
-    expect(await a.get([url])).toEqual([
-      expect.objectContaining({ orgId: 'org-a', fileSha256: 'a'.repeat(64), etag: '"a"', nextCheckAt: 20, lastError: null }),
-    ]);
-    expect(await b.get([url])).toEqual([expect.objectContaining({ orgId: 'org-b', fileSha256: null, nextCheckAt: 50, lastError: 'timeout' })]);
+    expect(await hold(s.b, 'news', { again: [], fresh: [url] }, 1)).toEqual([url]);
+    const [held] = await b.get([url]);
+    await b.delivered(url, { result: 'failed', now: 2, checked: held!, error: 'timeout', passing: true });
+    expect(await a.get([url])).toEqual([expect.objectContaining({ orgId: 'org-a', fileSha256: sha('a'), etag: '"a"', nextCheckAt: 20, lastError: null })]);
+    expect(await b.get([url])).toEqual([expect.objectContaining({ orgId: 'org-b', fileSha256: null, lastError: 'timeout', failures: 1 })]);
   });
 
-  it('holds a URL it already has without losing its image', async () => {
+  it('holds a URL it already has without losing its copy', async () => {
     const url = 'https://news.example/kept.jpg';
-    const a = s.a.scope.feedImages;
-    await a.hold([url], { until: 10, now: 1, sourceId: 'news' });
-    await a.save(url, { fileSha256: 'a'.repeat(64), thumbSha256: 'b'.repeat(64), nextCheckAt: 20 });
-    await a.hold([url, 'https://news.example/new.jpg'], { until: 30, now: 20, sourceId: 'other' });
-    expect((await a.get([url, 'https://news.example/new.jpg'])).map((r) => [r.url, r.fileSha256, r.nextCheckAt])).toEqual(
+    const a = s.a.scope.feedPhotos;
+    await ensureSource(s.a, 'other');
+    await a.put({ url, sourceId: 'news', fileSha256: sha('a'), thumbSha256: sha('b'), nextCheckAt: 20 });
+    expect(await hold(s.a, 'other', { again: [url], fresh: ['https://news.example/new.jpg'] }, 20)).toEqual([url, 'https://news.example/new.jpg']);
+    expect((await a.get([url, 'https://news.example/new.jpg'])).map((r) => [r.url, r.fileSha256])).toEqual(
       expect.arrayContaining([
-        [url, 'a'.repeat(64), 30],
-        ['https://news.example/new.jpg', null, 30],
+        [url, sha('a')],
+        ['https://news.example/new.jpg', null],
       ]),
     );
   });
 
   it('holds a fresh URL only once, including when two polls both planned it as fresh', async () => {
-    const photos = s.a.scope.feedImages;
+    const photos = s.a.scope.feedPhotos;
     const url = 'https://news.example/hold-once.jpg';
-    expect(await photos.hold([url], { until: 30, now: 20, sourceId: 'news' })).toEqual([url]);
-    expect(await photos.hold([url], { until: 31, now: 21, sourceId: 'other' })).toEqual([]);
-    const budget = { again: [], fresh: [url], until: 32, now: 22, since: 0, maxSource: 100, maxOrg: 100 };
-    expect(await photos.holdWithinBudget('other', budget)).toEqual([]);
-    expect(await photos.holdWithinBudget('other', { ...budget, now: 30 })).toEqual([url]);
-    expect(await photos.get([url])).toEqual([expect.objectContaining({ sourceId: 'news', createdAt: 20, nextCheckAt: 32 })]);
+    await ensureSource(s.a, 'news');
+    await ensureSource(s.a, 'other');
+    expect(await hold(s.a, 'news', { again: [], fresh: [url] }, 20)).toEqual([url]);
+    expect(await hold(s.a, 'other', { again: [], fresh: [url] }, 21)).toEqual([]);
+    expect(await photos.get([url])).toEqual([expect.objectContaining({ sourceId: 'news', createdAt: 20 })]);
   });
 
-  it("counts the rows a day's polls made, the org's and one source's, in its own org only", async () => {
-    const t = 1_000_000;
-    const a = s.a.scope.feedImages;
-    await a.hold(['https://count.example/1.jpg', 'https://count.example/2.jpg'], { until: t + 10, now: t, sourceId: 'one' });
-    await a.hold(['https://count.example/3.jpg'], { until: t + 10, now: t + 5, sourceId: 'two' });
-    await a.hold(['https://count.example/old.jpg'], { until: t + 10, now: t - 1, sourceId: 'one' });
-    // Held again: still made when first named, by the source that first named it.
-    await a.hold(['https://count.example/1.jpg'], { until: t + 20, now: t + 6, sourceId: 'two' });
-    expect(await a.madeSince(t, 'one')).toEqual({ org: 3, source: 2 });
-    expect(await a.madeSince(t, 'two')).toEqual({ org: 3, source: 1 });
-    expect(await s.b.scope.feedImages.madeSince(t, 'one')).toEqual({ org: 0, source: 0 });
+  it("counts the day's new photos against the source and the org that named them, in its own org only", async () => {
+    const t = 1_000_000_000;
+    const urls = (tag: string, n: number) => Array.from({ length: n }, (_, i) => `https://budget.example/${tag}-${i}.jpg`);
+    for (const id of ['one', 'two', 'three']) await ensureSource(s.a, id);
+    await ensureSource(s.b, 'one');
+    // Each source's share of org A's day: the sources a screen shows and the one polling, in org A alone, divide it (#481).
+    const { n } = (await env.DB.prepare(
+      "SELECT count(*) AS n FROM data_sources WHERE org_id = ? AND format = 'rss' AND photos = 1 AND (photo_urls_json IS NOT NULL OR id = 'one')",
+    )
+      .bind('org-a')
+      .first<{ n: number }>())!;
+    const share = Math.min(NEW_PER_SOURCE_PER_DAY, Math.floor(NEW_PER_ORG_PER_DAY / n));
+    expect(await hold(s.a, 'one', { again: [], fresh: urls('one', share + 2) }, t)).toEqual(urls('one', share));
+    expect(await hold(s.a, 'one', { again: [], fresh: urls('one-more', 1) }, t)).toEqual([]);
+    expect(await hold(s.a, 'two', { again: [], fresh: urls('two', 1) }, t)).toEqual(urls('two', 1));
+    // Org B's day is its own: org A's photos and sources take nothing of it.
+    expect(await hold(s.b, 'one', { again: [], fresh: urls('b-one', 1) }, t)).toEqual(urls('b-one', 1));
   });
 
-  it('finds existing renditions by content hash within the same org only', async () => {
-    const a = s.a.scope.feedImages;
-    const b = s.b.scope.feedImages;
-    const sha = (c: string) => c.repeat(64);
-    await a.hold(['https://dedupe.example/one.jpg', 'https://dedupe.example/pending.jpg'], { until: 10, now: 1, sourceId: 'news' });
-    await a.save('https://dedupe.example/one.jpg', { sourceSha256: sha('a'), fileSha256: sha('f'), thumbSha256: sha('t'), nextCheckAt: 20 });
-    // A row with sourceSha256 but no stored renditions is ignored.
-    await a.save('https://dedupe.example/pending.jpg', { sourceSha256: sha('p'), nextCheckAt: 20 });
-    expect(await a.bySourceSha(sha('a'))).toEqual({ fileSha256: sha('f'), thumbSha256: sha('t') });
-    expect(await a.bySourceSha(sha('p'))).toBeUndefined();
-    expect(await b.bySourceSha(sha('a'))).toBeUndefined();
+  it('finds the copies of the same bytes within the same org only', async () => {
+    const a = s.a.scope.feedPhotos;
+    const b = s.b.scope.feedPhotos;
+    await a.put({
+      url: 'https://dedupe.example/one.jpg',
+      sourceId: 'news',
+      sourceSha256: sha('a'),
+      fileSha256: sha('f'),
+      thumbSha256: sha('t'),
+      nextCheckAt: 20,
+    });
+    // A row with sourceSha256 but no stored copies is ignored.
+    await a.put({ url: 'https://dedupe.example/pending.jpg', sourceId: 'news', sourceSha256: sha('p'), nextCheckAt: 20 });
+    expect(await a.copyOf(sha('a'))).toEqual({ file: sha('f'), thumb: sha('t') });
+    expect(await a.copyOf(sha('p'))).toBeUndefined();
+    expect(await b.copyOf(sha('a'))).toBeUndefined();
   });
 
-  it('forgets rows, queues orphaned hashes durably, guards concurrent writes with leases, and stays isolated per org', async () => {
-    const a = s.a.scope.feedImages;
-    const b = s.b.scope.feedImages;
-    const sha = (c: string) => c.repeat(64);
+  it('expires rows, queues their hashes, guards deliveries with leases, and stays isolated per org', async () => {
+    const a = s.a.scope.feedPhotos;
+    const b = s.b.scope.feedPhotos;
     const urls = ['https://gc.example/alone.jpg', 'https://gc.example/shared.jpg', 'https://gc.example/twin.jpg', 'https://gc.example/shown.jpg'];
-    await a.hold(urls, { until: 1, now: 1, sourceId: 'news' });
-    await a.save(urls[0]!, { fileSha256: sha('1'), thumbSha256: sha('2'), nextCheckAt: 1 });
+    await a.put({ url: urls[0]!, sourceId: 'news', fileSha256: sha('1'), thumbSha256: sha('2'), nextCheckAt: 1 });
     // Its file is a distinct hash not held by other rows, and its thumbnail is shared with twin.
-    await a.save(urls[1]!, { fileSha256: sha('d'), thumbSha256: sha('5'), nextCheckAt: 1 });
-    await a.save(urls[2]!, { fileSha256: sha('6'), thumbSha256: sha('5'), nextCheckAt: 1 });
+    await a.put({ url: urls[1]!, sourceId: 'news', fileSha256: sha('d'), thumbSha256: sha('5'), nextCheckAt: 1 });
+    await a.put({ url: urls[2]!, sourceId: 'news', fileSha256: sha('6'), thumbSha256: sha('5'), nextCheckAt: 1 });
     // The source's latest snapshot still names this one.
-    await a.save(urls[3]!, { fileSha256: sha('7'), thumbSha256: sha('8'), nextCheckAt: 1 });
+    await a.put({ url: urls[3]!, sourceId: 'news', fileSha256: sha('7'), thumbSha256: sha('8'), nextCheckAt: 1 });
     await s.a.scope.dataSources.putSnapshot(s.a.dataSource, {
       version: 'gc',
       fetchedAt: 1,
@@ -566,34 +674,72 @@ describe('feed images', () => {
       dataJson: JSON.stringify({ items: [{ image: { file: sha('7') } }] }),
     });
     // Org B holds the same hash: not org A's to keep or delete.
-    await b.hold([urls[0]!], { until: 1, now: 1, sourceId: 'news' });
-    await b.save(urls[0]!, { fileSha256: sha('1'), nextCheckAt: 1 });
+    await b.put({ url: urls[0]!, sourceId: 'news', fileSha256: sha('1'), nextCheckAt: 1 });
 
-    // Forgetting alone, shared, and shown deletes alone + shared (shown stays), queueing their hashes durably.
-    const forgetAt = 100 + FEED_IMAGE_TTL_MS;
-    expect(await a.forget(urls.slice(0, 2).concat(urls[3]!), forgetAt)).toBe(2);
+    // Expiring alone, shared, and shown removes alone + shared (shown stays), queueing their hashes.
+    const expireAt = 100 + FEED_IMAGE_TTL_MS;
+    expect(await a.expire(urls.slice(0, 2).concat(urls[3]!), expireAt)).toBe(2);
     expect((await a.get(urls)).map((r) => r.url).sort()).toEqual([urls[2], urls[3]].sort());
     expect(await b.get([urls[0]!])).toHaveLength(1);
-    expect((await a.pendingDeletes()).map((d) => d.sha256)).toEqual([sha('1'), sha('2'), sha('5'), sha('d')].sort());
-    expect(await b.pendingDeletes()).toEqual([]);
+    expect((await a.deletes()).map((d) => d.sha256)).toEqual([sha('1'), sha('2'), sha('5'), sha('d')].sort());
+    expect(await b.deletes()).toEqual([]);
 
-    // Claiming deletes drops sha('5') (still referenced by twin), leases sha('1'), sha('2'), sha('d').
-    const claimAt = forgetAt + FEED_IMAGE_DELETE_GRACE_MS;
-    const claimed = (await a.claimDeletes([sha('1'), sha('2'), sha('5'), sha('d')], { now: claimAt, leaseMs: 1_000 })).sort();
-    expect(claimed).toEqual([sha('1'), sha('2'), sha('d')].sort());
-    // While leased, claimForWrite returns false so a consumer retries rather than racing R2 delete.
-    expect(await a.claimForWrite([sha('1')], claimAt + 300)).toBe(false);
-    // Org B's claimForWrite is unaffected by org A's lease.
-    expect(await b.claimForWrite([sha('1')], claimAt + 300)).toBe(true);
-    // Once finished, the durable records are gone.
-    await a.finishDeletes(claimed);
-    expect(await a.pendingDeletes()).toEqual([]);
+    // Deleting drops sha('5') from the queue (twin names it) and leases sha('1'), sha('2'), sha('d').
+    const deleteAt = expireAt + FEED_IMAGE_DELETE_GRACE_MS;
+    const removed: string[] = [];
+    const leased = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const deleting = a.deleteBlobs([sha('1'), sha('2'), sha('5'), sha('d')], deleteAt, async (shas) => {
+      removed.push(...shas);
+      leased.resolve();
+      await finish.promise;
+    });
+    await leased.promise;
+    expect(removed.sort()).toEqual([sha('1'), sha('2'), sha('d')].sort());
+    // While leased, a delivery naming one of them is refused, so it is tried again rather than racing the delete.
+    const reuse = { result: 'reused', now: deleteAt + 300, sourceId: 'news', sourceSha256: sha('s'), copy: copy('1'), validators } as const;
+    await expect(a.delivered('https://gc.example/again.jpg', reuse)).rejects.toThrow(DeleteInFlightError);
+    // Org B's delivery is unaffected by org A's lease.
+    await b.delivered('https://gc.example/again.jpg', reuse);
+    finish.resolve();
+    expect(await deleting).toBe(3);
+    expect(await a.deletes()).toEqual([]);
 
-    // Replacing hashes at the same URL durably queues the old ones and cancels active ones.
-    await a.save(urls[2]!, { fileSha256: sha('9'), thumbSha256: sha('9'), nextCheckAt: 300 }, { now: 300 });
-    expect((await a.pendingDeletes()).map((d) => d.sha256)).toEqual([sha('5'), sha('6')]);
-    // Unleased pending delete is cancelled by claimForWrite when the hash is reused.
-    expect(await a.claimForWrite([sha('6')], 300)).toBe(true);
-    expect((await a.pendingDeletes()).map((d) => d.sha256)).toEqual([sha('5')]);
+    // Replacing the copies at a URL queues the old hashes, and naming a queued hash again takes it off the queue.
+    await a.delivered(urls[2]!, { result: 'reused', now: 300, sourceId: 'news', sourceSha256: sha('s'), copy: copy('9'), validators });
+    expect((await a.deletes()).map((d) => d.sha256)).toEqual([sha('5'), sha('6')]);
+    await a.delivered(urls[3]!, {
+      result: 'reused',
+      now: 300,
+      sourceId: 'news',
+      sourceSha256: sha('s'),
+      copy: { file: sha('6'), thumb: sha('8') },
+      validators,
+    });
+    expect((await a.deletes()).map((d) => d.sha256)).toEqual([sha('5'), sha('7')]);
+  });
+});
+
+describe("a smart group's guards (#186)", () => {
+  it('hold while the rule and the labels it reads are as read, and refuse the batch once either moved, a label it does not read aside', async () => {
+    const a = s.a.scope;
+    const rule = JSON.stringify({ all: [{ key: 'region', op: 'exists', values: [] }] });
+    const group = await a.screenGroups.insert({ name: 'Rule', selectorJson: rule });
+    const labels = await a.screens.labels.list();
+    await a.commit([...a.screenGroups.stage.ruleIs(group.id, rule).writes, ...a.screens.labels.stage.are(['region'], labels).writes]);
+    // A label of another key, edited between the read and the press, changes nothing the rule reads.
+    await a.commit((await a.screens.labels.stage.update([s.a.screen], { set: { floor: '2' }, remove: [] })).writes);
+    await a.commit(a.screens.labels.stage.are(['region'], labels).writes);
+    // One of its key does.
+    await a.commit((await a.screens.labels.stage.update([s.a.screen], { set: { region: 'elsewhere' }, remove: [] })).writes);
+    await expect(a.commit(a.screens.labels.stage.are(['region'], labels).writes)).rejects.toBeInstanceOf(StaleVersionError);
+    // A rule that names a system label reads the screens' settings: a screen turned refuses it.
+    const screens = await a.screens.list();
+    await a.commit(a.screens.labels.stage.are(['orientation'], [], screens).writes);
+    await a.screens.update(s.a.screen, { orientation: 'portrait' });
+    await expect(a.commit(a.screens.labels.stage.are(['orientation'], [], screens).writes)).rejects.toBeInstanceOf(StaleVersionError);
+    // Or the rule changes.
+    await a.screenGroups.update(group.id, { selectorJson: JSON.stringify({ all: [] }) });
+    await expect(a.commit(a.screenGroups.stage.ruleIs(group.id, rule).writes)).rejects.toBeInstanceOf(StaleVersionError);
   });
 });

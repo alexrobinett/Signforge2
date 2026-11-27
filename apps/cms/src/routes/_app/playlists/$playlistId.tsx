@@ -6,28 +6,24 @@
  * (src/state/playlist-editor.ts). The stage's orientation, scale and brand kit are in the URL,
  * as the spot editor's are.
  */
+import { choiceVariants } from '~/components/ui/choice';
 import type { Transition } from '@signforge/contract';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, notFound } from '@tanstack/react-router';
-import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, Trash2Icon, TriangleAlertIcon, XIcon } from 'lucide-react';
+import { ArrowDownIcon, ArrowUpIcon, CheckIcon, GripVerticalIcon, PlusIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
 import { useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { SpotPicker } from '~/components/playlists/spot-picker';
-import { EditorFields, EditorHeader, EditorSection, PublishButton, SaveAlert, SaveDraftButton, saveWord } from '~/components/editor';
-import { PlayerStage, stageSearch, type StageSearch } from '~/components/spots/player-stage';
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '~/components/ui/alert-dialog';
+import { ProposalPanel } from '~/components/proposal';
+import { EditorDeleteQuestion, EditorFields, EditorMoreMenu, EditorHeader, EditorSection, PublishButton, SaveAlert, saveWord } from '~/components/editor';
+import { EDITOR, EDITOR_FORM, EDITOR_ROW, PlayerStage, STAGE_COLUMN, stageSearch, type StageSearch } from '~/components/spots/player-stage';
+import { AlertDialogCancel, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '~/components/ui/alert-dialog';
 import { Alert, AlertDescription } from '~/components/ui/alert';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { clockLength, loopMs, playlistDraftOf, playlistPublishWord, rowKeys, type PlaylistView } from '~/lib/playlists';
+import { problemWords } from '~/lib/field-words';
 import { seconds, spotWhat, versionsById } from '~/lib/spots';
 import { aimedAt, describeWhen, runsAfter, stateWord, timeWord } from '~/lib/schedule';
 import { isRetired } from '~/lib/screen-status';
@@ -38,6 +34,38 @@ import { screensQuery } from '~/queries/screens';
 import { assetsQuery, brandKitsQuery, spotsQuery, templatesQuery } from '~/queries/spots';
 import { useAppStore } from '~/state/provider';
 import { shown } from '~/state/versioned-draft';
+
+/**
+ * A move of a spot (#385): made at once, then shown. The rows slide from where they were to where they are
+ * (each by its offset, measured before and after: FLIP), and, when it `moves`, the row now at `to` is ringed a moment,
+ * a ring and not a tint so its text keeps its contrast: by its place, so a spot listed twice rings the one moved, though
+ * React may keep its node where the other copy was. Under reduced motion it is just made.
+ */
+function showMove(list: Element | null, to: number, change: () => void, moves = true) {
+  const rows = list ? [...list.children] : [];
+  // Where each row is drawn now, mid-slide if a move is still sliding: a second move starts from there, not with a
+  // jump. That slide is then stopped, so the place measured after is the row's own.
+  const before = new Map(rows.map((r) => [r, r.getBoundingClientRect().top]));
+  for (const r of rows)
+    for (const a of r.getAnimations()) if (a.effect instanceof KeyframeEffect && a.effect.getKeyframes().some((k) => 'transform' in k)) a.cancel();
+  flushSync(change);
+  if (!list || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  // Only drawn: the move is made, and a browser that cannot draw this leaves it as made.
+  try {
+    for (const row of list.children) {
+      const top = before.get(row);
+      const by = top === undefined ? 0 : top - row.getBoundingClientRect().top;
+      if (by) row.animate([{ transform: `translateY(${by}px)` }, { transform: 'none' }], { duration: 200, easing: 'ease-out' });
+    }
+    const moved = list.children[to];
+    if (moves && moved instanceof HTMLElement) {
+      const ring = getComputedStyle(moved).getPropertyValue('--ring');
+      moved.animate([{ boxShadow: `0 0 0 3px ${ring}` }, { boxShadow: '0 0 0 3px transparent' }], { duration: 1200, easing: 'ease-out' });
+    }
+  } catch {
+    return;
+  }
+}
 
 export const Route = createFileRoute('/_app/playlists/$playlistId')({
   validateSearch: stageSearch,
@@ -120,8 +148,8 @@ function PlaylistEditor() {
   const startDrag = useAppStore((s) => s.startDragSpot);
   const drop = useAppStore((s) => s.dropSpot);
   const openAdd = useAppStore((s) => s.openAddSpots);
-  const save = useAppStore((s) => s.savePlaylistDraft);
   const reload = useAppStore((s) => s.reloadPlaylist);
+  const save = useAppStore((s) => s.savePlaylistDraft);
   const askDelete = useAppStore((s) => s.askDeletePlaylist);
   const deletePlaylist = useAppStore((s) => s.deletePlaylist);
   const publishing = useAppStore((s) => s.publishing.pending);
@@ -144,24 +172,28 @@ function PlaylistEditor() {
   const kitId = search.kit ?? brandKits.find((k) => k.isDefault)?.id ?? null;
 
   return (
-    <div className="flex min-h-[calc(100dvh-8rem)] flex-col overflow-clip rounded-xl border">
+    <div className={EDITOR}>
       <EditorHeader
         back={{ to: '/playlists', label: 'Playlists' }}
         title={draft.name || playlist.name}
         about={`${count} · ${loop} loop · ${saveWord(status, savedAt)} · ${playlistPublishWord(playlist)}`}
       >
-        {canManage && (
-          <>
-            <SaveDraftButton status={status} stale={stale} onSave={() => void save(playlistId)} />
-            <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => askDelete(true)}>
-              <Trash2Icon aria-hidden />
-              Delete
-            </Button>
-          </>
-        )}
         {canPublish && <PublishButton pending={publishing} disabled={stale || gone} onPublish={() => void publish(orgId, playlist.id)} />}
+        {canManage && <EditorMoreMenu onDelete={() => askDelete(true)} />}
       </EditorHeader>
-      <SaveAlert error={gone ? null : saveError} stale={stale} onReload={() => void reload(orgId, playlistId)} />
+      <SaveAlert error={gone ? null : saveError} stale={stale} onReload={() => void reload(orgId, playlistId)} onRetry={() => void save(playlistId)} />
+      {/* An agent's edit is its proposal (#116): who, what it changes, Keep or Reject. */}
+      {!gone && (
+        <ProposalPanel
+          orgId={orgId}
+          kind="playlist"
+          id={playlistId}
+          version={playlist.version}
+          spotNames={new Map(spots.map((x) => [x.id, x.name]))}
+          unsaved={status !== 'saved'}
+          canDecide={canManage}
+        />
+      )}
       {gone && (
         <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
           <AlertDescription className="flex flex-wrap items-center gap-3">
@@ -172,12 +204,8 @@ function PlaylistEditor() {
           </AlertDescription>
         </Alert>
       )}
-      <div className="flex flex-1 flex-wrap items-stretch">
-        <form
-          aria-label="Playlist"
-          onSubmit={(e) => e.preventDefault()}
-          className="flex max-w-full min-w-0 flex-[1_1_360px] flex-col gap-6 border-r bg-card px-4 pt-5 pb-8 sm:px-6"
-        >
+      <div className={EDITOR_ROW}>
+        <form aria-label="Playlist" onSubmit={(e) => e.preventDefault()} className={cn(EDITOR_FORM, 'gap-6 px-4 pt-5 pb-8 sm:px-6')}>
           <EditorFields disabled={!canManage}>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="playlist-name" className="font-medium">
@@ -218,7 +246,7 @@ function PlaylistEditor() {
                         }}
                         onDrop={(e) => {
                           e.preventDefault();
-                          drop(orgId, playlist.id, i);
+                          showMove(e.currentTarget.parentElement, i, () => drop(orgId, playlist.id, i), dragging !== null && dragging !== i);
                         }}
                         onDragEnd={() => startDrag(null)}
                         // The player names the spot, not its place: a spot listed twice is marked once, at its first place.
@@ -231,16 +259,19 @@ function PlaylistEditor() {
                         )}
                       >
                         {canManage && <GripVerticalIcon className="size-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden />}
-                        <span className="w-6 shrink-0 text-right font-mono text-xs text-muted-foreground">{i + 1}</span>
+                        <span className="w-6 shrink-0 text-right text-xs text-muted-foreground tabular-nums">{i + 1}</span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium">{name}</span>
                           <span className="block truncate text-sm text-muted-foreground">
                             {spot ? `${spotWhat(spot, versions)} · ${seconds(spot.durationMs)} s` : ''}
                           </span>
                           {why && (
-                            <span className="flex items-start gap-1.5 text-sm text-[#b54708] dark:text-[#fdb022]">
+                            <span className="flex items-start gap-1.5 text-sm text-status-updating-foreground">
                               <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                              <span>Not in the preview yet: {why.join('; ')}</span>
+                              <span>
+                                Not in the preview yet. {/* In words, by the field's label (#359). */}
+                                {why.map((p) => `${problemWords(p, versions.get(spot?.templateVersionId ?? '')?.manifest.fields ?? {})}.`).join(' ')}
+                              </span>
                             </span>
                           )}
                         </span>
@@ -253,7 +284,7 @@ function PlaylistEditor() {
                               className="size-9"
                               disabled={i === 0}
                               ref={focusOn('up')}
-                              onClick={() => move(orgId, playlist.id, i, i - 1, name)}
+                              onClick={(e) => showMove(e.currentTarget.closest('ol'), i - 1, () => move(orgId, playlist.id, i, i - 1, name))}
                               aria-label={`Move ${name} up`}
                             >
                               <ArrowUpIcon aria-hidden />
@@ -265,7 +296,7 @@ function PlaylistEditor() {
                               className="size-9"
                               disabled={i === draft.spotIds.length - 1}
                               ref={focusOn('down')}
-                              onClick={() => move(orgId, playlist.id, i, i + 1, name)}
+                              onClick={(e) => showMove(e.currentTarget.closest('ol'), i + 1, () => move(orgId, playlist.id, i, i + 1, name))}
                               aria-label={`Move ${name} down`}
                             >
                               <ArrowDownIcon aria-hidden />
@@ -274,7 +305,8 @@ function PlaylistEditor() {
                               type="button"
                               variant="ghost"
                               size="icon"
-                              className="size-9"
+                              // In the row's corner: its corner fits the row's, the row's radius less its padding (#383).
+                              className="size-9 rounded-[calc(var(--radius-lg)-(--spacing(1)))]"
                               onClick={() => remove(orgId, playlist.id, i, name)}
                               aria-label={`Remove ${name}`}
                             >
@@ -301,7 +333,7 @@ function PlaylistEditor() {
             <EditorSection title="Transition">
               <div className="flex flex-col gap-2">
                 {TRANSITIONS.map((o) => (
-                  <label key={o.type} className="flex gap-3 rounded-lg border p-3 has-checked:border-primary has-checked:bg-accent">
+                  <label key={o.type} className={choiceVariants({ className: 'flex gap-3 rounded-lg p-3' })}>
                     <input
                       type="radio"
                       name="playlist-transition"
@@ -334,7 +366,7 @@ function PlaylistEditor() {
                         onChange={(e) =>
                           change({ transition: { type: t.type, ms: Number.isNaN(e.target.valueAsNumber) ? 0 : Math.round(e.target.valueAsNumber * 1000) } })
                         }
-                        className="w-24 text-center font-mono"
+                        className="w-24 text-center tabular-nums"
                         aria-invalid={msBad || undefined}
                         aria-describedby="playlist-transition-help"
                       />
@@ -354,7 +386,7 @@ function PlaylistEditor() {
           </EditorFields>
         </form>
         {/* The form can be far longer than a spot's, so the stage stays in view beside it as it scrolls. */}
-        <div className="flex min-w-0 flex-[999_1_560px] flex-col bg-[#18181a] lg:sticky lg:top-0 lg:h-[calc(100dvh-8rem)] lg:self-start">
+        <div className={STAGE_COLUMN}>
           {draft.spotIds.length ? (
             <PlayerStage
               target={{ orgId, playlistId, orientation: search.o ?? 'landscape', brandKitId: search.kit }}
@@ -364,32 +396,30 @@ function PlaylistEditor() {
               onSearch={setSearch}
             />
           ) : (
-            <section aria-label="Live preview" className="flex flex-1 items-center justify-center bg-[#18181a] p-8 text-center text-[#c8c8c8]">
+            <section aria-label="Live preview" className="flex flex-1 items-center justify-center bg-stage p-8 text-center text-stage-muted-foreground">
               Add spots and the player plays the loop here.
             </section>
           )}
         </div>
       </div>
-      <AlertDialog open={deleting.open} onOpenChange={askDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {playlist.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Its draft and its published version are deleted; its spots stay in the library. A playlist a schedule plays, or the default playlist, cannot be
-              deleted.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
-            {deleting.error}
-          </p>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <Button variant="destructive" disabled={deleting.pending} onClick={() => void deletePlaylist(orgId, playlist.id)}>
-              {deleting.pending ? 'Deleting…' : 'Delete'}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <EditorDeleteQuestion open={deleting.open} onOpenChange={askDelete}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {playlist.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Its draft and its published version are deleted; its spots stay in the library. A playlist a schedule plays, or the default playlist, cannot be
+            deleted.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <p role="alert" className="text-sm font-medium text-destructive empty:hidden">
+          {deleting.error}
+        </p>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <Button variant="destructive" disabled={deleting.pending} onClick={() => void deletePlaylist(orgId, playlist.id)}>
+            {deleting.pending ? 'Deleting…' : 'Delete'}
+          </Button>
+        </AlertDialogFooter>
+      </EditorDeleteQuestion>
     </div>
   );
 }
@@ -434,7 +464,7 @@ function WherePlays({ orgId, playlist }: { orgId: string; playlist: PlaylistView
                 <strong className="font-semibold">{aimedAt(e, screens, groups)}</strong>{' '}
                 <span className="text-muted-foreground">· {e.takeover ? `takeover until ${timeWord((e.live ?? e).endsAt ?? '')}` : describeWhen(e)}</span>
               </span>
-              <span className="text-[13px] text-muted-foreground">{stateWord(e)}</span>
+              <span className="text-sm text-muted-foreground">{stateWord(e)}</span>
             </li>
           ))}
         </ul>

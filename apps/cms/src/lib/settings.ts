@@ -16,6 +16,21 @@ export type AlertChannel = NonNullable<ToolOutput<'get_alert_channels'>['slack']
 
 /** One row of `list_alert_deliveries`. */
 export type AlertDelivery = ToolOutput<'list_alert_deliveries'>['deliveries'][number];
+/** The org's own model provider (#261), or null while it uses the demo model. */
+export type AiProvider = NonNullable<ToolOutput<'get_ai_provider'>['provider']>;
+/** What the page calls each provider. */
+const AI_PROVIDER_NAMES: Record<AiProvider['provider'], string> = { anthropic: 'Anthropic', 'openai-compatible': 'The endpoint' };
+
+/** Why a test of the key could not reach the provider, in words. */
+export function aiTestProblem(problem: NonNullable<ToolOutput<'test_ai_provider'>['problem']>, provider: AiProvider['provider']): string {
+  const name = AI_PROVIDER_NAMES[provider];
+  if (problem === 'refused') return `${name} refused the key. It may have been revoked or rotated: replace it.`;
+  if (problem === 'busy') return `${name} is busy. Try again in a minute.`;
+  if (problem === 'blocked') return 'SignForge cannot reach that address: it must be public https, and must not redirect to another one.';
+  return provider === 'anthropic'
+    ? 'Anthropic did not answer. Try again.'
+    : 'The endpoint did not answer as an OpenAI-style API. Check its address, and try again.';
+}
 
 export const CHANNEL_LABELS: Record<AlertDelivery['channel'], string> = { email: 'Email', slack: 'Slack', webhook: 'Webhook' };
 
@@ -65,7 +80,16 @@ export const isAudience = (v: unknown): v is Audience => AUDIENCES.some((a) => a
 export const ALERTS: { kind: AlertKind; when: string; note: string }[] = [
   { kind: 'screen_offline', when: 'A screen goes offline, and when it is back', note: '' },
   { kind: 'publish_finished', when: 'A publish reaches every screen', note: 'Once every screen it switched plays it, checked every 5 minutes' },
-  { kind: 'agent_refused', when: 'An agent is refused', note: 'Sent once agents can connect' },
+  {
+    kind: 'agent_refused',
+    when: 'An agent is refused',
+    note: 'Refused for a scope it lacks 3 times in a clock hour; at most once an hour per agent, 5 per organization',
+  },
+  {
+    kind: 'publish_requested',
+    when: 'An agent or member asks to publish',
+    note: 'Emailed only to those who may approve it: owners, and editors while editors publish',
+  },
 ];
 
 /** What each role may do: the table on the Members page, matching ROLE_SCOPES, the org's choice of who publishes, and the tools' minimum roles. */

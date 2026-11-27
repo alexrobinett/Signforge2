@@ -1,8 +1,10 @@
 import {
   CalendarClockIcon,
+  InboxIcon,
   ImagesIcon,
   LayersIcon,
   LayoutDashboardIcon,
+  PaletteIcon,
   ListVideoIcon,
   MonitorIcon,
   PlugIcon,
@@ -13,7 +15,19 @@ import {
 } from 'lucide-react';
 
 export interface Section {
-  to: '/' | '/screens' | '/spots' | '/playlists' | '/schedule' | '/publishes' | '/assets' | '/integrations' | '/audit' | '/settings';
+  to:
+    | '/'
+    | '/screens'
+    | '/spots'
+    | '/playlists'
+    | '/schedule'
+    | '/publishes'
+    | '/approvals'
+    | '/assets'
+    | '/brand-kits'
+    | '/integrations'
+    | '/audit'
+    | '/settings';
   label: string;
   icon: LucideIcon;
   description: string;
@@ -41,14 +55,20 @@ export const SECTIONS: Section[] = [
     label: 'Spots',
     icon: LayersIcon,
     description: 'The pieces of content a screen shows: templates filled with your text, images, video or a web page.',
-    empty: { title: 'No spots yet', body: 'Spots you create from templates, images, video or web pages will be listed here.' },
+    empty: {
+      title: 'Make your first spot from a template',
+      body: 'A spot is what a screen shows: a template with your words and pictures, an image, or a web page. Pick a template to start.',
+    },
   },
   {
     to: '/playlists',
     label: 'Playlists',
     icon: ListVideoIcon,
     description: 'Ordered spots that play in a loop.',
-    empty: { title: 'No playlists yet', body: 'A playlist puts spots in order and sets how one gives way to the next. Make one, then add spots to it.' },
+    empty: {
+      title: 'Put your spots in a playlist',
+      body: 'A playlist plays spots in order, in a loop, and sets how one gives way to the next. Make one, then add spots to it.',
+    },
   },
   {
     to: '/schedule',
@@ -65,18 +85,36 @@ export const SECTIONS: Section[] = [
     empty: { title: 'Nothing published yet', body: 'Publish a spot or a playlist from its editor, and its rollout to each screen shows here.' },
   },
   {
+    to: '/approvals',
+    label: 'Approvals',
+    icon: InboxIcon,
+    description: 'Agents and members who may not publish asked to put these on screens. Nothing has changed on any screen yet.',
+    empty: {
+      title: 'Nothing is waiting for approval',
+      body: 'When an agent without the publish scope, or a member who may not publish, asks to put drafts on screens, the request waits here.',
+    },
+  },
+  {
     to: '/assets',
     label: 'Assets',
     icon: ImagesIcon,
     description: 'Images and video uploaded for your spots.',
     empty: { title: 'No assets yet', body: 'Uploaded images and video, checked for the screens they will play on, will be kept here.' },
   },
+  // Beside the content it dresses, not in Settings: a page of content work, so the sidebar marks it, not Settings (#381).
+  {
+    to: '/brand-kits',
+    label: 'Brand kits',
+    icon: PaletteIcon,
+    description: 'Your colours and fonts, which templates wear on screens.',
+    empty: { title: '', body: '' },
+  },
   {
     to: '/integrations',
     label: 'Integrations',
     icon: PlugIcon,
-    description:
-      'Data reaches screens through our server, never directly: each source is fetched and checked there, and screens get the new copy with their next sync. When a source is down, they keep the last good copy for a day.',
+    // One line (#368): what is here, and the fact that matters, that screens never fetch it themselves.
+    description: 'The data your spots show, fetched and checked by our server, never by the screens.',
     empty: { title: 'No data sources yet', body: 'Feeds, calendars and weather your spots read will be listed here with their health.' },
   },
   {
@@ -94,5 +132,8 @@ export const SECTIONS: Section[] = [
     empty: { title: '', body: '' },
   },
 ];
+
+/** An empty list's word to a viewer, who cannot make the first one. */
+export const ASK_AN_EDITOR = 'Ask an editor or owner to make one.';
 
 export const sectionFor = (to: Section['to']) => SECTIONS.find((s) => s.to === to)!;

@@ -5,21 +5,22 @@
  * (#181). Aimed at one screen, it says what that screen will play this week, and how to win where
  * it would lose.
  */
+import { Choice } from '~/components/ui/choice';
 import { LoaderCircleIcon, RotateCwIcon } from 'lucide-react';
 import { useId, type SubmitEvent } from 'react';
 import { Button } from '~/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '~/components/ui/dialog';
 import { Input } from '~/components/ui/input';
-import { NativeSelect } from '~/components/ui/select';
 import { DAYS } from '~/lib/days';
 import { useCanPublish } from '~/lib/live';
 import type { PlaylistView } from '~/lib/playlists';
 import { entryPreview, publishedEntries, type ScheduleEntryView } from '~/lib/schedule';
 import type { SpotView } from '~/lib/spots';
 import type { GroupView, ScreenView } from '~/lib/screen-types';
-import { cn } from '~/lib/utils';
 import { useAppStore } from '~/state/provider';
-import { DIALOG, entryProblems, entryWhen } from '~/state/schedule';
+import { DIALOG, entryProblems, entryWhen, everywhereAlways, firstDefaultOf } from '~/state/schedule';
+import { FirstDefaultChoice, FirstDefaultNote, UnpublishedDefault } from './first-default-note';
+import { PlaylistField } from './playlist-field';
 import { TargetPicker } from './target-picker';
 
 export function EntryDialog({
@@ -87,30 +88,33 @@ export function EntryDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && close()}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl" onCloseAutoFocus={onCloseAutoFocus}>
+      {/* Scroll padding the height of the stuck footer, so a field focused near the foot scrolls clear of it (#253). */}
+      <DialogContent className="max-h-[90dvh] scroll-pb-56 overflow-y-auto sm:max-w-xl" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>{draft.record ? 'Change schedule entry' : 'Schedule a playlist'}</DialogTitle>
           <DialogDescription>Days and times are each screen's own, in its time zone. Saved as a draft: Publish sends it.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={submit} className="grid gap-4">
-          <div className="grid gap-1.5">
-            <label htmlFor={`${id}-playlist`} className="text-sm font-medium">
-              Playlist
-            </label>
-            <NativeSelect id={`${id}-playlist`} value={d.playlistId} onChange={(e) => edit({ playlistId: e.target.value })}>
-              <option value="" disabled>
-                Choose a playlist
-              </option>
-              {playlists.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
+        <form onSubmit={submit} className="grid grid-cols-1 gap-4">
+          <PlaylistField id={`${id}-playlist`} value={d.playlistId} playlists={playlists} onPick={(playlistId) => edit({ playlistId })} />
+          {/* Near the top, where it is seen before Save and publish (#243). */}
+          {canPublish &&
+            (everywhereAlways(d) ? (
+              <FirstDefaultNote playlists={playlists} playlistId={d.playlistId} action="Save and publish" />
+            ) : (
+              <FirstDefaultChoice
+                playlists={playlists}
+                value={firstDefaultOf(d)}
+                changing={d.firstDefault !== undefined}
+                onChange={(firstDefault) => edit({ firstDefault })}
+                action="Save and publish"
+              />
+            ))}
+          {canPublish && (
+            <UnpublishedDefault playlists={playlists} checked={d.publishDefault === true} onChange={(publishDefault) => edit({ publishDefault })} />
+          )}
           <TargetPicker label="Plays on" value={d} screens={screens} groups={groups} onPick={edit} />
           {preview && (
-            <section aria-label="What this screen will play" className="grid gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">
+            <section aria-label="What this screen will play" className="grid min-w-0 gap-2 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm wrap-anywhere">
               <p role="status">
                 <span className="font-medium">This week, {screen?.name}:</span> {preview.text}
               </p>
@@ -132,19 +136,15 @@ export function EntryDialog({
               {DAYS.map(([day, short, long]) => {
                 const on = d.days.includes(day);
                 return (
-                  <button
+                  <Choice
                     key={day}
-                    type="button"
-                    aria-pressed={on}
+                    selected={on}
                     onClick={() => edit({ days: on ? d.days.filter((x) => x !== day) : [...d.days, day] })}
-                    className={cn(
-                      'h-10 min-w-11 rounded-md border px-2 text-xs font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                      on ? 'border-primary bg-primary text-primary-foreground' : 'border-border-strong bg-card text-foreground hover:bg-accent',
-                    )}
+                    className="h-10 min-w-11 rounded-md px-2 text-xs font-medium"
                   >
                     <span aria-hidden>{short}</span>
                     <span className="sr-only">{long}</span>
-                  </button>
+                  </Choice>
                 );
               })}
             </div>
@@ -204,7 +204,8 @@ export function EntryDialog({
                   : `${playlist.name} and this entry: the playlist has never been published.`}
             </p>
           )}
-          <DialogFooter>
+          {/* Stuck to the dialog's foot (#253): on a phone its fields scroll, and Save would be below them. The negative margins span the dialog's padding. */}
+          <DialogFooter className="sticky -bottom-6 -mx-6 -mb-6 border-t bg-popover px-6 pt-4 pb-6">
             <Button type="button" variant="outline" onClick={close}>
               Cancel
             </Button>
@@ -234,7 +235,7 @@ function Field({ label, type, value, onChange }: { label: string; type: 'time' |
         step={type === 'time' ? 60 : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full font-mono"
+        className="w-full tabular-nums"
       />
     </div>
   );

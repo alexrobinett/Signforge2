@@ -22,15 +22,14 @@ async function pairScreen(page: Page, name: string, address: string) {
 }
 
 test('add three selected screens to a group at once, rename a group, refuse to delete one an entry aims at, and retire a screen', async ({ page }) => {
-  test.setTimeout(120_000);
   await signInAs(page, `e2e-groups-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Harbor Coffee');
+  await createOrg(page, 'Harbor Coffee', ADDRESS);
   const left = await pairScreen(page, 'Drive-thru L', '192.0.2.72');
   await pairScreen(page, 'Drive-thru R', '192.0.2.73');
   await pairScreen(page, 'Menu board', '192.0.2.74');
   const lobby = await pairScreen(page, 'Lobby', '192.0.2.75');
-  const { group: drive } = (await tool(page, 'create_group', { name: 'Drive' })) as { group: { id: string } };
-  const { group: north } = (await tool(page, 'create_group', { name: 'North', screenIds: [lobby.id] })) as { group: { id: string } };
+  const { group: drive } = (await tool(page, 'save_group', { name: 'Drive' })) as { group: { id: string } };
+  const { group: north } = (await tool(page, 'save_group', { name: 'North', screenIds: [lobby.id] })) as { group: { id: string } };
   // Drive-thru L syncs with nothing published to it: it needs you.
   const synced = await page.request.post(`${DEVICE}/sync`, {
     headers: { authorization: `Bearer ${left.credential}` },
@@ -53,7 +52,7 @@ test('add three selected screens to a group at once, rename a group, refuse to d
   await hydrated(page);
   const adds: string[] = [];
   page.on('request', (r) => {
-    if (r.url().endsWith('/api/tools/add_group_members')) adds.push(r.postData() ?? '');
+    if (r.url().endsWith('/api/tools/save_group')) adds.push(r.postData() ?? '');
   });
   for (const name of ['Drive-thru L', 'Drive-thru R', 'Menu board']) await page.getByLabel(`Select ${name}`).check();
   const bar = page.getByRole('region', { name: 'Selected screens' });
@@ -92,8 +91,8 @@ test('add three selected screens to a group at once, rename a group, refuse to d
   await expect(groups.getByRole('rowheader', { name: 'Drive-thru' })).toBeVisible();
 
   // An entry aims at North: its delete is refused, with the entry shown, and North stays.
-  const { playlist } = (await tool(page, 'create_playlist', { name: 'Breakfast' })) as { playlist: { id: string } };
-  await tool(page, 'create_schedule_entry', { playlistId: playlist.id, target: 'group', groupId: north.id, from: '06:00', to: '10:30' });
+  const { playlist } = (await tool(page, 'save_playlist', { name: 'Breakfast' })) as { playlist: { id: string } };
+  await tool(page, 'save_schedule_entry', { playlistId: playlist.id, target: 'group', groupId: north.id, from: '06:00', to: '10:30' });
   await page.reload();
   await hydrated(page);
   await expect(groups.getByRole('row', { name: /North/ })).toContainText('1 entry');
@@ -162,24 +161,23 @@ test('add three selected screens to a group at once, rename a group, refuse to d
 });
 
 test('groups and screens in name order wherever they are listed, though their ids run the other way (#180)', async ({ page }) => {
-  test.setTimeout(120_000);
   await signInAs(page, `e2e-group-order-${Date.now()}@example.com`, '192.0.2.76');
-  await createOrg(page, 'Order Deli');
+  await createOrg(page, 'Order Deli', '192.0.2.76');
   // Names given after the ids are known, so each list's id order is the reverse of its name order, and plain string
   // order puts Screen 10 before Screen 2.
   const pairs = [await pairScreen(page, 'First', '192.0.2.77'), await pairScreen(page, 'Second', '192.0.2.78')].map((s) => s.id).sort();
-  await tool(page, 'rename_screen', { screenId: pairs[0], name: 'Screen 10' });
-  await tool(page, 'rename_screen', { screenId: pairs[1], name: 'Screen 2' });
+  await tool(page, 'update_screen', { screenId: pairs[0], name: 'Screen 10' });
+  await tool(page, 'update_screen', { screenId: pairs[1], name: 'Screen 2' });
   const made = [];
-  for (const name of ['One', 'Two']) made.push(((await tool(page, 'create_group', { name, screenIds: pairs })) as { group: { id: string } }).group.id);
+  for (const name of ['One', 'Two']) made.push(((await tool(page, 'save_group', { name, screenIds: pairs })) as { group: { id: string } }).group.id);
   const [zeta, alpha] = made.sort();
-  await tool(page, 'rename_group', { groupId: zeta, name: 'Zeta' });
-  await tool(page, 'rename_group', { groupId: alpha, name: 'Alpha' });
+  await tool(page, 'save_group', { groupId: zeta, name: 'Zeta' });
+  await tool(page, 'save_group', { groupId: alpha, name: 'Alpha' });
   const colors = { primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' };
   const kits = [];
   for (const name of ['Kit A', 'Kit B'])
     kits.push(
-      ((await tool(page, 'create_brand_kit', { name, colors, idempotencyKey: `${name.replace(' ', '-')}-${Date.now()}` })) as { brandKit: { id: string } })
+      ((await tool(page, 'save_brand_kit', { name, colors, idempotencyKey: `${name.replace(' ', '-')}-${Date.now()}` })) as { brandKit: { id: string } })
         .brandKit.id,
     );
   await tool(page, 'assign_brand_kit', { brandKitId: kits[0], groupId: alpha });
@@ -191,6 +189,10 @@ test('groups and screens in name order wherever they are listed, though their id
   await hydrated(page);
   await page.getByRole('button', { name: 'Pair a screen' }).click();
   const pair = page.getByRole('dialog', { name: 'Pair a screen' });
+  // No heading above its display hours, so their legend shows (#374).
+  await expect(pair.getByText('Display hours', { exact: true })).toBeVisible();
+  // Shown at its size, not screen-reader only (a 1 px box).
+  expect((await pair.getByText('Display hours', { exact: true }).boundingBox())?.height).toBeGreaterThan(8);
   await expect(pair.getByRole('group', { name: 'Groups' }).getByRole('checkbox')).toHaveCount(2);
   expect(await labels(pair.getByRole('group', { name: 'Groups' }).getByRole('checkbox'))).toEqual(['Alpha', 'Zeta']);
   await page.keyboard.press('Escape');
@@ -219,7 +221,238 @@ test('groups and screens in name order wherever they are listed, though their id
   await page.keyboard.press('Escape');
 
   // A brand kit's conflict alert: both screens are in groups that chose different kits.
-  await page.goto(`/settings/brand-kits/${kits[0]}`);
+  await page.goto(`/brand-kits/${kits[0]}`);
   await hydrated(page);
   await expect(page.getByText('Screen 2, Screen 10 are in groups that chose different kits')).toBeVisible();
+});
+
+test('a smart group is shown where a screen is in it, never offered to tick by hand (#186, review of #608)', async ({ page }) => {
+  await signInAs(page, `e2e-smart-groups-${Date.now()}@example.com`, '192.0.2.201');
+  await createOrg(page, 'Smart Deli', '192.0.2.201');
+  const { id } = await pairScreen(page, 'Bayside door', '192.0.2.202');
+  await tool(page, 'update_screen_labels', { screenIds: [id], set: { store: 'bayside' } });
+  await tool(page, 'save_group', { name: 'Listed', idempotencyKey: `listed-${Date.now()}` });
+  await tool(page, 'save_group', {
+    name: 'Bayside',
+    selector: { all: [{ key: 'store', op: 'eq', values: ['bayside'] }] },
+    idempotencyKey: `bayside-${Date.now()}`,
+  });
+  const ticks = (where: ReturnType<Page['getByRole']>) => where.getByRole('group', { name: 'Groups' }).getByRole('checkbox');
+
+  // Its page names the group its rule puts it in, and its settings offer only the listed one.
+  await page.goto(`/screens/${id}`);
+  await hydrated(page);
+  await expect(page.getByText('group Bayside')).toBeVisible();
+  await page.getByRole('button', { name: /More actions/ }).click();
+  await page.getByRole('menuitem', { name: 'Settings and groups…' }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(ticks(settings)).toHaveCount(1);
+  await expect(ticks(settings)).toHaveAccessibleName('Listed');
+  await page.keyboard.press('Escape');
+
+  // The pair form and the selection bar offer the listed group alone too.
+  await page.goto('/screens?view=table');
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Pair a screen' }).click();
+  const pair = page.getByRole('dialog', { name: 'Pair a screen' });
+  await expect(ticks(pair)).toHaveCount(1);
+  await expect(ticks(pair)).toHaveAccessibleName('Listed');
+  await page.keyboard.press('Escape');
+  await page.getByLabel('Select Bayside door').check();
+  await page.getByRole('region', { name: 'Selected screens' }).getByRole('button', { name: 'Add to group' }).click();
+  await expect(page.getByRole('menuitem')).toHaveText(['Listed']);
+});
+
+/** With E2E_SCREENSHOTS: light and dark at the desktop's width, then at a phone's (390 px). */
+async function shotsBoth(page: Page, name: string) {
+  if (!process.env.E2E_SCREENSHOTS) return;
+  const size = page.viewportSize()!;
+  await shots(page, `${name}-desktop`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shots(page, `${name}-390`);
+  await page.setViewportSize(size);
+}
+
+test('a smart group made from a rule, the screens it matches seen before it is saved, and whom it reaches (#186)', async ({ page }) => {
+  await signInAs(page, `e2e-group-rule-${Date.now()}@example.com`, '192.0.2.203');
+  await createOrg(page, 'Rule Deli', '192.0.2.203');
+  const door = await pairScreen(page, 'North door', '192.0.2.204');
+  const till = await pairScreen(page, 'North till', '192.0.2.205');
+  const south = await pairScreen(page, 'South door', '192.0.2.206');
+  await tool(page, 'update_screen_labels', { screenIds: [door.id, till.id], set: { region: 'north' } });
+  await tool(page, 'update_screen_labels', { screenIds: [south.id], set: { region: 'south', store: '0142' } });
+  await tool(page, 'save_playlist', { name: 'Storm closure', transition: { type: 'cut' } });
+
+  // New group: a rule, its screens matched as the conditions are chosen.
+  await page.goto('/settings/screens');
+  await hydrated(page);
+  await page.getByRole('button', { name: 'New group…' }).click();
+  const made = page.getByRole('dialog', { name: 'New group' });
+  await made.getByLabel('Name').fill('North');
+  await made.getByRole('radio', { name: /Screens that match/ }).click();
+  const first = made.getByRole('group', { name: 'Condition 1' });
+  await first.getByLabel('Label').selectOption('region');
+  await first.getByLabel('Value').fill('NORTH');
+  const matched = made.getByRole('region', { name: 'Matching screens' });
+  await expect(matched).toContainText('Matches 2 screens now');
+  await expect(matched).toContainText('North door, North till');
+  // A second condition no screen meets with the first: it says none matches, and why when no screen meets it at all.
+  await made.getByRole('button', { name: 'Add a condition' }).click();
+  const second = made.getByRole('group', { name: 'Condition 2' });
+  await second.getByLabel('Label').selectOption('store');
+  await second.getByLabel('Compared').selectOption({ label: 'is one of' });
+  await second.getByRole('checkbox', { name: '0142' }).check();
+  await expect(matched.getByRole('alert')).toHaveText('Matches no screen now.');
+  await second.getByLabel('Compared').selectOption({ label: 'is not set' });
+  await expect(matched).toContainText('Matches 2 screens now');
+  await axe(page);
+  await shotsBoth(page, '186-new-smart-group');
+  await made.getByRole('button', { name: 'Create group' }).click();
+  await expect(made).toBeHidden();
+
+  // The table marks it a rule, and its menu changes the rule rather than ticking screens.
+  const groups = page.getByRole('region', { name: 'Groups' });
+  await expect(groups.getByRole('row', { name: /North/ })).toContainText('Rule');
+  await expect(groups.getByRole('row', { name: /North/ })).toContainText('2 screens');
+  await groups.getByRole('button', { name: 'Change North' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Members…' })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Rule…' }).click();
+  const rule = page.getByRole('dialog', { name: 'North’s rule' });
+  await expect(rule.getByRole('group', { name: 'Condition 2' }).getByLabel('Compared')).toHaveValue('missing');
+  await rule.getByRole('button', { name: 'Remove condition 2' }).click();
+  await rule.getByRole('group', { name: 'Condition 1' }).getByLabel('Value').fill('south');
+  await expect(rule.getByRole('region', { name: 'Matching screens' })).toContainText('Matches 1 screen now');
+  await rule.getByRole('button', { name: 'Save' }).click();
+  await expect(rule).toBeHidden();
+  await expect(groups.getByRole('row', { name: /North/ })).toContainText('1 screen');
+  // Its conditions are text in the row, not a hover's.
+  await expect(groups.getByRole('row', { name: /North/ })).toContainText('region is south');
+  // A rule on a label no screen has any more opens with that label still chosen.
+  await tool(page, 'save_group', { name: 'Zoned', selector: { all: [{ key: 'zone', op: 'eq', values: ['a'] }] }, idempotencyKey: `zoned-${Date.now()}` });
+  await page.reload();
+  await hydrated(page);
+  await groups.getByRole('button', { name: 'Change Zoned' }).click();
+  await page.getByRole('menuitem', { name: 'Rule…' }).click();
+  const zoned = page.getByRole('dialog', { name: 'Zoned’s rule' });
+  await expect(zoned.getByRole('group', { name: 'Condition 1' }).getByLabel('Label')).toHaveValue('zone');
+  await expect(zoned.getByRole('group', { name: 'Condition 1' }).getByLabel('Value')).toHaveValue('a');
+  await page.keyboard.press('Escape');
+  await shotsBoth(page, '186-groups-rule-badge');
+
+  // A takeover's picker: the group marked a rule, and whom it reaches when sent.
+  await page.goto('/schedule');
+  await hydrated(page);
+  await page.getByRole('button', { name: 'Take over screens' }).click();
+  const takeover = page.getByRole('dialog', { name: 'Take over screens' });
+  await takeover.getByRole('combobox', { name: 'Plays on' }).click();
+  const picker = page.getByRole('dialog', { name: 'Plays on' });
+  await expect(picker.getByRole('option', { name: /^North Rule/ })).toContainText('Rule');
+  await picker.getByRole('option', { name: /^North Rule/ }).click();
+  await expect(takeover.getByRole('combobox', { name: 'Plays on' })).toHaveAccessibleDescription('Reaches this screen now: South door');
+  await shotsBoth(page, '186-takeover-reach');
+});
+
+test("save a filtered view as a smart group, then schedule a playlist to it (#186's done when)", async ({ page }) => {
+  await signInAs(page, `e2e-save-as-group-${Date.now()}@example.com`, '192.0.2.207');
+  await createOrg(page, 'Filter Deli', '192.0.2.207');
+  const door = await pairScreen(page, 'North door', '192.0.2.208');
+  const kiosk = await pairScreen(page, 'North kiosk', '192.0.2.209');
+  const south = await pairScreen(page, 'South door', '192.0.2.210');
+  await tool(page, 'update_screen_labels', { screenIds: [door.id, kiosk.id], set: { region: 'north' } });
+  await tool(page, 'update_screen_labels', { screenIds: [kiosk.id], set: { type: 'kiosk' } });
+  await tool(page, 'update_screen_labels', { screenIds: [south.id], set: { region: 'south' } });
+  await tool(page, 'save_playlist', { name: 'Breakfast', transition: { type: 'cut' } });
+
+  // The view filtered to region north, with a search the rule leaves out.
+  await page.goto('/screens?view=table&l=region:north&q=door');
+  await hydrated(page);
+  await expect(page.getByRole('button', { name: 'Save as group…' })).toBeVisible();
+  await shotsBoth(page, '186-filter-actions');
+  await page.getByRole('button', { name: 'Schedule a playlist for these…' }).click();
+  const save = page.getByRole('dialog', { name: 'Schedule a playlist for these screens' });
+  await expect(save.getByRole('list', { name: 'Its rule' })).toHaveText('region: north');
+  await expect(save).toContainText('Matches 2 screens now. The search and the group and status filters are not part of it.');
+  await save.getByLabel('Name').fill('North');
+  await axe(page);
+  await shotsBoth(page, '186-save-as-group');
+  await save.getByRole('button', { name: 'Save and schedule…' }).click();
+
+  // Saved, and the entry dialog opened aimed at it: a playlist chosen, the entry saved as a draft.
+  await expect(save).toBeHidden();
+  const entry = page.getByRole('dialog', { name: 'Schedule a playlist' });
+  await expect(entry.getByRole('combobox', { name: 'Plays on' })).toHaveText('North');
+  await expect(entry.getByRole('combobox', { name: 'Plays on' })).toHaveAccessibleDescription('Its rule matches 2 screens now: North door, North kiosk');
+  await entry.getByLabel('Playlist', { exact: true }).selectOption({ label: 'Breakfast' });
+  await entry.getByRole('button', { name: 'Save draft' }).click();
+  await expect(entry).toBeHidden();
+  const groups = (await tool(page, 'list_groups', {})) as { groups: { name: string; selector: unknown; screenIds: string[] }[] };
+  expect(groups.groups).toEqual([
+    expect.objectContaining({ name: 'North', selector: { all: [{ key: 'region', op: 'eq', values: ['north'] }] }, screenIds: [door.id, kiosk.id].toSorted() }),
+  ]);
+  await page.goto('/schedule');
+  await hydrated(page);
+  const entries = page.getByRole('region', { name: 'Entries' }).getByRole('listitem');
+  await expect(entries).toHaveCount(1);
+  await expect(entries.first()).toContainText('Group North · Always · Draft, not published');
+});
+
+test('the Publish button says which screens would change and why, and a publish records whom each group reached (#187)', async ({ page }) => {
+  await signInAs(page, `e2e-publish-preview-${Date.now()}@example.com`, '192.0.2.244');
+  await createOrg(page, 'Preview Deli', '192.0.2.244');
+  const door = await pairScreen(page, 'North door', '192.0.2.245');
+  const till = await pairScreen(page, 'Till', '192.0.2.246');
+  await pairScreen(page, 'South door', '192.0.2.247');
+  await tool(page, 'update_screen_labels', { screenIds: [door.id], set: { region: 'north' } });
+  await tool(page, 'update_screen_labels', { screenIds: [till.id], set: { region: 'south' } });
+  const { playlist } = (await tool(page, 'save_playlist', { name: 'Breakfast', transition: { type: 'cut' } })) as { playlist: { id: string } };
+  await tool(page, 'set_default_playlist', { playlistId: playlist.id });
+  const { group } = (await tool(page, 'save_group', {
+    name: 'North',
+    selector: { all: [{ key: 'region', op: 'eq', values: ['north'] }] },
+    idempotencyKey: `north-${Date.now()}`,
+  })) as { group: { id: string } };
+  await tool(page, 'publish', {});
+
+  // A draft entry for the smart group: the sidebar's Publish says which screen it would change, and why.
+  await tool(page, 'save_schedule_entry', { playlistId: playlist.id, target: 'group', groupId: group.id, priority: 1, idempotencyKey: `entry-${Date.now()}` });
+  await page.goto('/screens');
+  await hydrated(page);
+  await page.getByRole('button', { name: '1 unpublished change · Publish' }).click();
+  const ask = page.getByRole('alertdialog', { name: 'Publish 1 unpublished change?' });
+  await expect(ask).toContainText('1 screen would change');
+  await expect(ask.getByRole('list', { name: 'Screens that would change' })).toHaveText('North door: entry Breakfast added');
+  await axe(page);
+  await shotsBoth(page, '187-publish-preview');
+  await ask.getByRole('button', { name: 'Publish' }).click();
+  await expect(ask).toBeHidden();
+
+  // Till labelled north on its page: the toast says what the next publish would change, and its Publish asks with the preview.
+  await page.goto(`/screens/${till.id}`);
+  await hydrated(page);
+  await page.getByRole('region', { name: 'Labels' }).getByRole('button', { name: 'Edit labels' }).click();
+  const labels = page.getByRole('dialog', { name: 'Labels' });
+  await labels.getByLabel('Label 1 value').fill('north');
+  await labels.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Takes effect at the next publish: 1 screen would change.')).toBeVisible();
+  await page.getByRole('button', { name: 'Publish…' }).click();
+  const moved = page.getByRole('alertdialog', { name: 'Publish the group changes?' });
+  await expect(moved).toContainText('1 screen would change · +1 join North');
+  await expect(moved.getByRole('list', { name: 'Screens that would change' })).toHaveText('Till: joined North');
+  await shotsBoth(page, '187-publish-group-changes');
+  await moved.getByRole('button', { name: 'Publish' }).click();
+  await expect(moved).toBeHidden();
+
+  // The Publishes page lists whom each group reached at that publish.
+  await page.goto('/publishes');
+  await hydrated(page);
+  const reached = page.getByRole('region', { name: 'Whom each group reached' });
+  await expect(reached.getByRole('listitem')).toHaveCount(1);
+  await expect(reached.getByRole('listitem').first()).toContainText('North');
+  await expect(reached.getByRole('listitem').first()).toContainText('Rule');
+  await expect(reached.getByRole('listitem').first()).toContainText('2 screens');
+  await expect(reached.getByRole('listitem').first()).toContainText('North door and Till');
+  // Its history row says which group it was for, as no draft changed.
+  await expect(page.getByRole('region', { name: 'Publish history' }).getByRole('listitem').first()).toContainText('Screens moved in or out of North');
+  await axe(page);
+  await shotsBoth(page, '187-groups-reached');
 });

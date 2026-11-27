@@ -1,14 +1,15 @@
 /**
  * SignForge API Worker. Three route trees, one per kind of caller, and no credential is accepted
  * on another's tree: `/api` for CMS users (session cookie), `/v1/device` for screens (bearer
- * credential), `/mcp` for agents (OAuth, Milestone 4). See docs/backend-plan.md. `/admin` takes
- * `sf push` uploads behind a deploy secret (src/admin) and publishes through the tool registry.
+ * credential), `/mcp` for agents (OAuth access token, src/mcp). See docs/backend-plan.md. `/admin` takes
+ * `sf push` uploads behind a deploy secret (src/admin) and publishes through the tool registry. `/v1/player-releases`
+ * takes the player release workflows' register and promote behind a secret of its own (src/releases, #628).
  * Two queue consumers: one tells the screens a publish switched (src/publish.ts), the other stores
- * the photos of news feeds' stories that the poller queues (src/data/images.ts).
+ * the photos of news feeds' stories that the poller queues (src/data/feed-photos.ts).
  * Two Cron Triggers: the data-source poller (src/data) and the offline alert check (src/alerts.ts) with the
  * alert deliveries it queues (src/deliveries.ts), whose first run each UTC day also expires old idempotency
- * keys, audit rows and alert deliveries (packages/db retention.ts). The poller's 01:00 UTC run
- * forgets unneeded feed photos (src/data/images.ts).
+ * keys, audit rows and alert deliveries (packages/db retention.ts), and prunes OAuth clients nobody consented to. The poller's run at half
+ * past each hour sweeps unneeded feed photos (src/data/feed-photos.ts), and at 02:00 UTC what an org stores that nothing needs (src/storage.ts).
  *
  * Each tree is its own Hono app with its own authentication middleware, mounted here. Nothing
  * authenticates at this level, so a tree accepts only what its own middleware checks.
@@ -18,10 +19,20 @@ import { MANIFEST_SCHEMA } from '@signforge/contract';
 import { admin } from './admin';
 import { device } from './device';
 import { createApi } from './api';
-import { AUDIT_ROWS_PER_RUN, expireAlertDeliveries, expireAuditRows, expireIdempotencyKeys } from '@signforge/db';
+import { mcp } from './mcp';
+import { releases } from './releases';
+import {
+  AUDIT_ROWS_PER_RUN,
+  expireAlertDeliveries,
+  expireAuditRows,
+  expireIdempotencyKeys,
+  expirePublishRequests,
+  pruneUnconsentedClients,
+} from '@signforge/db';
 import { checkScreenAlerts, finishRollouts } from './alerts';
 import { deliverAlerts } from './deliveries';
-import { type FeedImageJob, forgetFeedImages, storeFeedImages } from './data/images';
+import { type FeedImageJob, photoDeps, r2PhotoBlobs, storeFeedImages, sweepFeedPhotos } from './data/feed-photos';
+import { sweepStorage } from './storage';
 import { pollDataSources } from './data/poller';
 import { refuseSession } from './auth/guards';
 import { emailSenderFor } from './email';
@@ -42,21 +53,32 @@ app.get('/health', (c) => c.json({ ok: true, environment: c.env.ENVIRONMENT, ver
 app.route('/v1/device', device);
 app.route('/api', createApi());
 app.route('/admin', admin);
+app.route('/v1/player-releases', releases);
+app.route('/', mcp);
 
 const FIVE_MIN_MS = 5 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
-const FEED_IMAGE_CLEANUP_MS = 60 * 60_000;
+const HOUR_MS = 60 * 60_000;
+/** The feed photos' sweep's minute: half past every hour, each run taking a bounded share of what is due (review of #497). */
+const FEED_IMAGE_CLEANUP_MS = 30 * 60_000;
+/** The storage sweep's minute (#235): 02:00 UTC, its own invocation as the feed photos' is. */
+const STORAGE_SWEEP_MS = 2 * 60 * 60_000;
 
 /** Each Cron Trigger's job, by its schedule as written in wrangler.jsonc `triggers`. */
 const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
   // Give feed cleanup its own invocation without exceeding the account's five Free Cron Triggers.
-  '* * * * *': (env, now) => (now % DAY_MS === FEED_IMAGE_CLEANUP_MS ? forgetFeedImages(env, now) : pollDataSources(env, { now })),
+  '* * * * *': (env, now) =>
+    now % HOUR_MS === FEED_IMAGE_CLEANUP_MS
+      ? sweepFeedPhotos(env.DB, r2PhotoBlobs(env.BLOBS), now)
+      : now % DAY_MS === STORAGE_SWEEP_MS
+        ? sweepStorage(env.DB, env.BLOBS, () => Date.now())
+        : pollDataSources(env, { now }),
   // The offline alert check and the finished rollouts (src/alerts.ts), every 5 minutes: screens sync that
   // often, so a shorter period finds nothing new. Then the alert deliveries to Slack and webhooks (src/deliveries.ts), the new ones and the retries due,
   // started once the check has queued its alerts and whether or not it failed, so neither holds up the other.
-  // The midnight run spends up to 21 D1 calls on retention, 14 on deliveries, and 4 on finding
-  // alerts and rollouts. One write per check leaves room for their context reads and fallback writes
-  // (up to 5 calls each, 49 total). The remaining work is due again at 00:05.
+  // The midnight run spends up to 21 D1 calls on retention, 1 on pruning OAuth clients nobody consented to
+  // (M4-04), 14 on deliveries, and 4 on finding alerts and rollouts. One write per check leaves room for their
+  // context reads and fallback writes (up to 5 calls each, 50 total). The remaining work is due again at 00:05.
   // Settled, not raced: a failed retention delete must not end the run before an alert's email goes.
   '*/5 * * * *': async (env, now) => {
     const daily = now % DAY_MS < FIVE_MIN_MS;
@@ -68,7 +90,15 @@ const CRON_JOBS: Record<string, (env: Env, now: number) => Promise<unknown>> = {
       // Claimed at the time it claims: the checks may have taken minutes, and a lease counted from the
       // schedule could run out before the sends do, letting the next run send them again.
       Promise.allSettled(checks).then(() => deliverAlerts(env, email, { now: Date.now() })),
-      ...(daily ? [expireAuditRows(env.DB, now), expireIdempotencyKeys(env.DB, now), expireAlertDeliveries(env.DB, now)] : []),
+      ...(daily
+        ? [
+            expireAuditRows(env.DB, now),
+            expireIdempotencyKeys(env.DB, now),
+            expireAlertDeliveries(env.DB, now),
+            pruneUnconsentedClients(env.DB, now),
+            expirePublishRequests(env.DB, now),
+          ]
+        : []),
     ]);
     const audit = results[checks.length + 1];
     if (audit?.status === 'fulfilled' && audit.value === AUDIT_ROWS_PER_RUN)
@@ -87,7 +117,7 @@ const isNotices = (batch: MessageBatch<PublishNotice | FeedImageJob>): batch is 
 export default {
   fetch: app.fetch,
   queue: async (batch, env) => {
-    if (isFeedImages(batch)) return storeFeedImages(batch, env);
+    if (isFeedImages(batch)) return storeFeedImages(batch, env.DB, photoDeps(env, Date.now()));
     if (isNotices(batch)) return deliverNotices(batch, env);
     throw new Error(`No consumer for queue "${batch.queue}"`);
   },
@@ -101,4 +131,4 @@ export default {
 // Durable Object classes are exported from the Worker's entry point.
 export { ScreenObject } from './device/screen-object';
 export { AgentGrantObject } from './agents/grant-object';
-export { OrgObject } from './publish';
+export { OrgObject } from './org-object';

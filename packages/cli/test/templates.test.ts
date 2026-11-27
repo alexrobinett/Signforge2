@@ -13,7 +13,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { templateKey } from '@signforge/contract';
 import { describe, expect, it } from 'vitest';
-import { buildTemplate } from '../src/template';
+import { buildTemplate } from '@signforge/template-build';
 
 const dir = join(import.meta.dirname, '../../../templates');
 const templates = readdirSync(dir, { withFileTypes: true })
@@ -31,6 +31,18 @@ describe.each(templates)('template %s', (name) => {
     const manifest = JSON.parse(readFileSync(join(dir, name, 'template.json'), 'utf8')) as { fields: Record<string, { type: string; default?: unknown }> };
     for (const [key, field] of Object.entries(manifest.fields)) {
       if (field.type === 'color') expect(field.default, key).toMatch(/^\$brand\.[a-zA-Z]+$/);
+    }
+  });
+
+  it('carries the OFL, and the copyright of each font its style.css inlines, into its bundle, as the licence asks of every copy', async () => {
+    const { html } = await buildTemplate(join(dir, name));
+    if (!html.includes('data:font/woff2;')) return;
+    expect(html).toContain('SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007');
+    expect(html).toContain('5) The Font Software, modified or unmodified, in part or in whole,');
+    const css = readFileSync(join(dir, name, 'style.css'), 'utf8');
+    for (const [, pkg] of css.matchAll(/node_modules\/(@fontsource(?:-variable)?\/[a-z0-9-]+)\//g)) {
+      const licence = readFileSync(join(dir, name, 'node_modules', pkg, 'LICENSE'), 'utf8');
+      expect(html, pkg).toContain(licence.slice(0, licence.indexOf(')') + 1));
     }
   });
 
@@ -53,7 +65,9 @@ it('changes no template bundle without a new version', async () => {
       "bytes. Bump the template's version (template.json and package.json) and record the new key and hash in place of the old. " +
       "If the template's own files did not change, something else reached its bundle (docs/template-spec.md, Rules).",
   ).toEqual(recorded);
-});
+  // It builds every template while CI runs up to 13 template test tasks on two cores, and it went past the
+  // default 5 s there (#277, run 45117900937).
+}, 30_000);
 
 it('checks what a stylesheet that style.css imports brings into the bundle: network URLs and colour literals', async () => {
   // Under this directory, so main.ts resolves the SDK as a template's own does.

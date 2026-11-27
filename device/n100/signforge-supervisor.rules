@@ -1,0 +1,12 @@
+// The device supervisor (supervisor.py, user signforge) may restart the kiosk when the player stops
+// beating, and nothing else. deploy-n100.sh installs it in /etc/polkit-1/rules.d/.
+polkit.addRule(function (action, subject) {
+  if (
+    action.id === "org.freedesktop.systemd1.manage-units" &&
+    action.lookup("unit") === "signforge-kiosk.service" &&
+    action.lookup("verb") === "restart" &&
+    subject.user === "signforge"
+  ) {
+    return polkit.Result.YES;
+  }
+});

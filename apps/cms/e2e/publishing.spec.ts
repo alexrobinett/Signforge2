@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, hydrated, shots, signInAs, stageShows, tool } from './helpers';
+import { axe, createOrg, d1, hydrated, orgOf, shots, signInAs, stageShows, testScreenToPair, tool, toolResponse } from './helpers';
+import { API_PORT } from './servers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.51';
@@ -22,21 +23,20 @@ const playing = (tab: Page) =>
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-publishing-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Gallery', ADDRESS);
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
   ({
     spot: { id: spotId },
-  } = await tool(page, 'create_spot', { name: 'Deal', kind: 'template', templateVersionId: clock, durationMs: 10_000, data: { message: 'Two for $4' } }));
+  } = await tool(page, 'save_spot', { name: 'Deal', kind: 'template', templateVersionId: clock, durationMs: 10_000, data: { message: 'Two for $4' } }));
   ({
     playlist: { id: playlistId },
-  } = await tool(page, 'create_playlist', { name: 'Main', transition: { type: 'cut' }, spotIds: [spotId] }));
+  } = await tool(page, 'save_playlist', { name: 'Main', transition: { type: 'cut' }, spotIds: [spotId] }));
 
   // A test screen, paired by its code as the Screens page pairs one.
-  screen = await (await browser.newContext()).newPage();
-  await screen.goto('/test-screen/?kind=browser&content=/v1/device');
-  await expect.poll(async () => (await playing(screen))?.pairing ?? '', { timeout: 20_000 }).not.toBe('');
-  const code = (await playing(screen))!.pairing;
+  const pairing = await testScreenToPair(browser);
+  screen = pairing.screen;
+  const { code } = pairing;
   await tool(page, 'claim_screen', { code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
   await expect.poll(async () => (await playing(screen))?.pairing, { timeout: 20_000 }).toBe('');
 });
@@ -50,7 +50,6 @@ test.afterAll(async () => {
 const toastSays = (title: string | RegExp) => page.locator('[data-sonner-toast]').filter({ hasText: title });
 
 test('a playlist reaches no screen until it is the default, then publishes from its editor and plays', async () => {
-  test.setTimeout(120_000);
   await page.goto(`/playlists/${playlistId}`);
   await hydrated(page);
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
@@ -74,7 +73,6 @@ test('a playlist reaches no screen until it is the default, then publishes from 
 });
 
 test('an edit to a spot, published from the spot editor, is on the screen in seconds, offers Undo, and a roll back takes it back', async () => {
-  test.setTimeout(120_000);
   const before = (await playing(screen))!.manifestId;
   await page.goto(`/spots/${spotId}`);
   await hydrated(page);
@@ -109,7 +107,28 @@ test('the Screens page shows the latest rollout, and the Publishes page why each
   await hydrated(page);
   const latest = page.getByRole('region', { name: 'Latest publish' });
   await expect(latest).toContainText('v4');
-  await expect(latest.getByRole('img', { name: /^Rollout of v4: back to v2: 1 playing v2 again/ })).toBeVisible({ timeout: 30_000 });
+  const rollout = latest.getByRole('img', { name: /^Rollout of v4: back to v2: 1 playing v2 again/ });
+  await expect(rollout).toBeVisible({ timeout: 30_000 });
+  // As screens take a publish, each part of the bar eases to its new width (#385), and under reduced motion it is set at once.
+  const easing = () =>
+    rollout
+      .locator('span')
+      .first()
+      .evaluate((s) => [getComputedStyle(s).transitionProperty, getComputedStyle(s).transitionDuration]);
+  expect(await easing()).toEqual(['flex-grow', '0.3s']);
+  // Every part stays drawn, an empty one at no width, so the bar can ease to the whole of it, and back.
+  // Eight outcomes, and one for an outcome this page does not know (#541).
+  expect(await rollout.locator('span').count()).toBe(9);
+  expect(await rollout.locator('span').evaluateAll((parts) => parts.filter((p) => getComputedStyle(p).flexGrow === '0').length)).toBeGreaterThan(0);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect((await easing())[1]).toBe('1e-05s');
+  await page.emulateMedia({ reducedMotion: null });
+  // Its tile shows the template the player drew and the template's name, not its key or a hash (#362).
+  // It took the publish, so its tile says Playing, not Updating to (#362).
+  const thumb = page.getByRole('img', { name: 'Playing: Deal' });
+  await expect(thumb.locator('img')).toHaveAttribute('src', '/template-thumbnails/clock.webp');
+  await expect(page.getByRole('main')).not.toContainText('base/clock@');
+  await expect(page.getByRole('listitem').filter({ has: thumb })).toContainText('Clock');
   await axe(page);
   await shots(page, '52-screens-latest-publish');
 
@@ -139,22 +158,54 @@ test('the Screens page shows the latest rollout, and the Publishes page why each
   await page.setViewportSize({ width: 1280, height: 720 });
 });
 
+test('a publish made more than 90 days ago can no longer be rolled back to, and the page says why (#235)', async () => {
+  // v1 made 91 days ago: past the storage clean-up's grace period, its files may be gone.
+  await d1(`UPDATE publishes SET created_at = created_at - ${91 * 24 * 60 * 60_000} WHERE revision = 1 AND org_id = ${orgOf(spotId)}`);
+  await page.goto('/publishes');
+  await hydrated(page);
+  const old = page.getByRole('button', { name: 'Roll back to v1' });
+  await expect(old).toBeDisabled();
+  // What each publish changed, so a roll back is to something seen, not remembered (#370): v1 made the spot and the
+  // playlist live; v2 only compiled the screens again, for the new default; v3 published the spot's edit.
+  const history = page.getByRole('region', { name: 'Publish history' });
+  await expect(history.getByRole('listitem').filter({ hasText: /^v1/ })).toContainText('Spot Deal; playlist Main');
+  await expect(history.getByRole('listitem').filter({ hasText: /^v2/ })).toContainText('No draft changed: the screens were compiled again');
+  await expect(history.getByRole('listitem').filter({ hasText: /^v3/ })).toContainText('Spot Deal');
+  await expect(old).toHaveAccessibleDescription('Spot Deal; playlist Main Over 90 days old: its files are no longer kept.');
+  await expect(page.getByRole('button', { name: 'Roll back to v2' })).toBeEnabled();
+  // A roll back's says what it put back (review of #455): v4 put v2 back.
+  await expect(page.getByRole('button', { name: 'Roll back to v4' })).toHaveAccessibleDescription('Restores v2');
+  // The tool refuses it too, and says why.
+  const { publishes } = await tool(page, 'list_publishes', {});
+  const v1 = publishes.find((p: { revision: number }) => p.revision === 1);
+  const refused = await toolResponse(page, 'roll_back_publish', { publishId: v1.id });
+  expect(refused.status()).toBe(409);
+  expect(await refused.json()).toMatchObject({ error: 'conflict', details: { tooOld: true } });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await old.scrollIntoViewIfNeeded();
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await axe(page);
+    await shots(page, `56-publish-too-old-${width}`);
+  }
+  await page.setViewportSize({ width: 1280, height: 720 });
+});
+
 test('Publish pressed while an autosave is on its way waits for it, and publishes the latest edit (#150)', async () => {
-  test.setTimeout(120_000);
   await page.goto(`/spots/${spotId}`);
   await hydrated(page);
   // The first save's answer is held: the server has it, the page does not yet.
   let release = () => {};
   const held = new Promise<void>((r) => (release = r));
   let first = true;
-  await page.route('**/api/tools/update_spot', async (route) => {
+  await page.route('**/api/tools/save_spot', async (route) => {
     if (!first) return route.continue();
     first = false;
     const response = await route.fetch();
     await held;
     await route.fulfill({ response });
   });
-  const saving = page.waitForRequest('**/api/tools/update_spot');
+  const saving = page.waitForRequest('**/api/tools/save_spot');
   await page.getByLabel('Message').fill('Four for $6');
   // The autosave, a second after the edit.
   await saving;
@@ -165,5 +216,38 @@ test('Publish pressed while an autosave is on its way waits for it, and publishe
   await expect(toastSays('Not published')).toHaveCount(0);
   await expect.poll(() => stageShows(screen, 'Five for $7'), { timeout: 20_000 }).toBe(true);
   expect((await tool(page, 'get_spot', { spotId })).spot).toMatchObject({ data: { message: 'Five for $7' }, draftChanged: false });
-  await page.unroute('**/api/tools/update_spot');
+  await page.unroute('**/api/tools/save_spot');
+});
+
+test("a name with no break wraps in the history's line at a phone's width (review of #455)", async () => {
+  const { spot } = await tool(page, 'get_spot', { spotId });
+  const unbroken = 'Q'.repeat(100);
+  await tool(page, 'save_spot', { spotId, name: unbroken, ifVersion: spot.version });
+  await tool(page, 'publish', {});
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/publishes');
+  await hydrated(page);
+  const line = page.getByRole('region', { name: 'Publish history' }).getByText(unbroken, { exact: false }).first();
+  await line.scrollIntoViewIfNeeded();
+  expect(await line.evaluate((l) => l.scrollWidth <= l.clientWidth)).toBe(true);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await axe(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
+});
+
+test("a screen not heard from since it was paired is unreachable in the publish's rollout, as it is on the Screens page (#345)", async () => {
+  const start = await page.request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': '192.0.2.57' } });
+  const { code } = (await start.json()) as { code: string };
+  await tool(page, 'claim_screen', { code, name: 'Back room', timezone: 'UTC', orientation: 'landscape' });
+  await tool(page, 'publish', { drafts: [] });
+  await page.goto('/publishes');
+  await hydrated(page);
+  await expect(page.getByText('unreachable, update when back')).toBeVisible();
+  await expect(page.getByText(/Never heard from, playing what they have from their cache/)).toBeVisible();
+  await axe(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await shots(page, '57-publishes-unreachable');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shots(page, '57-publishes-unreachable-phone');
+  await page.setViewportSize({ width: 1280, height: 720 });
 });

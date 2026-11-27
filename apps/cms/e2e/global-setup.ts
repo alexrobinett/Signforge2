@@ -1,15 +1,35 @@
 /**
- * Start the API and the CMS as a developer would (two processes, joined by the dev registry),
+ * Start the API (`wrangler dev`) and the built CMS (`vite preview`), joined by the dev registry,
  * but on their own ports, with their own local database and their own registry, so a dev server
  * already running on this machine is neither used nor disturbed.
  */
-import { chromium } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ADMIN_TOKEN, API_LOG, API_PORT, CMS_PORT, CMS_URL, FEEDS_DIR, PLACES, RUN_DIR } from './servers';
+import {
+  ADMIN_TOKEN,
+  ANTHROPIC_STUB_KEY,
+  ANTHROPIC_STUB_MODELS,
+  API_LOG,
+  API_PORT,
+  CMS_PORT,
+  CMS_URL,
+  ENDPOINT_STUB_KEY,
+  ENDPOINT_STUB_MODELS,
+  FEEDS_DIR,
+  PLACES,
+  portTaken,
+  RUN_DIR,
+  STUB_CARD,
+  STUB_DRAFT,
+  STUB_DRAFTED,
+  STUB_TAKEN,
+  STUB_CANCELLED,
+  STUB_FILL,
+  STUB_MENU,
+} from './servers';
 
 const apiDir = fileURLToPath(new URL('../../api/', import.meta.url));
 const cmsDir = fileURLToPath(new URL('../', import.meta.url));
@@ -45,18 +65,158 @@ async function geocodingStub(): Promise<{ url: string; close: () => void }> {
 }
 
 /**
+ * The drawer's scripted turn: a tool to call, or the answer's card (#350: the card as JSON text, the
+ * structured output asked with the tools). Every read is `read` (#345). On a spot's page (#268): read the
+ * spot in full, draft a punchier headline and a QR link from its data as read, then `STUB_DRAFTED`. Asked
+ * about the storm (#269): read the playlists, take every screen over with the first for an hour (the run
+ * pauses there for the person's press), then `STUB_TAKEN`. Asked to cancel an invitation by its id (#321):
+ * cancel it (a card the person presses), then `STUB_CANCELLED`. Anywhere else (#267): read the screens'
+ * status, then `STUB_CARD`.
+ */
+function drawerStep(messages: { role: string; content: unknown }[]): { name: string; input: unknown } | { card: object } {
+  // The person's turn, as text or as text blocks (TanStack AI sends the blocks, #349).
+  const content = messages[0]?.content;
+  const first = typeof content === 'string' ? content : Array.isArray(content) ? content.map((b: { text?: string }) => b.text ?? '').join('') : '';
+  const page = /<page>\n(\{.*\})\n<\/page>/.exec(first)?.[1];
+  const spotId: string | undefined = page ? JSON.parse(page).ids?.spotId : undefined;
+  const last = messages.at(-1)?.content;
+  const result = Array.isArray(last) && last[0]?.type === 'tool_result' ? String(last[0].content) : undefined;
+  const asked = messages.at(-2)?.content;
+  const lastCall = Array.isArray(asked) ? asked.find((b: { type: string }) => b.type === 'tool_use')?.name : undefined;
+  if (/storm/i.test(first)) {
+    if (!result) return { name: 'read', input: { type: 'playlist' } };
+    if (lastCall === 'read') {
+      const read = JSON.parse(result.replace(/^<data>\n/, '').replace(/\n<\/data>$/, ''));
+      return {
+        name: 'takeover',
+        input: { action: 'publish', playlistId: read.items[0].id, target: 'org', endsAt: new Date(Date.now() + 3_600_000).toISOString() },
+      };
+    }
+    return { card: { groups: [], steps: [], ...STUB_TAKEN } };
+  }
+  // The drawer offers no org:manage read, so the question names the invitation.
+  const invitation = /cancel the invitation (inv_[\w-]+)/i.exec(first)?.[1];
+  if (invitation) return result ? { card: { groups: [], steps: [], ...STUB_CANCELLED } } : { name: 'cancel_invitation', input: { invitationId: invitation } };
+  // The question names the entry, as for the invitation: a removal behind the delete card (#523).
+  const entry = /remove the schedule entry (sch_[\w-]+)/i.exec(first)?.[1];
+  if (entry) return result ? { card: STUB_CARD } : { name: 'delete', input: { type: 'schedule_entry', id: entry } };
+  if (!spotId) return result ? { card: STUB_CARD } : { name: 'read', input: { type: 'screen_status' } };
+  if (!result) return { name: 'read', input: { type: 'spot', ids: [spotId], detail: 'full' } };
+  if (lastCall === 'read') {
+    const read = JSON.parse(
+      result
+        .replace(/^<data>\n/, '')
+        .replace(/\n<\/data>$/, '')
+        .replaceAll('&lt;', '<'),
+    );
+    return { name: 'save_spot', input: { spotId, data: { ...read.items[0].data, ...STUB_DRAFT } } };
+  }
+  return { card: { groups: [], steps: [], ...STUB_DRAFTED } };
+}
+
+/** One answer as Anthropic's Messages API streams it (the adapter asks streaming, #349): its one block, then `stop`. */
+function streamed(
+  res: import('node:http').ServerResponse,
+  model: string,
+  block: { type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: unknown },
+  stop: string,
+) {
+  const event = (type: string, data: Record<string, unknown>) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+  const usage = { input_tokens: 1, output_tokens: 1 };
+  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  res.end(
+    [
+      event('message_start', {
+        message: { id: 'msg_stub', type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage },
+      }),
+      event('content_block_start', {
+        index: 0,
+        content_block: block.type === 'text' ? { type: 'text', text: '' } : { type: 'tool_use', id: block.id, name: block.name, input: {} },
+      }),
+      event('content_block_delta', {
+        index: 0,
+        delta: block.type === 'text' ? { type: 'text_delta', text: block.text } : { type: 'input_json_delta', partial_json: JSON.stringify(block.input) },
+      }),
+      event('content_block_stop', { index: 0 }),
+      event('message_delta', { delta: { stop_reason: stop, stop_sequence: null }, usage }),
+      event('message_stop', {}),
+    ].join(''),
+  );
+}
+
+/**
+ * Anthropic's API as the agent's adapter asks it (`ANTHROPIC_BASE_URL`, apps/api src/agent): the
+ * Models API, where the stub key gets `ANTHROPIC_STUB_MODELS` and any other key Anthropic's 401; and
+ * the Messages API for the fill (#263), which answers every call with `STUB_FILL` for the Photo
+ * Promo template, or, asked to update a Menu Board (#264), with `STUB_MENU`; and the drawer's tool
+ * turn (#267, #350), a read of the screens' status and then `STUB_CARD`. On a free port, so the run never reaches the internet or spends a token.
+ */
+async function anthropicStub(): Promise<{ url: string; close: () => void }> {
+  const server = createServer((req, res) => {
+    const known = req.headers.authorization === `Bearer ${ANTHROPIC_STUB_KEY}` || req.headers['x-api-key'] === ANTHROPIC_STUB_KEY;
+    const path = new URL(req.url ?? '/', 'http://stub').pathname;
+    if (path === '/v1/messages' && known) {
+      let body = '';
+      req.on('data', (chunk: Buffer) => {
+        body += chunk.toString();
+      });
+      req.on('end', () => {
+        const asked = JSON.parse(body);
+        // The drawer's turn (#267, #350): first a read, then the answer, as `STUB_CARD`. A fill offers no tools.
+        if (asked.tools?.length) {
+          const step = drawerStep(asked.messages);
+          if ('card' in step) return void streamed(res, asked.model, { type: 'text', text: JSON.stringify(step.card) }, 'end_turn');
+          return void streamed(res, asked.model, { type: 'tool_use', id: `toolu_${asked.messages.length}`, ...step }, 'tool_use');
+        }
+        const keys: string[] = asked.output_config.format.schema.properties.template.enum;
+        const template = keys.find((k) => k.startsWith('base/photo-promo@')) ?? keys[0] ?? '';
+        const { name, ...data } = template.startsWith('base/menu-board@') ? STUB_MENU : STUB_FILL;
+        const text = JSON.stringify({ template, name, data_json: JSON.stringify(data), unsure: ['price'] });
+        streamed(res, asked.model, { type: 'text', text }, 'end_turn');
+      });
+      return;
+    }
+    if (path !== '/v1/models') return void res.writeHead(404).end();
+    res.writeHead(known ? 200 : 401, { 'content-type': 'application/json' });
+    const models = ANTHROPIC_STUB_MODELS.map((id) => ({ type: 'model', id, display_name: id, created_at: '2026-10-01T00:00:00Z' }));
+    res.end(
+      JSON.stringify(
+        known
+          ? { data: models, has_more: false, first_id: models[0]!.id, last_id: models.at(-1)!.id }
+          : { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } },
+      ),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (typeof address !== 'object' || !address) throw new Error('the Anthropic stub is not listening');
+  return { url: `http://127.0.0.1:${address.port}`, close: () => server.close() };
+}
+
+/**
  * A file server for the links table sources read (issue #84): the dev API sends every feed fetch
  * here (`FEED_STUB_URL`), and it answers with the file in FEEDS_DIR named by the URL's last path
- * segment, which a test writes and edits. On a free port.
+ * segment, which a test writes and edits; and, for any host's /v1/models, an OpenAI-compatible
+ * endpoint's model list to the stub key (#262). On a free port.
  */
 async function feedServer(): Promise<{ url: string; close: () => void }> {
   const server = createServer((req, res) => {
-    const file = join(FEEDS_DIR, basename(new URL(req.url ?? '/', 'http://stub').pathname));
+    const path = new URL(req.url ?? '/', 'http://stub').pathname;
+    // An OpenAI-compatible endpoint's model list (#262): every host's fetch lands here in dev, so its key is checked here.
+    if (path.endsWith('/v1/models')) {
+      const known = req.headers.authorization === `Bearer ${ENDPOINT_STUB_KEY}`;
+      res.writeHead(known ? 200 : 401, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify(known ? { object: 'list', data: ENDPOINT_STUB_MODELS.map((id) => ({ id, object: 'model' })) } : { error: { message: 'invalid key' } }),
+      );
+      return;
+    }
+    const file = join(FEEDS_DIR, basename(path));
     if (!existsSync(file)) {
       res.writeHead(404).end();
       return;
     }
-    res.writeHead(200, { 'content-type': file.endsWith('.json') ? 'application/json' : 'text/csv' });
+    res.writeHead(200, { 'content-type': file.endsWith('.json') ? 'application/json' : file.endsWith('.html') ? 'text/html' : 'text/csv' });
     res.end(readFileSync(file));
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -65,42 +225,33 @@ async function feedServer(): Promise<{ url: string; close: () => void }> {
   return { url: `http://127.0.0.1:${address.port}`, close: () => server.close() };
 }
 
-/** True if something already answers on the port: another checkout's run, whose servers this run would otherwise use. */
-async function answers(url: string) {
-  try {
-    await fetch(url, { signal: AbortSignal.timeout(2_000) });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export default async function globalSetup() {
-  for (const [name, url] of [
-    ['E2E_API_PORT', `http://127.0.0.1:${API_PORT}/health`],
-    ['E2E_CMS_PORT', `http://127.0.0.1:${CMS_PORT}/`],
+  for (const [name, port] of [
+    ['E2E_API_PORT', API_PORT],
+    ['E2E_CMS_PORT', CMS_PORT],
   ] as const) {
-    if (await answers(url)) throw new Error(`${url} is already in use (another e2e run?): set ${name} to a free port`);
+    if (await portTaken(port)) throw new Error(`port ${port} is already in use (another e2e run?): set ${name} to a free port`);
   }
   rmSync(RUN_DIR, { recursive: true, force: true });
   mkdirSync(FEEDS_DIR, { recursive: true });
   const env = { ...process.env, CLOUDFLARE_DEV_REGISTRY_PATH: `${RUN_DIR}registry`, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' };
   const state = `${RUN_DIR}state`;
 
-  const migrate = spawnSync('pnpm', ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local', '--env', 'dev', '--persist-to', state], {
-    cwd: apiDir,
-    env,
-    encoding: 'utf8',
-  });
-  if (migrate.status !== 0) throw new Error(`migrations failed:\n${migrate.stdout}\n${migrate.stderr}`);
-  // The CMS serves the player build as its test screen and the spot editor's stage (vite.config.ts).
-  // Built for this host: no CMS_ORIGIN.
-  const player = spawnSync('pnpm', ['--filter', '@signforge/player', 'build'], { env: { ...env, CMS_ORIGIN: '' }, encoding: 'utf8' });
-  if (player.status !== 0) throw new Error(`player build failed:\n${player.stdout}\n${player.stderr}`);
+  // The migrations beside the builds. The player build is the CMS's test screen and stage
+  // (vite.config.ts), built for this host: no CMS_ORIGIN. The CMS is built, as it deploys, for
+  // `vite preview`: `vite dev` compiled each module on its first request, which took seconds.
+  await Promise.all([
+    run('migrations', ['exec', 'wrangler', 'd1', 'migrations', 'apply', 'DB', '--local', '--env', 'dev', '--persist-to', state], { cwd: apiDir, env }),
+    run('player build', ['--filter', '@signforge/player', 'build'], { env: { ...env, CMS_ORIGIN: '' } }).then(() =>
+      run('CMS build', ['exec', 'vite', 'build'], { cwd: cmsDir, env }),
+    ),
+  ]);
 
   const geocoding = await geocodingStub();
   const feeds = await feedServer();
+  const anthropic = await anthropicStub();
   const log = openSync(API_LOG, 'a');
+  const cmsLog = openSync(`${RUN_DIR}cms.log`, 'a');
   const children: ChildProcess[] = [
     spawn(
       'pnpm',
@@ -124,6 +275,8 @@ export default async function globalSetup() {
         `GEOCODING_URL:${geocoding.url}`,
         '--var',
         `FEED_STUB_URL:${feeds.url}`,
+        '--var',
+        `ANTHROPIC_BASE_URL:${anthropic.url}`,
         // GET /__scheduled runs the Cron Triggers' jobs: how a test makes the poller run now.
         '--test-scheduled',
       ],
@@ -134,10 +287,10 @@ export default async function globalSetup() {
         detached: true,
       },
     ),
-    spawn('pnpm', ['exec', 'vite', 'dev', '--port', String(CMS_PORT)], {
+    spawn('pnpm', ['exec', 'vite', 'preview', '--port', String(CMS_PORT), '--strictPort'], {
       cwd: cmsDir,
       env,
-      stdio: ['ignore', openSync(`${RUN_DIR}cms.log`, 'a'), openSync(`${RUN_DIR}cms.log`, 'a')],
+      stdio: ['ignore', cmsLog, cmsLog],
       detached: true,
     }),
   ];
@@ -164,27 +317,40 @@ export default async function globalSetup() {
   await waitFor(`${CMS_URL}/sign-in`);
   // The CMS reaches the API through the registry; wait until the binding answers.
   await waitFor(`${CMS_URL}/api/sign-in-options`);
-  // Vite optimises dependencies on the first browser load and may reload the page; do that now,
-  // not in the middle of a test.
-  const browser = await chromium.launch();
-  try {
-    const page = await browser.newPage();
-    await page.goto(`${CMS_URL}/sign-in`);
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1_000);
-    await page.reload();
-    await page.waitForLoadState('networkidle');
-  } finally {
-    await browser.close();
-  }
 
   return async () => {
     geocoding.close();
     feeds.close();
-    for (const child of children) {
-      try {
-        if (child.pid) process.kill(-child.pid, 'SIGTERM');
-      } catch {}
-    }
+    anthropic.close();
+    // Each server is its own process group (pnpm, wrangler or vite, workerd): asked to stop, then
+    // killed, so no workerd is left holding a port for the next run.
+    await Promise.all(
+      children.map(async (child) => {
+        if (!child.pid) return;
+        const exited = new Promise((resolve) => child.once('exit', resolve));
+        signal(child.pid, 'SIGTERM');
+        await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
+        signal(child.pid, 'SIGKILL');
+      }),
+    );
   };
+}
+
+/** Signal a process group that may already be gone. */
+function signal(pid: number, name: NodeJS.Signals) {
+  try {
+    process.kill(-pid, name);
+  } catch {}
+}
+
+/** Run `pnpm <args>` to its end, its output kept for the error if it fails. */
+function run(what: string, args: string[], options: { cwd?: string; env: NodeJS.ProcessEnv }) {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn('pnpm', args, { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout.on('data', (chunk) => (output += chunk));
+    child.stderr.on('data', (chunk) => (output += chunk));
+    child.on('error', reject);
+    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`${what} failed:\n${output}`))));
+  });
 }

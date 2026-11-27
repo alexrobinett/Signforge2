@@ -10,6 +10,7 @@ import {
   orgSwitcher,
   requestCode,
   screenshot,
+  shots,
   signIn,
   signInAs,
 } from './helpers';
@@ -55,8 +56,13 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   // Signed in with no org yet: back on the page asked for, offered to create the first org.
   await expect(page).toHaveURL(/\/screens$/);
   await expect(page.getByRole('heading', { name: 'Welcome to SignForge' })).toBeVisible();
+  // No org yet: only the logo and the account menu, no sections to go to or search (#379).
+  await expect(page.getByRole('navigation', { name: 'Main' })).toHaveCount(0);
+  await expect(page.getByRole('complementary', { name: 'Sidebar' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Search and actions/ })).toHaveCount(0);
+  await expect(accountMenu(page)).toBeVisible();
   await axe(page);
-  await screenshot(page, '03-first-org');
+  await shots(page, '03-first-org');
   await fillUntilEnabled(page, 'Organization name', 'Acme Coffee', 'Create organization');
   await page.getByRole('button', { name: 'Create organization' }).click();
   await expect(page.getByRole('heading', { name: 'Screens', level: 1 })).toBeVisible();
@@ -89,6 +95,9 @@ test('sign in with an email code, create two orgs and switch between them', asyn
   await page.getByRole('menuitemradio', { name: 'Acme Coffee' }).click();
   await expect(switcher).toContainText('Acme Coffee');
   expect(await activeOrgId(page)).toBe(acme);
+  // Its menu gone before ⌘K: axe below stops animations, which held the menu's closing mid-way, and it played
+  // again as ⌘K closed, under the next click on the switcher, which it then swallowed.
+  await expect(page.getByRole('menu')).toHaveCount(0);
 
   // ⌘K switches too: "Switch organization…" lists the orgs.
   const menu = page.getByRole('dialog', { name: 'Command menu' });
@@ -152,7 +161,7 @@ test('sign in with an email code, create two orgs and switch between them', asyn
 test('a member of one org signs in on it: Overview, with its name and no menu to switch', async ({ page }) => {
   const email = `e2e-one-org-${Date.now()}@example.com`;
   await signInAs(page, email, ADDRESS.oneOrg);
-  await createOrg(page, 'Solo Bakery');
+  await createOrg(page, 'Solo Bakery', ADDRESS.oneOrg);
   await accountMenu(page).click();
   await page.getByRole('menuitem', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/sign-in$/);
@@ -170,7 +179,7 @@ test('a member of one org signs in on it: Overview, with its name and no menu to
 test('a member of two orgs signs in on the one they last switched to', async ({ page }) => {
   const email = `e2e-last-org-${Date.now()}@example.com`;
   await signInAs(page, email, ADDRESS.lastOrg);
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Market', ADDRESS.lastOrg);
   await createOrgFromAccountMenu(page, 'Southside Deli');
   await orgSwitcher(page).click();
   await page.getByRole('menuitemradio', { name: 'Northside Market' }).click();

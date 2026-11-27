@@ -23,7 +23,7 @@ ol {
 :root[data-schedule='off'] {
   --lk-scale: var(--lk-step);
 }
-/* Free is the look's accent (Night: its lime), busy the text colour (Night: its lilac). */
+/* Free is the look's accent (Night: its amber), busy the text colour. */
 .stage {
   --tone: var(--lk-accent-ink-large);
   --tone-fill: var(--lk-accent);
@@ -38,6 +38,10 @@ ol {
   inset: 0;
   display: grid;
   overflow: hidden;
+}
+/* No label or hour under 2.6vmin, whatever the look's own label size: a room sign is read from the corridor. */
+:root {
+  --rs-label: max(2.6vmin, var(--lk-size-label));
 }
 .stage > *,
 .status > *,
@@ -56,9 +60,6 @@ ol {
 .time {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-.colon {
-  animation: rs-blink 1s steps(1, end) infinite;
 }
 .line,
 .room {
@@ -158,16 +159,6 @@ ol {
 .facts .k {
   white-space: pre;
 }
-@keyframes rs-blink {
-  50% {
-    opacity: 0.25;
-  }
-}
-@keyframes rs-glow {
-  50% {
-    opacity: 0.4;
-  }
-}
 
 /* Pop (A): a pill of the room, the word huge, a line, and the day as cards with a pin at now. Busy
    turns the page the primary colour. */
@@ -178,21 +169,23 @@ ol {
   grid-template-areas: 'id clock' 'word word' 'line line' 'note note' 'org org' 'next next' 'sched sched';
   column-gap: 3vmin;
 }
+/* The room's name leads at title size, its seats and floor on its baseline: no pill. */
 [data-look='pop'] .ident {
   grid-area: id;
   justify-self: start;
   max-width: 100%;
   display: flex;
-  padding: 1.3vmin 3vmin;
-  border-radius: var(--lk-radius-pill);
-  background: var(--lk-text);
-  --ink: var(--lk-bg);
-  color: var(--card-text, var(--lk-bg));
+  align-items: baseline;
+  gap: 2.4vmin;
   font-family: var(--lk-font-display);
   font-weight: 800;
-  font-size: 3.7vmin;
+  font-size: 3.4vmin;
   line-height: 1.1;
   white-space: nowrap;
+}
+[data-look='pop'] .room {
+  font-size: 6.6vmin;
+  line-height: 1.05;
 }
 [data-look='pop'] .facts,
 [data-look='night'] .facts {
@@ -213,8 +206,8 @@ ol {
 [data-look='pop'] .facts > * {
   --lk-motion: none;
 }
-[data-look='pop'] .facts > *::before,
-[data-look='night'] .facts > *::before {
+/* Pop's seats and floor follow the name on its line; Night's sit on a line of their own, spaced, not dotted. */
+[data-look='pop'] .facts > *::before {
   content: ' · ';
   white-space: pre;
 }
@@ -389,7 +382,7 @@ ol {
 [data-look='poster'] .hours {
   font-family: var(--lk-font-label);
   font-weight: var(--lk-label-weight);
-  font-size: var(--lk-size-label);
+  font-size: var(--rs-label);
   letter-spacing: var(--lk-label-tracking);
   text-transform: var(--lk-label-case);
 }
@@ -520,7 +513,7 @@ ol {
   background: var(--lk-surface);
   --ink: var(--lk-text);
   font-weight: 700;
-  font-size: var(--lk-size-label);
+  font-size: var(--rs-label);
   line-height: 1.3;
 }
 [data-look='poster'] .block .when {
@@ -558,7 +551,8 @@ ol {
   line-height: 1;
 }
 
-/* Night (C): mono labels in the accent, the status in its tone, and the day as a lit track. */
+/* Night (C): the room's name leads at title size, the status in its one accent, times and notes in body type, and the
+   day as a hairline track with solid bars. */
 [data-look='night'] .stage {
   --tone: var(--lk-primary-ink-large);
   --tone-fill: var(--lk-primary);
@@ -572,38 +566,38 @@ ol {
 }
 [data-look='night'] .ident,
 [data-look='night'] .clock {
-  font-family: var(--lk-font-label);
-  font-size: 2.6vmin;
-  color: var(--lk-accent-ink-large);
-  text-transform: lowercase;
+  font-size: 3.4vmin;
+  font-weight: 500;
+  color: var(--lk-muted);
   white-space: nowrap;
 }
 [data-look='night'] .ident {
   grid-area: id;
   display: flex;
+  flex-direction: column;
+  gap: 1vmin;
   --lk-motion: none;
+}
+[data-look='night'] .room {
+  font: 700 6.6vmin / 1.05 var(--lk-font-display);
+  letter-spacing: -0.02em;
+  color: var(--lk-text);
+}
+[data-look='night'] .facts {
+  display: flex;
+  gap: 2.4vmin;
 }
 [data-look='night'] .clock {
   grid-area: clock;
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 1.5vmin;
-}
-[data-look='night'] .live {
-  display: block;
-  position: relative;
-  width: 1.3vmin;
-  height: 1.3vmin;
-}
-[data-look='night'] .live i {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: var(--tone-fill);
+  font-size: 4.4vmin;
+  color: var(--lk-text);
 }
 [data-look='night'] .status {
   grid-area: status;
-  margin-top: 3.7vmin;
+  margin-top: 2vmin;
   display: grid;
   grid-template-columns: minmax(0, max-content) minmax(max-content, 1fr);
   grid-template-rows: 1fr auto auto;
@@ -616,7 +610,7 @@ ol {
 [data-look='night'] .word {
   font-family: var(--lk-font-display);
   font-weight: 800;
-  font-size: calc(25.9vmin * var(--lk-scale));
+  font-size: calc(22vmin * var(--lk-scale));
   line-height: 0.92;
   letter-spacing: -0.04em;
 }
@@ -625,7 +619,7 @@ ol {
   grid-row: 2;
   font-family: var(--lk-font-display);
   font-weight: 700;
-  font-size: calc(6.67vmin * var(--lk-scale));
+  font-size: calc(6.6vmin * var(--lk-scale));
   line-height: 1.04;
   white-space: nowrap;
 }
@@ -633,37 +627,33 @@ ol {
   display: block;
   grid-row: 3;
   margin: 0.74vmin 0 3.3vmin;
-  font-family: var(--lk-font-label);
-  font-size: 2.6vmin;
+  font-size: 3.4vmin;
   color: var(--lk-muted);
   white-space: nowrap;
 }
 [data-look='night'] .line {
   grid-area: line;
   margin-top: 3.7vmin;
-  font-size: calc(4.07vmin * var(--lk-scale));
+  font-size: calc(4.4vmin * var(--lk-scale));
   line-height: 1.2;
-  color: var(--lk-muted);
+  color: var(--lk-text);
 }
 [data-look='night'] .org {
   grid-area: org;
   margin-top: 1.5vmin;
-  font-family: var(--lk-font-label);
-  font-size: 2.6vmin;
+  font-size: 3.4vmin;
   color: var(--lk-muted);
 }
 [data-look='night'] .allday {
   grid-area: note;
   margin-top: 1.5vmin;
-  font-family: var(--lk-font-label);
-  font-size: 2.6vmin;
+  font-size: 3.4vmin;
   color: var(--lk-muted);
 }
 [data-look='night'] .next {
   grid-area: next;
   margin-top: 1.5vmin;
-  font-family: var(--lk-font-label);
-  font-size: 2.6vmin;
+  font-size: 3.4vmin;
   color: var(--lk-muted);
 }
 [data-look='night'] .schedule {
@@ -671,22 +661,22 @@ ol {
   gap: 1.5vmin;
 }
 [data-look='night'] .body {
-  height: 17vmin;
+  height: 12vmin;
   flex: none;
 }
+/* The day as a hairline track; its bookings are solid bars, the one on now in the status's tone. */
 [data-look='night'] .track::before {
   content: '';
   position: absolute;
   inset: 0 0 4vmin;
-  border-radius: 2.6vmin;
-  background: var(--lk-surface);
+  border-top: max(1px, 0.12vmin) solid var(--lk-rule-color);
+  border-bottom: max(1px, 0.12vmin) solid var(--lk-rule-color);
 }
 [data-look='night'] .hours > span {
   bottom: 0;
   left: calc(var(--t) * 100%);
   translate: -50% 0;
-  font-family: var(--lk-font-label);
-  font-size: 2vmin;
+  font-size: 2.6vmin;
   color: var(--lk-muted);
 }
 [data-look='night'] .hours > span:first-child {
@@ -701,44 +691,20 @@ ol {
   left: calc(var(--now) * 100%);
   width: 0.56vmin;
   translate: -50% 0;
-  background: var(--lk-primary);
-}
-[data-look='night'] .glow {
-  display: block;
-  position: absolute;
-  inset: 0 -1.1vmin;
-  background: var(--lk-primary);
-  opacity: 0.25;
-  animation: rs-glow 2.4s ease-in-out 2.2s infinite;
+  background: var(--tone-fill);
 }
 [data-look='night'] .block {
   top: 1.5vmin;
   bottom: 5.5vmin;
   left: calc(var(--a) * 100% + 0.37vmin);
   width: calc((var(--b) - var(--a)) * 100% - 0.74vmin);
-  display: flex;
-  flex-direction: column;
-  gap: 0.3vmin;
-  padding: 1.3vmin 1.7vmin;
-  border-radius: 1.7vmin;
-  background: color-mix(in srgb, var(--lk-surface) 82%, var(--lk-text));
-  --ink: var(--lk-text);
-}
-[data-look='night'] .block.past {
-  --ink: var(--lk-muted);
+  background: color-mix(in srgb, var(--lk-text) 22%, var(--lk-bg));
 }
 [data-look='night'] .block.current {
-  background: var(--lk-accent);
-  --ink: var(--lk-on-accent);
+  background: var(--tone-fill);
 }
-[data-look='night'] .block .when {
-  font-family: var(--lk-font-label);
-  font-size: 1.85vmin;
-  white-space: nowrap;
-}
-[data-look='night'] .block .what {
-  font-size: 2.4vmin;
-  font-weight: 500;
+[data-look='night'] .block :is(.when, .what) {
+  display: none;
 }
 [data-look='night'] .free-day {
   font-size: 4vmin;
@@ -777,7 +743,7 @@ ol {
 [data-look='corporate'] .k,
 [data-look='corporate'] .head {
   font-weight: var(--lk-label-weight);
-  font-size: var(--lk-size-label);
+  font-size: var(--rs-label);
   letter-spacing: var(--lk-label-tracking);
   text-transform: var(--lk-label-case);
   color: var(--lk-muted);
@@ -838,19 +804,19 @@ ol {
 [data-look='corporate'] .org {
   grid-area: org;
   margin-top: 1vmin;
-  font-size: 2.4vmin;
+  font-size: 2.6vmin;
   color: var(--lk-muted);
 }
 [data-look='corporate'] .allday {
   grid-area: note;
   margin-top: 1vmin;
-  font-size: 2.4vmin;
+  font-size: 2.6vmin;
   color: var(--lk-muted);
 }
 [data-look='corporate'] .next {
   grid-area: next;
   margin-top: 1vmin;
-  font-size: 2.4vmin;
+  font-size: 2.6vmin;
   color: var(--lk-muted);
 }
 [data-look='corporate'] .r2 {
@@ -933,7 +899,7 @@ ol {
 [data-look='corporate'] .item .when {
   grid-row: 1 / 3;
   font-weight: 500;
-  font-size: 2.4vmin;
+  font-size: 2.6vmin;
   font-variant-numeric: tabular-nums;
 }
 [data-look='corporate'] .item .what {
@@ -946,7 +912,7 @@ ol {
   -webkit-line-clamp: 2;
 }
 [data-look='corporate'] .item .sub {
-  font-size: 2vmin;
+  font-size: 2.6vmin;
 }
 [data-look='corporate'] .item .bar {
   grid-column: 2;
@@ -965,7 +931,7 @@ ol {
   align-items: center;
   padding: 1.3vmin 0;
   font-weight: var(--lk-label-weight);
-  font-size: var(--lk-size-label);
+  font-size: var(--rs-label);
   letter-spacing: var(--lk-label-tracking);
   text-transform: var(--lk-label-case);
   color: var(--card-accent, var(--lk-accent));
@@ -1027,6 +993,12 @@ ol {
 [data-look='corporate'] .stage[data-state='busy'] {
   --tone: var(--lk-text);
 }
+/* Unknown (#225): the calendar is not updating. Neither free's accent nor busy's fill, in any look: the muted ink,
+   which main.ts sets on the stage as `--tone` once it is read on the page. */
+[data-look] .stage[data-state='unknown'] {
+  --tone: var(--lk-muted);
+  --tone-fill: var(--lk-muted);
+}
 [data-look='pop'][data-orientation='portrait'] .stage {
   padding: 7.4vmin 6.5vmin;
 }
@@ -1058,12 +1030,14 @@ ol {
   translate: 0 -50%;
   clip-path: polygon(0 0, 100% 50%, 0 100%);
 }
+/* Portrait is too narrow for the facts and the clock on one line at the labels' floor: the clock goes above. */
 [data-look='poster'][data-orientation='portrait'] .stage {
   grid-template-columns: 7vmin minmax(0, 1fr) auto 7vmin;
-  grid-template-rows: 6.7vmin auto auto auto auto minmax(0, 1fr) auto auto auto auto auto 46vh;
+  grid-template-rows: 6.7vmin auto auto auto auto auto minmax(0, 1fr) auto auto auto auto auto 46vh;
   grid-template-areas:
     '. . . .'
-    '. facts clock .'
+    '. clock clock .'
+    '. facts facts .'
     '. r1 r1 .'
     '. room room .'
     '. word word .'
@@ -1077,6 +1051,9 @@ ol {
 }
 [data-look='poster'][data-orientation='portrait'] .room {
   font-size: 16vmin;
+}
+[data-look='poster'][data-orientation='portrait'] .clock {
+  margin: 0 0 1vmin;
 }
 [data-look='poster'][data-orientation='portrait'] .schedule {
   margin-top: 3.3vmin;

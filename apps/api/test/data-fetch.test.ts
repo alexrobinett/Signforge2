@@ -82,6 +82,63 @@ describe('guardedFetch', () => {
       expect(await refusal(guardedFetch(`https://${host}/a`, {}, stub({}, dns).guards)), host).toBe('private-address');
   });
 
+  it.each(['localhost.', 'printer.local.', 'nas.', 'localhost..'])('refuses the local name %s, written with trailing dots, without a lookup', async (host) => {
+    const asked: string[] = [];
+    const { guards } = stub({});
+    const resolve: FetchGuards['resolve'] = (name, signal) => {
+      asked.push(name);
+      return guards.resolve(name, signal);
+    };
+    expect(await refusal(guardedFetch(`https://${host}/a`, {}, { ...guards, resolve }))).toBe('private-address');
+    expect(asked).toEqual([]);
+  });
+
+  it('fetches a public name written with a trailing dot', async () => {
+    const { guards } = stub({ 'https://feed.test./a': ok('<rss/>') });
+    expect(await guardedFetch('https://feed.test./a', {}, guards)).toMatchObject({ status: 'ok', body: '<rss/>' });
+  });
+
+  // Each is read as the 128 bits it names, so no spelling of a private address gets past the check.
+  it.each([
+    ['::ffff:7f00:1', 'IPv4-mapped 127.0.0.1, in hex'],
+    ['::ffff:c0a8:101', 'IPv4-mapped 192.168.1.1, in hex'],
+    ['0:0:0:0:0:ffff:10.0.0.1', 'IPv4-mapped, written out in full'],
+    ['::ffff:0:7f00:1', 'IPv4-translated 127.0.0.1'],
+    ['::127.0.0.1', 'IPv4-compatible 127.0.0.1'],
+    ['::a00:1', 'IPv4-compatible 10.0.0.1, in hex'],
+    ['::8.8.8.8', 'IPv4-compatible, carrying a public IPv4'],
+    ['::808:808', 'IPv4-compatible, carrying a public IPv4, in hex'],
+    ['0:0:0:0:0:0:0:1', 'loopback, written out in full'],
+    ['0::', 'unspecified, in another spelling'],
+    ['2002:7f00:1::', '6to4'],
+    ['2001:0:4136:e378:8000:63bf:3fff:fdd2', 'Teredo'],
+    ['2001:2::1', 'benchmarking'],
+    ['fec0::1', 'site-local'],
+    ['FEC0::1', 'site-local, upper case'],
+    ['0064:ff9b::7f00:1', 'NAT64, with leading zeros'],
+    ['2001:0db8::1', 'documentation, with leading zeros'],
+    ['3fff::1', 'documentation (RFC 9637)'],
+    ['100::1', 'discard'],
+    ['5f00::1', 'SRv6, outside global unicast'],
+  ])('refuses a host that resolves to %s (%s)', async (address) => {
+    expect(await refusal(guardedFetch('https://feed.test/a', {}, stub({}, { 'feed.test': [address] }).guards))).toBe('private-address');
+  });
+
+  it.each(['not-an-address', '256.1.1.1', '1::2::3', '1:2:3:4:5:6:7:8:9', '::ffff:1.2.3'])(
+    'refuses a host whose resolver answers %s, which is not an address',
+    async (answer) => {
+      expect(await refusal(guardedFetch('https://feed.test/a', {}, stub({}, { 'feed.test': [answer] }).guards))).toBe('private-address');
+    },
+  );
+
+  it.each(['2606:4700::1111', '2001:4860:4860::8888', '::ffff:93.184.216.34', '::ffff:5db8:d822'])(
+    'fetches a host that resolves to the public %s',
+    async (address) => {
+      const { guards } = stub({ 'https://feed.test/a': ok('<rss/>') }, { 'feed.test': [address] });
+      expect(await guardedFetch('https://feed.test/a', {}, guards)).toMatchObject({ status: 'ok', body: '<rss/>' });
+    },
+  );
+
   it('refuses a host that does not resolve', async () => {
     expect(await refusal(guardedFetch('https://gone.test/a', {}, stub({}, { 'gone.test': [] }).guards))).toBe('dns');
   });

@@ -20,6 +20,7 @@ import {
   type TemplateManifest,
   type WEATHER_UNITS,
 } from '@signforge/contract';
+import { isStale, sourceStaleS } from '@signforge/player-core';
 import type { ToolOutput } from '@signforge/tools/outputs';
 import { ago } from './screen-status';
 
@@ -48,7 +49,7 @@ export const placeName = (p: Pick<PlaceView, 'name' | 'region' | 'country'>) => 
  * The fields a person types: neither live nor one of a source's settings (an Open-Meteo
  * source's units). A table source's live fields are typed until they are bound.
  */
-export function typedFields(m: TemplateManifest, bindings: Record<string, BindingInput>): TemplateManifest['fields'] {
+export function typedFields(m: Pick<TemplateManifest, 'fields' | 'live'>, bindings: Record<string, BindingInput>): TemplateManifest['fields'] {
   if (!m.live) return m.fields;
   const skip = new Set(
     Object.values(liveSources(m.live)).flatMap((live) => [
@@ -105,6 +106,7 @@ export function guessMapping(def: ListDef, columns: readonly string[]): TableMap
   const taken = new Set<string>();
   const mapped: Record<string, string> = {};
   for (const [prop, d] of Object.entries(def.item)) {
+    if (d.type === 'image') continue;
     // Own keys only: an org template's item may have a property named `constructor`.
     const words = new Set([prop, d.label, ...(Object.hasOwn(ALSO, prop) ? (ALSO[prop] ?? []) : [])].map(squash));
     const named = columns.find((c) => !taken.has(c) && words.has(squash(c)));
@@ -112,7 +114,7 @@ export function guessMapping(def: ListDef, columns: readonly string[]): TableMap
   }
   for (const c of Object.values(mapped)) taken.add(c);
   for (const [prop, d] of Object.entries(def.item)) {
-    if (mapped[prop] || d.default !== undefined) continue;
+    if (d.type === 'image' || mapped[prop] || d.default !== undefined) continue;
     const free = columns.find((c) => !taken.has(c));
     if (free === undefined) continue;
     mapped[prop] = free;
@@ -139,7 +141,10 @@ const WIND_PARAM = { mph: 'mph', 'km/h': 'kmh' } as const;
 const isTemperature = (v: unknown): v is WeatherUnits['temperature'] => v === '°F' || v === '°C';
 const isWind = (v: unknown): v is WeatherUnits['wind'] => v === 'mph' || v === 'km/h';
 
-/** The units the spot's data says for an Open-Meteo source, else the template's defaults, else °F and mph. */
+/** The wind unit that goes with a temperature unit: km/h with °C, mph with °F. */
+const windFor = (temperature: WeatherUnits['temperature']): WeatherUnits['wind'] => (temperature === '°C' ? 'km/h' : 'mph');
+
+/** The units the spot's data says for an Open-Meteo source, else the template's defaults, else °F and the wind unit that goes with it. */
 export function unitsOf(m: TemplateManifest, live: LiveSourceDef, data: Record<string, unknown>): WeatherUnits {
   const value = (field: string | undefined) => {
     if (!field) return undefined;
@@ -148,7 +153,8 @@ export function unitsOf(m: TemplateManifest, live: LiveSourceDef, data: Record<s
   };
   const t = value(live.units?.temperature);
   const w = value(live.units?.wind);
-  return { temperature: isTemperature(t) ? t : '°F', wind: isWind(w) ? w : 'mph' };
+  const temperature = isTemperature(t) ? t : '°F';
+  return { temperature, wind: isWind(w) ? w : windFor(temperature) };
 }
 
 /** `units` with one of them changed to `value`, if it is a unit of that kind. */
@@ -157,8 +163,40 @@ export function withUnit(units: WeatherUnits, kind: keyof WeatherUnits, value: s
   return isWind(value) ? { ...units, wind: value } : units;
 }
 
+/**
+ * What every weather source asks Open-Meteo for: the variables and days the base templates' live paths read, Weather's
+ * and Info frame's (each one's template.json under templates/). A source for a place and units then serves them all (#345).
+ */
+const BASE_WEATHER = {
+  current: ['is_day', 'relative_humidity_2m', 'temperature_2m', 'weather_code', 'wind_speed_10m'],
+  daily: ['sunrise', 'sunset', 'temperature_2m_max', 'temperature_2m_min', 'weather_code'],
+  days: 4,
+};
+
 /** The ids `weatherSource` makes. */
 const WEATHER_SOURCE_ID = /^weather-\d+-[cf]-(?:mph|kmh)-[0-9a-f]{6}$/;
+
+/** Whether two of `weatherSource`'s ids are for the same place and units, whatever variables each asks for. */
+export const sameWeather = (a: string, b: string) => madeByEditor(a) && madeByEditor(b) && a.slice(0, a.lastIndexOf('-')) === b.slice(0, b.lastIndexOf('-'));
+
+/** A `weatherSource` id without its wind unit. */
+const windless = (id: string) => id.replace(/-(?:mph|kmh)-(?=[0-9a-f]{6}$)/, '-');
+
+/**
+ * A source the org has that the spot can read instead of making `wanted`: `wanted` itself, or, for a template with no
+ * wind unit (Info frame), one for the same place, temperature and variables in either wind unit, such as a °C and mph
+ * org's Weather made, or an Info frame source made before wind followed temperature (review of #546).
+ */
+export const weatherToReuse = (live: LiveSourceDef, wanted: string, existing: readonly string[]) =>
+  existing.includes(wanted) ? wanted : live.units?.wind ? undefined : existing.find((id) => madeByEditor(id) && windless(id) === windless(wanted));
+
+/**
+ * The source a spot stays on when `wanted` cannot be made (the org at its ten, #541): one it binds now (`bound`), that
+ * the editor made for the same place and units and the org still has (`existing`). Its variables are fewer, the
+ * template's own; the merge waits until a source is free.
+ */
+export const weatherToKeep = (wanted: string, bound: readonly (string | undefined)[], existing: readonly string[]) =>
+  bound.find((id): id is string => id !== undefined && sameWeather(id, wanted) && existing.includes(id));
 
 /**
  * Whether the editor made this source from a place and units (`weatherSource`), so picking the
@@ -173,15 +211,19 @@ async function shortHash(text: string): Promise<string> {
 }
 
 /**
- * The Open-Meteo forecast for a place, in these units, with the variables the template's live
- * paths read (`current.x`, `daily.x.N`). Its id follows from the place, the units and the
- * variables, so a second spot for the same place reuses the source, and a template that reads
- * other variables gets its own. `timeformat=unixtime` makes times numbers, which number fields take.
+ * The Open-Meteo forecast for a place, in these units: the variables every base template reads
+ * (`BASE_WEATHER`), and any other the template's live paths read (`current.x`, `daily.x.N`). Its id
+ * follows from the place, the units and the variables, sorted, so every spot for the same place and
+ * units shares one source whichever base template it is (#345), and only a template reading more
+ * gets its own. `timeformat=unixtime` makes times numbers, which number fields take.
  */
-export async function weatherSource(live: LiveSourceDef, place: PlaceView, units: WeatherUnits) {
-  const current = new Set<string>();
-  const daily = new Set<string>();
-  let days = 1;
+export async function weatherSource(live: LiveSourceDef, place: PlaceView, asked: WeatherUnits) {
+  // A template with no wind unit (Info frame) asks for the one that goes with its temperature, whatever the picker
+  // holds: a metric org's spots of every base template then share one source for a place (#541).
+  const units = live.units?.wind ? asked : { ...asked, wind: windFor(asked.temperature) };
+  const current = new Set<string>(BASE_WEATHER.current);
+  const daily = new Set<string>(BASE_WEATHER.daily);
+  let days = BASE_WEATHER.days;
   for (const path of Object.values(live.fields)) {
     const [block, variable, index] = path.split('.');
     if (!variable) continue;
@@ -192,12 +234,15 @@ export async function weatherSource(live: LiveSourceDef, place: PlaceView, units
       days = Math.max(days, Number(index ?? 0) + 1);
     }
   }
-  const variables = `current=${[...current].join(',')}&daily=${[...daily].join(',')}`;
+  const currentList = [...current].sort().join(',');
+  const dailyList = [...daily].sort().join(',');
+  const variables = `current=${currentList}&daily=${dailyList}&days=${days}`;
   const params = new URLSearchParams({
     latitude: String(place.latitude),
     longitude: String(place.longitude),
-    ...(current.size ? { current: [...current].join(',') } : {}),
-    ...(daily.size ? { daily: [...daily].join(','), forecast_days: String(days) } : {}),
+    current: currentList,
+    daily: dailyList,
+    forecast_days: String(days),
     temperature_unit: TEMPERATURE_PARAM[units.temperature],
     wind_speed_unit: WIND_PARAM[units.wind],
     timezone: place.timezone,
@@ -210,9 +255,19 @@ export async function weatherSource(live: LiveSourceDef, place: PlaceView, units
   };
 }
 
-/** Whether screens show the snapshot: one confirmed within `SNAPSHOT_STALE_MS`. */
-export const isFresh = (snapshot: SnapshotView | null, now: number): snapshot is SnapshotView =>
-  snapshot !== null && now - Date.parse(snapshot.checkedAt) <= SNAPSHOT_STALE_MS;
+/** How long screens keep a source's data with no confirmed check (#624): a calendar's minutes, or a day. */
+export const keepsFor = (source: { format: string; refreshS: number }) => (sourceStaleS(source.format, source.refreshS) ?? SNAPSHOT_STALE_MS / 1000) * 1000;
+
+/** `keepsFor` in words: "a day", or how many minutes or hours. */
+export const keepsForWords = (source: { format: string; refreshS: number }) => (keepsFor(source) === SNAPSHOT_STALE_MS ? 'a day' : ago(keepsFor(source)));
+
+/**
+ * Whether screens show the snapshot: not stale by the age the server gives its source (player-core's `isStale`). The
+ * browser's clock counts as trusted: a screen's untrusted clock rule is about the screen, and a browser clock a little
+ * behind the server's is no reason to call fresh data stale.
+ */
+export const isFresh = (source: { format: string; refreshS: number }, snapshot: SnapshotView | null, now: number): snapshot is SnapshotView =>
+  snapshot !== null && !isStale({ checkedAt: snapshot.checkedAt, staleS: keepsFor(source) / 1000 }, now, true);
 
 /** How fresh the source's data is, and what screens do about it. */
 export function freshness(source: DataSourceView, snapshot: SnapshotView | null, now: number): string {
@@ -222,9 +277,9 @@ export function freshness(source: DataSourceView, snapshot: SnapshotView | null,
       ? `The first check failed: ${failing}. Screens show the fallback values until it works.`
       : 'Waiting for the first check, within a minute. Until then screens show the fallback values.';
   const since = now - Date.parse(snapshot.checkedAt);
-  if (!isFresh(snapshot, now)) return `Not confirmed for ${ago(since)}: screens show the fallback values.`;
+  if (!isFresh(source, snapshot, now)) return `Not confirmed for ${ago(since)}: screens show the fallback values.`;
   const when = since < 60_000 ? 'Checked just now.' : `Checked ${ago(since)} ago.`;
-  return failing ? `${when} The last check failed: ${failing}. Screens keep this data for a day, then show the fallback values.` : when;
+  return failing ? `${when} The last check failed: ${failing}. Screens keep this data for ${keepsForWords(source)}, then show the fallback values.` : when;
 }
 
 /** WMO weather codes, as Open-Meteo sends them, in words. */

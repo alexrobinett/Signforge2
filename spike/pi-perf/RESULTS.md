@@ -895,6 +895,181 @@ The re-check of #222 found the fade above had taken Poster's ink wipe away: the 
 - Prepares after the first: medians about 165 ms in landscape and 175 to 230 ms in portrait. First prepares were 315 to 476 ms. The 120 kB bundle carries two faces (Space Grotesk and Inter) and not the look kit, which is about half the time of the kit's test template (300 to 500 ms). An alert starts quickly.
 - Emergency's pulse (the band's glow and its icon, every 2 s) costs nothing measurable while playing (0.00%). It drops a little more than the others while the next spot loads (6 to 10%), as its two layers keep animating under the load.
 
+## The Alert's 40vmin QR code (issue #230, 2026-11-25)
+
+`templates/alert` 1.1.0 at `05ca4db`: the QR tile grown from 23vmin to 40vmin so a 200-character link scans from 2 m. Each severity was a 10 s spot with its defaults and the longest link allowed (200 characters, version 10), played on its own, 3 runs each. This branch's player and content were in `~/signforge/www` (the original restored afterwards), content built per orientation; portrait was set with `wlr-randr --transform 90` and restored afterwards. Method as for the Alert above: `device/pi/isolate.py`, 10 s to settle and 30 s measured, the HTTP cache and the origin's storage cleared before each spec, the supervisor and the soak logger stopped, `__sf.prepares` read after each spec. The first prepare follows a cold load.
+
+| Orientation | Transition | Severity | Overall (3 runs) | Playing | Loading next | Worst frame | First prepares (ms) | Later prepares, median |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | emergency | 0.22, 0.11, 0.17% | 0.00% | 5.3 to 10.8% | 33 ms | 343, 350, 342 | 198 ms |
+| | | warning | 0.00% | 0.00% | 0.0% | 17 ms | 356, 355, 364 | 180 ms |
+| | | advisory | 0.00% | 0.00% | 0.0% | 17 ms | 364, 359, 372 | 179 ms |
+| | | notice | 0.00% | 0.00% | 0.0% | 17 ms | 365, 353, 358 | 180 ms |
+| | fade | emergency | 0.17, 0.17, 0.11% | 0.00% | 5.4 to 8.3% | 33 ms | 339, 359, 356 | 196 ms |
+| | | warning | 0.00% | 0.00% | 0.0% | 17 ms | 366, 369, 356 | 177 ms |
+| | | advisory | 0.00% | 0.00% | 0.0% | 17 ms | 346, 358, 359 | 180 ms |
+| | | notice | 0.00% | 0.00% | 0.0% | 17 ms | 357, 358, 342 | 179 ms |
+| portrait | cut | emergency | 0.22, 0.22, 0.78% | 0.00, 0.00, 0.63% | 6.2 to 8.5% | 200 ms (one, in run 3) | 333, 357, 364 | 261 ms |
+| | | warning | 0.00, 0.11, 0.00% | 0.00% | 0.0 to 5.6% | 33 ms | 370, 380, 367 | 194 ms |
+| | | advisory | 0.00, 0.06, 0.17% | 0.00% | 0.0 to 7.9% | 33 ms | 374, 372, 368 | 192 ms |
+| | | notice | 0.06, 0.00, 0.00% | 0.00% | 0.0 to 2.9% | 33 ms | 377, 367, 379 | 184 ms |
+| | fade | emergency | 0.22, 0.33, 0.17% | 0.00% | 6.7 to 10.6% | 50 ms | 349, 362, 361 | 251 ms |
+| | | warning | 0.17, 0.00, 0.00% | 0.00% | 0.0 to 2.9% | 33 ms | 355, 365, 363 | 180 ms |
+| | | advisory | 0.00% | 0.00% | 0.0% | 17 ms | 368, 360, 372 | 194 ms |
+| | | notice | 0.06, 0.89, 0.00% | 0.00% | 0.0 to 5.7% | 250 ms (one, in run 2, in the transition) | 355, 351, 354 | 194 ms |
+
+- Every run is under the 1% budget: at most 0.89% overall and 0.63% while playing. Nothing was skipped.
+- Two single stalls broke the 50 ms frame rule once each: 200 ms while portrait emergency played (cut, run 3) and 250 ms in portrait notice's fade (run 2). Neither came back in 5 more runs of each spec straight after: portrait cut emergency 0.17 to 0.28% overall, 0.00% playing, worst 33 to 50 ms; portrait fade notice 0.00%, worst 17 ms. They are read as the Pi's own noise, not the larger tile.
+- Against the 23vmin code (the Alert above) nothing moved beyond run-to-run noise: emergency still drops a little while the next spot loads, as its pulse keeps two layers animating, and prepares are close: first 333 to 380 ms (315 to 476 before), later medians 177 to 198 ms in landscape (about 165 before) and 180 to 261 ms in portrait (175 to 230 before), portrait emergency the highest in both. All are well inside the 500 ms budget.
+
+### The stalls, A/B: 23vmin against 40vmin (review of #448, 2026-11-25)
+
+The same build and session, at `67e74d6`, differing only in the tile: A with `--qr` at 23vmin, B at 40vmin, each at its own content path (`?content=/ab/A`, `/ab/B`), with a 213-byte link and default copy. Portrait, run in turn A then B, 5 runs each of the two specs that stalled once: emergency on a cut and notice on a fade. Method as above.
+
+| Spec | Tile | Overall (5 runs) | Playing | Worst frame | Later prepares, median |
+| --- | --- | --- | --- | --- | --- |
+| emergency, cut | A 23vmin | 0.17, 0.17, 0.28, 0.44, 0.22% | 0.00, 0.00, 0.00, 0.17, 0.00% | 33, 33, 50, 67, 50 ms | 266 ms |
+| | B 40vmin | 0.22, 0.22, 0.28, **1.22**, 0.17% | 0.00, 0.00, 0.00, **0.97**, 0.00% | 50, 50, 50, **300**, 50 ms | 270 ms |
+| notice, fade | A 23vmin | 0.00% | 0.00% | 17 ms | 179 ms |
+| | B 40vmin | 0.00, 0.06, 0.11, 0.00, 0.06% | 0.00% | 17 to 33 ms | 196 ms |
+
+- **B had one more stall.** Its run 4 of emergency on a cut held a 300 ms frame while playing, 1.22% overall, over the 1% budget. A's worst was a 67 ms frame in the same run (run 4), over the 50 ms rule too, but nothing like it.
+- **Not settled by this many runs.** Counting every portrait run of these two specs, stalls of 200 ms or more came 3 times in 26 runs with the 40vmin tile (above and here) and never in 10 with the 23vmin one. With so few, that difference could be chance (Fisher's exact test, p ≈ 0.5). Every stall came in a spec where emergency's pulse or a fade was moving. The code itself is still once drawn, but a 40vmin tile has more than three times the area of a 23vmin one, so a link to the bigger tile cannot be ruled out. Telling the two apart would take about 30 runs of each.
+- Notice's fade and the prepares barely move. Notice is 0.00 to 0.11% against 0.00%. Later prepares are 266 against 270 ms for emergency, and 179 against 196 ms for notice.
+
+### Regions and scaled text (review of #448, 2026-11-25)
+
+`templates/alert` at `da00cc7`. The body is three regions, text scales to fit its region, and each text box clips its ink (Alert above, and `docs/template-spec.md`, Alert). Measured with `device/pi/isolate.py` (`SF_PLAYER`; each spec starts cold, the HTTP cache and the origin's storage cleared first), the player and content served from one origin by `packages/cli/bench/feed-images/serve.py`, the supervisor and the soak logger stopped. Each severity was a 10 s spot with default copy and a 213-byte link, 3 runs.
+
+| Orientation | Transition | Severity | Overall | Playing | Worst frame | Prepares, median (range) |
+| --- | --- | --- | --- | --- | --- | --- |
+| landscape | cut | emergency | 0.11, 0.22, 0.17% | 0.00% | 33 ms | 231 ms (199-248) |
+| | | warning | 0.06, 0.00, 0.00% | 0.00% | 33 ms | 195 ms (180-212) |
+| | | advisory | 0.00, 0.06, 0.11% | 0.00% | 33 ms | 204 ms (189-212) |
+| | | notice | 0.06, 0.06, 0.00% | 0.00% | 33 ms | 198 ms (178-208) |
+| | fade | emergency | 0.22, 0.17, 0.06% | 0.00% | 33 ms | 211 ms (194-245) |
+| | | warning | 0.00% | 0.00% | 17 ms | 189 ms (175-214) |
+| | | advisory | 0.00% | 0.00% | 17 ms | 195 ms (181-228) |
+| | | notice | 0.00% | 0.00% | 17 ms | 195 ms (177-227) |
+| portrait | cut | emergency | 0.28, **1.00**, 0.28% | 0.00, **0.80**, 0.00% | **250 ms** (one, run 2, playing) | 282 ms (268-314) |
+| | | warning | 0.17, 0.06, 0.11% | 0.00% | 33 ms | 209 ms (199-230) |
+| | | advisory | 0.06, 0.11, 0.00% | 0.00% | 33 ms | 212 ms (205-226) |
+| | | notice | 0.06, 0.11, 0.06% | 0.00% | 33 ms | 210 ms (208-227) |
+| | fade | emergency | 0.28, 0.22, 0.22% | 0.00% | 50 ms | 288 ms (261-300) |
+| | | warning | 0.06, 0.06, 0.00% | 0.00% | 33 ms | 196 ms (192-245) |
+| | | advisory | 0.00, 0.06, 0.00% | 0.00% | 33 ms | 201 ms (194-214) |
+| | | notice | 0.06% | 0.00% | 33 ms | 211 ms (192-221) |
+
+- **The two specs that stalled before, 5 more runs each, in the same session.** Portrait emergency on a cut: 0.17 to 0.28% overall, 0.00% playing, worst 33 to 50 ms. Portrait notice on a fade: 0.00 to 0.06%, worst 17 to 33 ms. Neither stalled. With the 250 ms frame above, portrait emergency on a cut has now stalled (200 ms or more) in 3 of its 21 runs with the 40vmin tile, always while playing, against none in 5 with 23vmin (A/B above): it is the spec to watch.
+- **Realistic copy prepares as before.** It fits at full size in one measuring layout. Medians are 189 to 231 ms in landscape and 196 to 288 ms in portrait; portrait emergency is the highest, as before (about 265 ms then).
+- **Worst-case copy over budget cold.** Every field at its limit in `﷽`, so both fit searches run in full (eight halvings each), timed from load to `ready` from a cold start (cache and storage cleared, 25 s, every prepare):
+
+  | Orientation | Cold (first prepare) | Warm (later prepares) |
+  | --- | --- | --- |
+  | landscape | 590, 544, 541 ms | 347, 331, 328, 362, 360, 345 ms |
+  | portrait | 566, 533, 564 ms | 462, 449, 468, 432, 475, 437 ms |
+
+  The cold prepare is 533 to 590 ms, over the 500 ms budget by up to 90 ms, and inside the 2 s ready timeout. Warm prepares are within it: 328 to 362 ms landscape, 432 to 475 ms portrait. Such copy cannot be realistic: 40 of `﷽` in the headline. Fewer halvings would bring it in, at a coarser fit.
+
+  **Brought under the budget** (the same session's tools, later that day, the Pi otherwise as above). Without any search (the scale left at 1), the cold prepare of that copy is 373 to 394 ms, about default copy's (323 to 397 ms): the search was what took it over, 14 layouts of reshaped text. Step by step, 3 runs each orientation:
+
+  | Search | Layouts | Cold, landscape | Cold, portrait | Warm |
+  | --- | --- | --- | --- | --- |
+  | 8 halvings, each scale in turn | 18 | 541-590 ms | 533-566 ms | 328-475 ms |
+  | 6 halvings, each scale in turn | 14 | 458-579 ms | 471-541 ms | 296-417 ms |
+  | 6 halvings, both scales sharing each layout | 7 | 441-491 ms | 492-510 ms | 278-412 ms |
+  | Estimate, a stride, then halves to 1/64, sharing layouts (shipped) | 5 | 407-466 ms | 452-487 ms | 244-380 ms |
+
+  The last was run twice, 6 runs each orientation: every cold prepare under 500 ms (407 to 487 ms), every warm one 244 to 380 ms. The estimate is taken in the layout at full size, from what the text needs: height about as the square of the scale, the regions that share a column together. In the cases tried (W, W words, Japanese, `﷽`, `⸻` and `ﷺ` at every limit, with and without the code, both orientations) it came within 0.07 of the answer in all but one (0.14, portrait without the code, W words), and four probes found the scale in all but that one (six).
+
+### The headline's room and a search that always reaches 1/64 (review of #448, round 5, 2026-11-25)
+
+`b400dee`: the headline keeps room below its line for real scripts' marks (`padding-bottom: 0.25em`, measured by the fit), and the search may take eight probes (it stops at 1/64, four as a rule). Worst-case prepares, cold (first) and warm, with the tools above:
+
+| Copy | Orientation | Cold | Warm |
+| --- | --- | --- | --- |
+| `﷽` in every field (4 probes) | landscape | 517, 408, 475, 439, 433, 438 ms | 255-287 ms |
+| | portrait | 498, 450, 455, 444, 483, 426 ms | 314-371 ms |
+| W words in every field, no code (6 probes, the most seen) | landscape | 332, 343, 320 ms | 178-197 ms |
+| | portrait | 354, 342, 338 ms | 247-281 ms |
+
+- **One cold prepare over 500 ms in 12:** 517 ms, the session's first run (landscape, `﷽`). The other eleven were 408 to 498 ms; the same search at `5ec7a79` gave 407 to 487 ms in 12. The probe cap is not what it costs: `﷽` takes four probes, as before.
+- The case that takes the most probes (six) has light text, and its cold prepare is 320 to 354 ms.
+
+### A close first step, and the first prepare after a kiosk restart (review of #448, 2026-11-25)
+
+`98cb08b`: after probing the estimated scale, the search steps 1/64 from it when that probe's own layout puts the answer that close, so two probes bracket it (`﷽` in every field, with the code, takes two in landscape and four in portrait). Worst-case cold prepares, 6 per orientation, the first straight after `systemctl restart signforge-kiosk` (the supervisor, which the kiosk's unit wants and so starts again, stopped at once; in portrait the panel is turned right after the restart, which the kiosk's start resets):
+
+| Orientation | First after restart | Cold, runs 2 to 6 | Warm |
+| --- | --- | --- | --- |
+| landscape | **543 ms** | 446, 450, 450, 471, 434 ms | 263-299 ms |
+| portrait | **516 ms** | 441, 436, 447, 433, 427 ms | 314-363 ms |
+
+- **Every cold prepare is under 500 ms but the first after a kiosk restart, which is 516 to 543 ms.**
+- **A stated exception, accepted for #448:** worst-case input (`﷽` in every field at its limit), and only the first prepare after a kiosk restart, may take up to about 545 ms, well inside the 2 s ready timeout. Realistic copy fits at full size and runs no search, and the 1/64 fit is kept, which needs the two probes.
+- That first prepare without any search (the scale left at 1) is 419 and 423 ms for the same copy, and 410 ms for default copy. So in a freshly started Chromium the search's two probes, each a layout of the reshaped `﷽` text, cost about 100 to 120 ms. The 1/64 guarantee needs at least two probes.
+- An earlier attempt at this measurement is discarded: restarting the kiosk had started the supervisor again, which restarted the kiosk every 50 s for want of the bench page's heartbeat. That cut some runs short and put the panel back to landscape.
+
+### The headline's line height at 1.3 (review of #448, round 6, 2026-11-25)
+
+`a9d5e33`: the headline's line height goes from 1.02 to 1.3, so a wrapped line's marks stay off the line above. The same worst case, the same way (6 per orientation, the first straight after a kiosk restart, the supervisor stopped):
+
+| Orientation | First after restart | Cold, runs 2 to 6 | Warm |
+| --- | --- | --- | --- |
+| landscape | **502 ms** | 413, 418, 391, 432, 407 ms | 247-282 ms |
+| portrait | **502 ms** | 458, 461, 399, 440, 411 ms | 316-363 ms |
+
+- **Within the accepted exception:** the first prepare after a restart is 502 ms in both orientations (543 and 516 ms before), and every other cold prepare is under 500 ms.
+- No slower than at 1.02. With one restart per orientation, read the lower first prepare as no cost, not as a gain.
+- **Reverted** after the review's round 7: the headline is back at 1.02 (the owner put the demo's English look first and left other scripts' line spacing for a follow-up), so the section above holds for what ships.
+
+## Feed images on sync and prepare (issue #196, 2026-11-25)
+
+This branch (`e558986`) against master's player (`dc1244b`), both served beside the content from one origin by `packages/cli/bench/feed-images/serve.py`, measured with `device/pi/isolate.py` (`SF_PLAYER`; each spec starts cold, the HTTP cache and the origin's storage cleared first; 10 s to settle, 30 s measured; prepares printed after). Content from `packages/cli/bench/feed-images/make.ts`: the bench template over ten stories, `text` with no images and `photos` with each story's 1920x1080 photo and 480x270 thumbnail (20 seeded JPEGs, 4,933 kB). The stress set's `news` and `photo-kitchen` were built by master's `sf build` (schema 7, which both players play), with the bench's ten stories as `news`'s snapshot. 3 runs of each spec, cut and fade, landscape and portrait (`wlr-randr --transform 90`); the supervisor and the soak logger stopped.
+
+**Prepare: ten stories with their photos, against the same stories as text** (this branch):
+
+| Orientation | Spot | Overall (cut; fade) | Playing | Worst frame | Prepares, median (range) |
+| --- | --- | --- | --- | --- | --- |
+| landscape | text | 0.00%; 0.00% | 0.00% | 17 ms | 128 ms (110-144) |
+| | photos | 0.00-0.06%; 0.00-0.22% | 0.00% | 33 ms; 67 ms | 195 ms (193-245) cut, 205 ms (196-265) fade |
+| portrait | text | 0.00%; 0.00% | 0.00% | 17 ms | 147 ms (117-150) cut, 134 ms (113-148) fade |
+| | photos | 0.00%; 0.06-0.17% | 0.00% | 17 ms; 50 ms | 224 ms (209-261) cut, 229 ms (206-363) fade |
+
+Reading ten photos from the cache, decoding them and drawing them in their rows adds about 70 ms to a prepare in landscape and 80 to 90 ms in portrait. The slowest is 363 ms, inside the 500 ms budget, and nothing drops while the spot plays.
+
+**Sync: the photos arriving while a spot plays.** `text` plays while the `photos` snapshot's 20 JPEGs, held back until then, appear 5 s into the measured window. The next 5 s pass fetches them in the download worker, checks each hash and stores it. The time is from their appearing to the cache holding all 20, polled every 100 ms. Resource Timing cannot see a worker's fetches, so it is not used.
+
+| Orientation | Overall | Playing | Worst frame | All 20 held after |
+| --- | --- | --- | --- | --- |
+| landscape | 0.00, 0.00, 0.00% | 0.00% | 17 ms | 1,773, 1,665, 1,678 ms |
+| portrait | 0.00, 0.00, 0.06% | 0.00% | 17-33 ms | 1,653, 1,679, 1,675 ms |
+
+**This branch against master on shipped templates.** This branch also changes prepare for every template: framing, assets and theme in parallel, and data before framing.
+
+| Orientation | Spot | Transition | Master: overall, playing, worst, prepare median | This branch |
+| --- | --- | --- | --- | --- |
+| landscape | news | cut | 0.06-0.17%, 0.00%, 33 ms, 185 ms | 0.11-0.17%, 0.00%, 33 ms, 187 ms |
+| | | fade | 0.11-0.22%, 0.00%, 33 ms, 184 ms | 0.00-0.11%, 0.00%, 33 ms, 180 ms |
+| | photo-kitchen | cut | 0.11-0.17%, 0.00%, 50 ms, 231 ms | 0.17-**1.72**%, 0.00-**1.59**%, **483 ms** (one, run 1, playing), 230 ms |
+| | | fade | 0.11-0.22%, 0.00%, 33 ms, 230 ms | 0.17-0.33%, 0.00%, 33 ms, 229 ms |
+| portrait | news | cut | 0.06-0.17%, 0.00-0.06%, 50 ms, 262 ms | 0.11-0.17%, 0.00%, 50 ms, 252 ms |
+| | | fade | 0.28-0.39%, 0.00%, 50 ms, 249 ms | 0.28-0.44%, 0.00-0.06%, 50 ms, 252 ms |
+| | photo-kitchen | cut | 0.50-**2.33**%, 0.17-**2.03**%, **567 ms** (one, playing), 417 ms | 0.28-**2.00**%, 0.00-**1.04**%, **467 ms** (one, loading) and 283 ms (one, playing), 412 ms |
+| | | fade | **1.44-1.56%**, 0.25%, 67 ms, 416 ms | **1.28-1.61%**, 0.06-0.31%, 67 ms, 416 ms |
+
+- **Prepares match.** The medians are within 10 ms of each other everywhere. Each build's single stalls fall in the same specs: the 4K photo, and portrait photo-kitchen above all.
+- **Portrait photo-kitchen is over budget in both builds** (1.28 to 2.33% overall), as it was before: The look kit and Info frame above.
+- **The one stall only this branch showed** is landscape photo-kitchen, cut, run 1: a 483 ms frame while it played, which made 1.72% overall. Runs 2 and 3 were 0.17 and 0.28%, and master's portrait run of the same spot held a 567 ms frame. Single stalls of this size come with that spot on both builds. Three runs cannot tell this one apart from them.
+- **Five more runs each, later the same day** (review of #240), landscape photo-kitchen on a cut, the two builds in turn (this branch at `e675efd`, master's player at `dc1244b`, the same stress content):
+
+  | Build | Overall | Playing | Worst frame | Prepares, median |
+  | --- | --- | --- | --- | --- |
+  | master | 0.17, 0.17, 0.22, 0.11, 0.11% | 0.00% | 33 ms | 230 ms |
+  | this branch | 0.17, 0.17, 0.17, 0.17, 0.11% | 0.00% | 33 ms | 231 ms |
+
+  Neither build stalled. Over all eight runs of this spec, this branch had one 483 ms frame and master none; with master's own 567 ms frame on portrait photo-kitchen, that is no sign of a regression.
+
 ## Baseline: the same player on a Mac (2026-11-17)
 
 The stress playlist on an Apple M5 Pro laptop in Chrome for Testing 157, a windowed app on the built-in 120 Hz ProMotion panel. Same build, content and measurement as the Pi.
@@ -1021,3 +1196,482 @@ Over budget, stated plainly (nothing skipped in any spec):
 What the template changed across earlier sessions (first at `b2270523`, second at `ab9802e0`, the same spots): card inks were each resolved with a 1x1 canvas read and a forced style pass, about 40 of each per prepare, and the photo, a drifting layer of its own, was painted before `ready` in every look but Poster. Batching the inks into one style pass with no canvas, and keeping the photo unpainted until play in every look, took Pop's landscape cut from 2.11% (1.37% while playing) and prepares of 988 to 1,117 ms down to 0.72% (414 to 461 ms after the first) in the second session (before landing in Chromium's slower prepare mode at 1.44% / 577 to 658 ms on the re-measure above; Pop's landscape fade prepares remained 436 to 468 ms except one 647 ms), Night's from 733 to 858 ms to 443 to 464 ms, and Corporate's from 572 to 786 ms to 392 to 448 ms; Poster, whose photo already waited, was 491 to 544 ms after the first. In the first session, portrait cuts were 0.72 to 2.83% and prepares 726 to 1,339 ms.
 
 Ablations in the second session, as variant templates built beside it: Pop without its looping sticker wobble and glyph bob, and Pop and Night without any rounded clip (the panel's corners painted over it in the ground colour, cards not clipping). Neither moved the numbers past the run-to-run spread, which was 0.72 to 1.33% for the same landscape layout and 0.83 to 2.67% in portrait, so the canvas's wobble and rounded corners stay. The rail-off layout (the clock and the weather as a chip on the photo) was measured only in the first session, before the fixes: 0.33 to 1.83% landscape, as its rail-on spec.
+
+## The held drift without `will-change` (issue #218, 2026-11-23)
+
+In portrait the kit holds `.lk-drift` still but kept its `will-change: transform`, so the held photo still had a layer of its own. #218 drops it there. A/B on the Announcement (the kit's 4K photo in `.lk-drift`, the river photo scaled to 3413x1920, QR code on), portrait, cut, a 10 s spot played on its own: A built with master's `looks.css`, B with the branch's, the same player for both at `http://127.0.0.1:8090/cp218/<a|b>/`. Portrait set with `wlr-randr --transform 90` and restored. Method as for the look kit: `isolate.py`'s measurement with a base path, the HTTP cache and the origin's storage cleared and the service worker bypassed before each spec, 10 s to settle and 30 s measured, the supervisor and the soak logger stopped, `__sf.prepares` read after each spec. Two sessions: Pop and Night alternated ABBA twice (19:18 to 19:29), then Pop alone BAAB twice (19:31 to 19:36). Nothing was skipped.
+
+| Look | Build | Overall | Playing | Worst frame | Prepares |
+| --- | --- | --- | --- | --- | --- |
+| Pop | A (master) | 1.11, 0.78, 0.89, 1.05, 0.72, 0.89, 0.94, 0.83% | 0.35-0.65% | 50-67 ms | median 548 ms, 5 of 24 at 732-780 |
+| | B (branch) | 0.67, 0.72, 0.72, 0.67, 0.56, 0.78, 0.89, 0.56% | 0.18-0.29% | 67 ms | median 543 ms, 11 of 24 at 699-776 |
+| Night | A (master) | 0.56, 0.28, 0.28, 0.33% | 0.12-0.29% | 33-50 ms | 406-440 ms, median 424 |
+| | B (branch) | 0.28, 0.33, 0.28, 0.28% | 0.00-0.12% | 33-50 ms | 405-425 ms, median 408 |
+
+- **Fewer frames dropped while playing**, in both looks: Pop 0.18-0.29% against 0.35-0.65%, Night 0.00-0.12% against 0.12-0.29%. Pop's overall fell from 0.72-1.11% (three of eight runs over 1%) to 0.56-0.89%.
+- **Over budget in both builds.** Pop's prepare medians are 548 ms (A) and 543 ms (B) against the 500 ms budget, and every Pop run's worst frame was 67 ms (one A run 50 ms) against 50 ms. Night's prepares (405 to 440 ms) and worst frames (33 to 50 ms) are within it.
+- **Prepares:** the same median, but Pop's fell into the slower of its two modes (about 700 ms against about 530) more often with B: 11 of 24 against 5 of 24. That difference is not significant (p ≈ 0.12, Fisher's exact test, two-sided). The two modes are the kit's (The look kit, above), and A has them too.
+
+## News 2.0 (issue #202, 2026-11-25)
+
+The new News template in each look, its lead turning every 6 s through four stories in a 24 s play (`rotationSeconds` 6), over ten stories from a snapshot: eight with a 1920x1080 photo and a 480x270 thumbnail (generated JPEGs, as `packages/cli/bench/feed-images/make.ts` makes them), two without, most with a summary. Each spec is `isolate.py 75 <transition>`, started cold, so its first prepare is the first after a page load (the look kit's, #232) and the others are warm. `-still` is the same spot held to one story (`rotationSeconds` 30). Memory is Chromium's summed RSS and the kernel's CmaFree, sampled every 2 s while the spec ran. The supervisor was stopped and the panel turned with `wlr-randr` for portrait.
+
+| Look | Orientation | Cut: all%, play% | Fade: all%, play%, trans% | Worst frame | Prepares, cut / fade (ms) | Still (one story), prepares | RSS max |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Pop | landscape | 0.13, 0.02 | 0.16, 0.02, 1.11 | 50 ms | 415, 445, 427 / 413, 417, 427 | 396, 395, 377 | 1.36 GB |
+| Poster | landscape | 0.13, 0.02 | 0.27, 0.00, 6.59 | 50 ms | 434, 463, 446 / 449, 462, 430 | 365, 364, 377 | 1.38 GB |
+| Night | landscape | 0.18, 0.05 | 0.16, 0.05, 0.00 | 50 ms | 448, 448, 462 / 447, 452, 462 | 379, 395, 361 | 1.36 GB |
+| Corporate | landscape | 0.20, 0.07 | 0.13, 0.00, 0.00 | 50 ms | 413, 412, 411 / 413, 395, 380 | 363, 344, 361 | 1.36 GB |
+| Pop | portrait | 0.27, 0.07 | 0.64, 0.12, 20.88 | 67 ms | 499, 530, 509 / 512, 499, 496 | 482, 481, 463 | 1.38 GB |
+| Poster | portrait | 0.27, 0.07 | 0.80, 0.16, 22.58 | 67 ms | 518, 518, 516 / 514, 515, 508 | 465, 484, 482 | 1.39 GB |
+| Night | portrait | 0.18, 0.02 | 0.67, 0.07, 20.43 | 67 ms | 495, 527, 492 / 510, 511, 505 | 477, 454, 472 | 1.36 GB |
+| Corporate | portrait | 0.18, 0.05 | 0.58, 0.07, 17.58 | 67 ms | 496, 528, 478 / 498, 480, 493 | 448, 478, 445 | 1.37 GB |
+
+- **Dropped frames are within 1% in every spec**, 0.13 to 0.80% overall and at most 0.16% while playing. A portrait fade drops 17 to 23% of its own frames, as every template's portrait fade does.
+- **Landscape is within the prepare budget**, 380 to 463 ms. **Portrait is over it in 14 of 24 prepares, by up to 30 ms** (478 to 530 ms), all six Poster runs among them (508 to 518 ms); the worst are warm second prepares (527 to 530 ms), not the first after a page load. The same spot held to one story takes 445 to 484. In line with the other look-kit templates (Room status, Announcement, Info frame). **Accepted by the owner** (#476).
+- **Worst frames** are 50 ms in landscape and 67 ms in portrait, against 50, in the load and fade phases, never while playing.
+- **The stacked stories cost little memory**: 5 to 35 MB more Chromium RSS than one story, and no CMA (CmaFree's low point is the same, 447 MB, for one story and four).
+- **Each later story's photo loads in play.** With every story's photo set in prepare, the SDK decoded all four before ready: portrait prepares took 546 to 602 ms (one cold run per spec), against 499 to 531 with only the first photo. Loading each later one 3 s before its turn costs no frames while playing (0.02 to 0.16%).
+- Portrait is the template as shipped. Landscape was measured just before one change: a story without a photo then sat at the foot of the lead, not in its middle (layout only).
+
+**The N100 at 4K60, a second check** (Proxmox host `pve`, LXC 105, a virtual 4K60 HDMI display, real DRM scan-out; `isolate.py 45`, landscape, each look cut and fade): 0.00 to 0.15% of frames dropped, worst frames 17 to 50 ms, prepares 115 to 167 ms. At 4K the N100 has room to spare; the Pi sets the budget.
+
+### News 2.0.2: small photos framed smaller (#492, 2026-11-26)
+
+The same bench with every photo 700x560, as The Guardian's feed sends them, so each lead takes the smaller frame (at most 1.25 times its size) and the first story's prepare waits for its photo to load. `isolate.py 60 cut`, each look, the lead turning every 6 s:
+
+| Look | Landscape: all%, play% | Landscape prepares (ms) | Portrait: all%, play% | Portrait prepares (ms) |
+| --- | --- | --- | --- | --- |
+| Pop | 0.14, 0.03 | 413, 411 | 0.11, 0.00 | 547, 510 |
+| Poster | 0.11, 0.00 | 418, 415 | 0.14, 0.03 | 512, 526 |
+| Night | 1.30, 1.18 (two stalls in play, 283 and 450 ms); again 0.11, 0.00 and 0.17, 0.00 | 429, 411; 412, 428; 429, 397 | 0.14, 0.03 | 517, 513 |
+| Corporate | 0.11, 0.00 | 380, 362 | 0.11, 0.00 | 496, 530 |
+
+- Within the budget in landscape. Night's first run dropped 1.30% to two long frames while playing; two more runs of it dropped 0.11 and 0.17%, so it is not the layout.
+- Portrait prepares, 496 to 547 ms, are where 2.0.0's were with large photos (478 to 530): a small photo decodes faster and the wait for its load costs about as much. Over the budget by up to 47 ms in 7 of 8, as accepted for 2.0.0.
+
+
+## The bundle cache, with and without (issue #213, 2026-11-26)
+
+The player has kept each bundle it has read, by hash, for the manifest last prepared, since #91 (`framesFor` in `packages/player/src/slot.ts`): a spot that plays again reads nothing. #213 asked how much that saves on a large bundle. Master (`a6be8a32`) against the same build with the cache turned off (every prepare reads the bundle from Cache Storage and runs `containedFrames` on it), served beside the deployed player at `http://localhost:8090/b213/<build>/` so the kiosk's own origin and storage were not touched, the supervisor stopped while measured. `isolate.py 60 cut announcement+info-frame` on the static content, two bundles of 398 and 403 kB alternating, so every prepare after a run's first is a second play of its bundle. ABBA twice in landscape, once in portrait (output rotated with `wlr-randr --transform 90`, 1080x1920), five prepares a run.
+
+| Orientation | Build | Prepares after the first | Median | First prepare | Overall | Loading next | Playing | Worst frame |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | cache | 324-379 (one 1,926) | 344 ms | 499-599 ms | 0.47, 0.50, 0.58, 3.14% | 13-16, 52% | 0.00-0.06% | 67 (one 1,583) ms |
+| | no cache | 379-596 | 501 ms | 549-617 ms | 1.22, 1.28, 1.36, 1.44% | 27-31% | 0.06% | 117-217 ms |
+| portrait | cache | 305-339 (one 575) | 311 ms | 509, 555 ms | 0.39, 0.44% | 12, 13% | 0.00, 0.03% | 50 ms |
+| | no cache | 358-507 | 455 ms | 495, 551 ms | 1.11, 1.17% | 26, 28% | 0.03, 0.09% | 133, 150 ms |
+
+- **Reading a 400 kB bundle again costs about 150 ms a prepare on the Pi** (157 ms landscape, 144 ms portrait, by median), and halves what the screen drops while the next spot loads. That is more than the 43 to 47 ms the parse and hash took timed alone in a tab (The look kit, above): inside a prepare the read and parse compete with the spot on screen.
+- **The cache's numbers are the per-template tables' own.** Its repeat prepares sit where the kit's templates measured on their own (Room status, Info frame, above).
+- **One cache run had a 1,926 ms prepare** with a 1,583 ms stall while loading, 3.14% overall. None of the other five cache runs, nor any no-cache run, came near it; it is not the cache (a hit does less than a miss) and was not chased further.
+- **Memory.** The cache holds, for each bundle of the manifest last prepared, its wrapper document (a few hundred bytes of policy) and its template document, about the bundle's own size: about the manifest's bundle bytes in all (2.26 MB for the 12 templates of this content), within a 4 GB Pi's means and bounded by what one manifest uses. A bundle a newly prepared manifest does not use is dropped then.
+
+## A template's first prepare (issue #232, 2026-11-26)
+
+Where a look-kit template's first prepare after a page load goes, and what reading the bundles still to come while a spot plays (`warmBundles` in `packages/player/src/slot.ts`) changes. Builds served beside the deployed player at `http://localhost:8090/c232/<build>/` with the supervisor stopped while measured, on the static content.
+
+**Where it goes.** A build that timed each stage of `Slot.template`, four page loads a template, each with the HTTP cache and the origin's storage cleared, landscape. Cumulative ms from the prepare's start:
+
+| Template (bundle) | Bundle read | Parse and contain | Wrapper frame loaded | Template frame's `loaded` | `ready` |
+| --- | --- | --- | --- | --- | --- |
+| room-status (402 kB), first prepare | 8-12 | 73-181 | 113-227 | 254-374 | 410-546 |
+| announcement (398 kB), first prepare | 10-13 | 76-128 | 116-197 | 259-347 | 466-552 |
+| clock (73 kB), first prepare | 5-6 | 43-51 | 81-86 | 161-175 | 281-317 |
+| room-status, later prepares in the page | 0 | 0 | 33-37 | 140-152 | 220-237 |
+
+Of the 300 ms or so between a kit template's first prepare and its later ones, the bundle's read and parse (`containedFrames`, cold) is about 200 ms; the rest is the template's frame starting (about 35 ms more to `loaded`) and its first init (about 70 ms more to `ready`: its fonts and first style and layout in a new process). The parse varies run to run, 73 to 213 ms for the same bundle.
+
+**The fix: the bundles still to come are read while a spot plays.** Master (`e27cb4b2`) against the branch. A kit template's first prepare when another spot plays first (a fresh page load each, `clock` then the kit template), ABBA, three loads a build per order in landscape, two in portrait:
+
+| Orientation | Template | Before | After |
+| --- | --- | --- | --- |
+| landscape | room-status | 332-477 ms | 268-316 ms |
+| | announcement | 440-595 ms | 361-391 ms |
+| portrait | room-status | 517-549 ms | 352-381 ms |
+| | announcement | 683-770 ms | 464-484 ms |
+
+`isolate.py 60 cut room-status+announcement+countdown+info-frame`, ABBA, the first cycle's first plays inside the measured minute:
+
+| Orientation | Build | First plays (prepares) | Repeat plays | Overall | Loading next | Playing | Worst frame |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| landscape | before | 472, 377, 570; 520, 511, 486 | 250-315 | 0.97, 1.08% | 25.0, 27.5% | 0.00, 0.03% | 17, 50 ms |
+| | after | 354, 262, 353; 353, 260, 375 | 250-316 | 0.42, 0.42% | 11.9, 12.6% | 0.03, 0.06% | 50, 67 ms |
+| portrait | before | 575, 322, 505; 616, 282, 479 | 210-394 | 0.89, 0.56% | 22.8, 14.9% | 0.03, 0.00% | 167, 17 ms |
+| | after | 446, 244, 325; 428, 227, 326 | 222-391 | 0.56, 0.33% | 10.5, 10.7% | 0.23, 0.00% | 133, 67 ms |
+
+- **Every first play but the page's first is now within the budget,** and the screen drops half as many frames while the next spot loads: a first play no longer parses its bundle while the spot before it is on screen.
+- **The runs above do not show the read-ahead's cost while it runs** (review of #555): `isolate.py` starts counting 10 s after the page loads, when it is long done. Its one portrait run at 0.23% playing was a single 133 ms frame in steady state, where the read-ahead finds nothing left to read.
+
+**While it runs.** The first seconds after a page load, nothing reset, `room-status+announcement+countdown+info-frame`, cut, landscape, ABBA, three loads a build per order (the read-ahead reads the other three bundles while `room-status` plays, from about 1 s in):
+
+| Build | Player frame monitor, playing (first 12 s) | Its stalls while playing | Presented by the compositor, 1 to 7 s in | Gaps over 50 ms | Worst gap |
+| --- | --- | --- | --- | --- | --- |
+| before | 0.00% in all six | none | 198-209 frames | 8-9 | 500-509 ms |
+| after | 0.42-3.95% | 67-250 ms, one to two a load | 196-207 frames | 8-9 | 500-502 ms |
+
+- **Each bundle's read and parse is one task of about 65 to 250 ms on the player page's main thread**, started when it is idle but not cut into pieces. The player's own frame monitor (a `requestAnimationFrame` loop on that thread) counts it as dropped `play` frames, in the first seconds after a page load or a new manifest.
+- **The compositor presented the same frames either way** (a `viz` trace, `Display::DrawAndSwap`): the template draws in its own process, and the player page draws nothing while a spot plays. These templates hold still between their animations, so the compositor presents only on a change, which is why the counts sit near 200 in 6 s; the gaps and the worst gap are the templates' own cadence, the same in both builds. So the stalls are the monitor's, not the panel's.
+- **A prepare that starts while a read runs waits for it**: a spot of about 5 s or less, whose successor loads at once. Running `containedFrames` in a worker would take it off the main thread; not done here.
+- **The page's first prepare is unchanged** (no spot plays before it to read ahead under): a kit template as the first spot after a page load took 432-558 ms before (one 948) and 455-542 ms after, landscape and portrait together. That is the cold-start cost left: its bundle's first parse and a new template process. Its bundle could be smaller (only the chosen look's fonts, as separate resources; a look-kit change, #232), and the parse itself is the containment check, which this does not touch.
+
+## Template bundles parsed in a worker (issue #561, 2026-11-26)
+
+The read-ahead of #232 parsed each bundle (`containedFrames`) as one 65 to 250 ms task on the player page's main thread; the frame monitor counted it as dropped `play` frames in the first seconds after a page load, and a prepare that started meanwhile waited for it. Now the parse runs in a worker, one for the page (`packages/player/src/bundles.ts`), started as the page loads; a parse asked for before it is ready (the page's first prepare) runs on the page. Master (`83e3f548`) against the branch, served beside the deployed player with the supervisor stopped while measured, landscape, ABBA.
+
+**The first 12 s after a fresh page load**, nothing reset (`room-status+announcement+countdown+info-frame`, cut, three loads a build per order):
+
+| Build | Frame monitor, playing | Stalls while playing | Loading next | Page's first prepare |
+| --- | --- | --- | --- | --- |
+| before | 0.62-2.52% | 50-133 ms, one to three a load | 18.8-28.6% | 438-566 ms |
+| after | 0.00% in all six | none | 7.7-11.3% | 508-558 ms |
+
+- **The read-ahead no longer stalls the player page.** Its parses run in the worker; the only stalls left are the prepares' own (67 ms at most).
+- **The page's first prepare is about 40 ms slower by median** (524 against 482 ms), parsed on the page as before, while the worker loads beside it (157 kB of script, compiled on another core). It stays within the cold-start budget proposed for that prepare (about 600 ms, `docs/template-spec.md`). A first version that waited for the worker took 576 to 845 ms.
+
+**A kit template's first prepare when `clock` plays first** (fresh page loads): the same, as the read-ahead had already done the parse: room-status 265-283 ms in both builds, announcement 362-392 before and 362-379 after; `clock`, the page's first prepare, 282-322 before and 308-349 after.
+
+**From 10 s in** (`isolate.py 60 cut`, the same four): the same in both builds, as the read-ahead is done by then. Overall 1.17, 0.39% before, 0.47, 0.39% after; loading next 11.3, 11.7% against 12.8, 13.1%; playing 0.86, 0.03% against 0.09, 0.00%.
+
+## A parse inside the bundle worker (issue #577, 2026-11-26)
+
+The worker's hang limit (`HUNG_MS`, 750 ms in `packages/player/src/bundles.ts`) was set from the page's main-thread parse (65 to 250 ms). This times the worker itself. Master `b820dd9e`'s player, with a measuring build's timing hooks, served beside the deployed one with the supervisor and soak logger stopped. Each run: a fresh page load playing `clock` (the static content, its twelve templates), 20 s to settle, then the two largest bundles (Info frame, 403,207 bytes, and Room status, 401,771) read from the file cache and parsed through `parseBundle`: ten times one alone, then ten pairs posted together, one of each pair waiting on the other (the worker reads each Blob before it parses, so either may be answered first). Times are from the post to the answer, on the page's clock. Three runs as the player runs (the read-ahead had already used the worker), three with the read-ahead off (`requestIdleCallback` removed), so the first parse is the worker's first.
+
+| | Alone | A pair: answered first | A pair: answered second |
+| --- | --- | --- | --- |
+| worker warmed by the read-ahead | 40-87 ms (the first of a run 76-83) | 41-49 ms | 79-103 ms |
+| worker's first parses | 41-75 ms (the first of a run 72-75) | 41-52 ms | 87-103 ms |
+
+- **Every read was answered by the worker, and none hung** (180 reads, `__sf.bundleHangs` 0).
+- **750 ms has the margin**: the slowest answer, a read queued behind another, took 103 ms, about a seventh of it. A read would need six or seven 400 kB parses ahead of it to reach the limit; the player has at most two in flight (a prepare and the read-ahead's one).
+- **The worker parses a 400 kB bundle in about 45 ms**, against 65 to 250 ms for the page's main thread at a prepare (#232): it parses with nothing else on its thread.
+
+## The template set on master (issue #203, 2026-11-26)
+
+Every base template at master `c08fbb3f` (after the motion refresh, #501 and #527, and the read-ahead of #555), each in every look: the look kit's four (Pop, Poster, Night, Corporate) for Announcement, Countdown, Info frame, News and Room status; Alert's four severities; Menu board's two themes; Agenda, Clock, C-store promo, Photo promo and Weather as they come. 31 spots per orientation.
+
+**Content.** Built with `sf build` from the stress example's spots (`examples/stress`, its canonical media): each spot 10 s, its look set, its live-data bindings left out, so it plays its own data (no feed waits; News without row photos, Info frame and Room status with their sample data). Announcement over the 4K river photo with a QR code, Info frame over the 4K kitchen photo with its crawl, Photo promo the 4K river photo, Weather the rain scene, Agenda the meeting room. No brand kit; cut only. Built once per orientation (the screen's `orientation`), portrait with the output rotated (`wlr-randr --transform 90`) and restored afterwards.
+
+**Method.** The master player served beside the deployed one at `http://localhost:8090/m203/<orientation>/`, the supervisor and the soak logger stopped while measured. Per spot, a fresh page load playing it alone (`?spots=`, the HTTP cache and the origin's storage cleared, as `isolate.py` does): its first prepare as the page made it; then, from 10 s after the load, 30 s measured with the counters reset (as `isolate.py`): frames by phase, stalls, the prepares made meanwhile (repeats of the same spot) and the worst frame. "Over budget" marks a repeat prepare over 500 ms, more than 1% dropped overall, and a first prepare over the cold-start budget proposed in #232 (about 600 ms, pending the owner). Specs over budget, and those with a single long frame, were measured twice more.
+
+
+**Landscape**
+
+| Spot | First prepare | Repeat prepares | Overall | Playing | Loading next | Worst frame | Over budget |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| announcement-pop | 613 ms | 326, 327, 325 | 0.39% | 0.00% | 11.7% | 67 ms | first > 600 ms |
+| announcement-poster | 594 ms | 329, 328, 344 | 0.39% | 0.00% | 11.5% | 67 ms | - |
+| announcement-night | 613 ms | 313, 312, 311 | 0.33% | 0.00% | 10.5% | 50 ms | first > 600 ms |
+| announcement-corporate | 611 ms | 313, 312, 311 | 0.33% | 0.00% | 10.5% | 50 ms | first > 600 ms |
+| countdown-pop | 614 ms | 213, 226, 225 | 0.22% | 0.00% | 9.8% | 50 ms | first > 600 ms |
+| countdown-poster | 612 ms | 230, 247, 229 | 0.22% | 0.00% | 9.3% | 50 ms | first > 600 ms |
+| countdown-night | 582 ms | 246, 247, 244 | 0.33% | 0.00% | 13.3% | 50 ms | - |
+| countdown-corporate | 587 ms | 196, 210, 208 | 0.22% | 0.00% | 10.5% | 50 ms | - |
+| info-frame-pop | 693 ms | 380, 398, 377 | 0.39% | 0.00% | 10.0% | 67 ms | first > 600 ms |
+| info-frame-poster | 696 ms | 361, 376, 359 | 0.44% | 0.00% | 11.9% | 67 ms | first > 600 ms |
+| info-frame-night | 716 ms | 398, 345, 394 | 0.67% | 0.06% | 15.7% | 100 ms | first > 600 ms |
+| info-frame-corporate | 680 ms | 379, 360, 375 | 0.50% | 0.00% | 13.2% | 67 ms | first > 600 ms |
+| news-pop | 539 ms | 197, 197, 195 | 0.22% | 0.00% | 11.1% | 50 ms | - |
+| news-poster | 550 ms | 191, 191, 205 | 1.11% | 0.91% | 11.4% | 283 ms | over 1% dropped |
+| news-night | 577 ms | 395, 192, 193, 193 | 0.28% | 0.00% | 10.6% | 50 ms | - |
+| news-corporate | 561 ms | 190, 203, 202 | 0.22% | 0.00% | 11.4% | 50 ms | - |
+| room-status-pop | 638 ms | 212, 211, 209 | 0.28% | 0.00% | 12.8% | 50 ms | first > 600 ms |
+| room-status-poster | 560 ms | 217, 217, 216 | 0.28% | 0.00% | 12.8% | 50 ms | - |
+| room-status-night | 566 ms | 232, 229, 229 | 0.33% | 0.00% | 14.3% | 50 ms | - |
+| room-status-corporate | 558 ms | 214, 228, 210 | 0.28% | 0.00% | 12.5% | 50 ms | - |
+| alert-emergency | 366 ms | 199, 194, 195 | 0.11% | 0.00% | 5.6% | 33 ms | - |
+| alert-warning | 357 ms | 187, 154, 168 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| alert-advisory | 340 ms | 194, 162, 160 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| alert-notice | 336 ms | 179, 161, 159 | 0.72% | 0.73% | 0.0% | 233 ms | - |
+| menu-dark | 297 ms | 162, 159, 160 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| menu-light | 292 ms | 162, 161, 160 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| agenda | 307 ms | 144, 326, 142 | 0.22% | 0.00% | 10.5% | 67 ms | - |
+| clock | 322 ms | 167, 164, 165 | 0.11% | 0.00% | 6.7% | 33 ms | - |
+| cstore-promo | 337 ms | 175, 178, 180 | 0.11% | 0.00% | 6.2% | 33 ms | - |
+| photo-promo | 375 ms | 266, 279, 262 | 0.11% | 0.00% | 4.1% | 33 ms | - |
+| weather | 829 ms | 373, 508, 413 | 1.89% | 1.28% | 15.6% | 117 ms | repeat prepare > 500 ms; over 1% dropped; first > 600 ms |
+
+**Portrait**
+
+| Spot | First prepare | Repeat prepares | Overall | Playing | Loading next | Worst frame | Over budget |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| announcement-pop | 1133 ms | 410, 409, 408 | 0.33% | 0.00% | 8.0% | 50 ms | first > 600 ms |
+| announcement-poster | 1016 ms | 399, 415, 413 | 0.17% | 0.00% | 4.1% | 33 ms | first > 600 ms |
+| announcement-night | 970 ms | 424, 406, 448 | 0.44% | 0.06% | 9.0% | 50 ms | first > 600 ms |
+| announcement-corporate | 990 ms | 425, 422, 439 | 0.33% | 0.06% | 6.3% | 50 ms | first > 600 ms |
+| countdown-pop | 629 ms | 242, 223, 222 | 0.17% | 0.00% | 7.3% | 33 ms | first > 600 ms |
+| countdown-poster | 594 ms | 308, 304, 303 | 0.44% | 0.00% | 14.5% | 67 ms | - |
+| countdown-night | 578 ms | 228, 210, 208 | 0.17% | 0.00% | 7.5% | 33 ms | - |
+| countdown-corporate | 584 ms | 230, 229, 227 | 0.22% | 0.00% | 9.5% | 50 ms | - |
+| info-frame-pop | 825 ms | 392, 395, 415 | 0.28% | 0.00% | 6.8% | 50 ms | first > 600 ms |
+| info-frame-poster | 811 ms | 396, 411, 418 | 0.22% | 0.00% | 5.4% | 50 ms | first > 600 ms |
+| info-frame-night | 762 ms | 394, 396, 391 | 0.33% | 0.00% | 8.1% | 50 ms | first > 600 ms |
+| info-frame-corporate | 762 ms | 392, 406, 371 | 0.33% | 0.00% | 8.3% | 50 ms | first > 600 ms |
+| news-pop | 551 ms | 188, 203, 200 | 0.28% | 0.00% | 13.9% | 50 ms | - |
+| news-poster | 557 ms | 188, 206, 204 | 0.28% | 0.00% | 13.5% | 50 ms | - |
+| news-night | 565 ms | 189, 208, 204 | 0.28% | 0.00% | 13.5% | 50 ms | - |
+| news-corporate | 558 ms | 195, 193, 190 | 0.17% | 0.00% | 8.3% | 33 ms | - |
+| room-status-pop | 596 ms | 239, 229, 236 | 0.28% | 0.00% | 11.9% | 50 ms | - |
+| room-status-poster | 574 ms | 222, 228, 226 | 0.22% | 0.00% | 9.8% | 50 ms | - |
+| room-status-night | 573 ms | 297, 282, 297 | 0.78% | 0.29% | 16.7% | 100 ms | - |
+| room-status-corporate | 573 ms | 238, 221, 234 | 0.33% | 0.06% | 12.2% | 50 ms | - |
+| alert-emergency | 401 ms | 246, 280, 261 | 0.28% | 0.00% | 10.4% | 50 ms | - |
+| alert-warning | 387 ms | 192, 194, 190 | 0.17% | 0.00% | 8.3% | 33 ms | - |
+| alert-advisory | 379 ms | 188, 188, 187 | 0.06% | 0.00% | 2.8% | 33 ms | - |
+| alert-notice | 378 ms | 179, 193, 191 | 0.06% | 0.00% | 2.9% | 33 ms | - |
+| menu-dark | 296 ms | 179, 178, 177 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| menu-light | 301 ms | 174, 174, 173 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| agenda | 310 ms | 150, 150, 147 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| clock | 325 ms | 202, 199, 215 | 0.28% | 0.00% | 13.5% | 50 ms | - |
+| cstore-promo | 349 ms | 197, 197, 198 | 0.17% | 0.00% | 8.6% | 33 ms | - |
+| photo-promo | 724 ms | 716, 780, 747 | 0.72% | 0.12% | 8.2% | 67 ms | repeat prepare > 500 ms; first > 600 ms |
+| weather | 437 ms | 472, 441, 773 | 5.06% | 4.12% | 21.2% | 100 ms | repeat prepare > 500 ms; over 1% dropped |
+
+
+**Re-runs, landscape**
+
+| Spot | First prepare | Repeat prepares | Overall | Playing | Loading next | Worst frame | Over budget |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| news-poster | 563 ms | 196, 194, 190 | 0.17% | 0.00% | 8.3% | 33 ms | - |
+| alert-notice | 363 ms | 177, 159, 159 | 0.00% | 0.00% | 0.0% | 17 ms | - |
+| weather | 481 ms | 426, 425, 428 | 1.89% | 1.16% | 18.7% | 117 ms | over 1% dropped |
+| news-poster | 567 ms | 192, 192, 192 | 0.22% | 0.00% | 11.4% | 50 ms | - |
+| alert-notice | 334 ms | 168, 154, 168 | 0.06% | 0.00% | 3.2% | 33 ms | - |
+| weather | 471 ms | 380, 377, 470 | 2.00% | 1.33% | 17.8% | 117 ms | over 1% dropped |
+
+**Re-runs, portrait**
+
+| Spot | First prepare | Repeat prepares | Overall | Playing | Loading next | Worst frame | Over budget |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| photo-promo | 538 ms | 721, 705, 767 | 0.50% | 0.18% | 4.5% | 50 ms | repeat prepare > 500 ms |
+| weather | 523 ms | 514, 477, 561 | 5.22% | 4.16% | 24.7% | 117 ms | repeat prepare > 500 ms; over 1% dropped |
+| announcement-pop | 948 ms | 414, 410, 410 | 0.17% | 0.00% | 4.0% | 33 ms | first > 600 ms |
+| room-status-night | 570 ms | 281, 298, 270 | 0.44% | 0.00% | 15.7% | 67 ms | - |
+| photo-promo | 719 ms | 781, 756, 747 | 0.72% | 0.12% | 8.0% | 67 ms | repeat prepare > 500 ms; first > 600 ms |
+| weather | 554 ms | 472, 507, 480 | 6.00% | 4.79% | 29.5% | 133 ms | repeat prepare > 500 ms; over 1% dropped |
+| announcement-pop | 964 ms | 416, 415, 431 | 0.39% | 0.00% | 9.2% | 50 ms | first > 600 ms |
+| room-status-night | 573 ms | 283, 283, 281 | 0.72% | 0.23% | 17.6% | 83 ms | - |
+
+**Over budget, repeatably:**
+- **Weather, rain.** Landscape 1.89 to 2.00% dropped (1.16 to 1.33% playing, worst 117 ms) in three runs, where #96 measured landscape within budget; portrait 5.06 to 6.00% (4.12 to 4.79% playing), repeat prepares up to 773 ms. #96.
+- **Photo promo, 4K photo, portrait.** Repeat prepares 705 to 781 ms in all three runs (first 538 to 724 ms); drops within budget (0.50 to 0.72%). Landscape is within (262 to 279 ms).
+- **First prepares after a page load** over the proposed ~600 ms cold-start budget: Announcement in portrait (948 to 1,133 ms, every look; its repeats 399 to 448 ms are within the 500 ms budget, which #229's 662 ms Pop portrait median no longer misses); Info frame (680 to 716 ms landscape, 762 to 825 ms portrait; repeats 345 to 418 ms); and just over it, Announcement in landscape but Poster (611 to 613 ms), Countdown's Pop and Poster in landscape and Pop in portrait (612 to 629 ms) and Room status's Pop in landscape (638 ms). Every other kit template's first prepare is 539 to 598 ms, and every other template's 292 to 437 ms (Weather's in landscape was 829 ms in the first pass, 471 and 481 ms in the re-runs; Photo promo's portrait ones are above).
+
+**Within budget:** every other spec, in both orientations: repeat prepares 142 to 448 ms, 0.00 to 0.78% dropped. Two single long frames while playing in the first pass (News Poster landscape, 283 ms, 1.11% overall; Alert notice landscape, 233 ms) did not come again in two re-runs each (0.17 to 0.22%, 0.00 to 0.06%). The worst frame is 50 to 100 ms while the next spot loads in most kit specs, as in every earlier run of them; while playing it stays at 17 to 50 ms but for Weather.
+
+## The template set on the N100 (issue #462, 2026-11-26)
+
+The #203 batch above, rerun on the N100 test rig ([`device/n100/README.md`](../../device/n100/README.md)): the same player build (master `c08fbb3f`) and the same content, 31 spots per orientation, served beside the deployed player at `/m203/<orientation>/`, with the same method (a fresh load per spot, its first prepare, then 30 s measured from 10 s in). Only the hardware differs: an Intel N100 (4 cores, the LXC given 2 GB) with Chromium 156 on Debian 13, scanning out on its iGPU through the forced virtual display, at 1920x1080 and at 3840x2160, both at 60 Hz, portrait by `wlr-randr --transform 90`. `cadence.py` read 60.00 fps (16.6 to 16.8 ms) in all four modes before each pass. Raw rows are in [`results/n100-462/`](results/n100-462/).
+
+Each cell is **Pi 1080p / N100 1080p / N100 4K**. The repeat prepare is the median of a spot's prepares while measured.
+
+**Landscape** (first prepare; median repeat prepare; dropped overall; worst frame: Pi 1080p / N100 1080p / N100 4K)
+| Spot | First prepare, ms | Repeat prepare, ms | Dropped | Worst frame, ms |
+| --- | --- | --- | --- | --- |
+| announcement-pop | 613 / 232 / 257 | 326 / 132 / 134 | 0.39% / 0.00% / 0.00% | 67 / 17 / 17 |
+| announcement-poster | 594 / 224 / 276 | 329 / 133 / 132 | 0.39% / 0.00% / 0.00% | 67 / 17 / 17 |
+| announcement-night | 613 / 218 / 221 | 312 / 132 / 133 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| announcement-corporate | 611 / 218 / 207 | 312 / 134 / 132 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| countdown-pop | 614 / 198 / 193 | 225 / 99 / 100 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| countdown-poster | 612 / 183 / 240 | 230 / 99 / 99 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| countdown-night | 582 / 201 / 238 | 246 / 99 / 100 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| countdown-corporate | 587 / 226 / 202 | 208 / 83 / 100 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| info-frame-pop | 693 / 322 / 312 | 380 / 131 / 149 | 0.39% / 0.00% / 0.00% | 67 / 17 / 17 |
+| info-frame-poster | 696 / 249 / 231 | 361 / 133 / 132 | 0.44% / 0.00% / 0.00% | 67 / 17 / 17 |
+| info-frame-night | 716 / 241 / 272 | 394 / 132 / 131 | 0.67% / 0.00% / 0.00% | 100 / 17 / 17 |
+| info-frame-corporate | 680 / 231 / 213 | 375 / 133 / 132 | 0.50% / 0.00% / 0.00% | 67 / 17 / 17 |
+| news-pop | 539 / 189 / 206 | 197 / 100 / 98 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| news-poster | 550 / 162 / 177 | 191 / 99 / 97 | 1.11% / 0.00% / 0.00% | 283 / 17 / 17 |
+| news-night | 577 / 160 / 175 | 193 / 100 / 99 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| news-corporate | 561 / 172 / 174 | 202 / 100 / 100 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| room-status-pop | 638 / 185 / 223 | 211 / 100 / 100 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| room-status-poster | 560 / 172 / 180 | 217 / 97 / 96 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| room-status-night | 566 / 180 / 185 | 229 / 99 / 99 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| room-status-corporate | 558 / 160 / 171 | 214 / 97 / 96 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| alert-emergency | 366 / 125 / 119 | 195 / 82 / 82 | 0.11% / 0.11% / 0.17% | 33 / 33 / 33 |
+| alert-warning | 357 / 128 / 134 | 168 / 83 / 82 | 0.00% / 0.00% / 0.00% | 17 / 17 / 17 |
+| alert-advisory | 340 / 130 / 144 | 162 / 84 / 82 | 0.00% / 0.00% / 0.00% | 17 / 17 / 17 |
+| alert-notice | 336 / 135 / 126 | 161 / 83 / 82 | 0.72% / 0.00% / 0.00% | 233 / 17 / 17 |
+| menu-dark | 297 / 112 / 145 | 160 / 84 / 83 | 0.00% / 0.00% / 0.00% | 17 / 17 / 17 |
+| menu-light | 292 / 121 / 113 | 161 / 83 / 83 | 0.00% / 0.00% / 0.00% | 17 / 17 / 17 |
+| agenda | 307 / 122 / 123 | 144 / 67 / 66 | 0.22% / 0.06% / 0.67% | 67 / 33 / 67 |
+| clock | 322 / 110 / 129 | 165 / 83 / 82 | 0.11% / 0.11% / 0.00% | 33 / 33 / 17 |
+| cstore-promo | 337 / 133 / 148 | 178 / 82 / 83 | 0.11% / 0.00% / 0.28% | 33 / 17 / 67 |
+| photo-promo | 375 / 144 / 178 | 266 / 99 / 150 | 0.11% / 0.00% / 0.00% | 33 / 17 / 17 |
+| weather | 829 / 146 / 177 | 413 / 100 / 147 | 1.89% / 0.11% / 1.50% | 117 / 33 / 67 |
+
+**Portrait** (first prepare; median repeat prepare; dropped overall; worst frame: Pi 1080p / N100 1080p / N100 4K)
+| Spot | First prepare, ms | Repeat prepare, ms | Dropped | Worst frame, ms |
+| --- | --- | --- | --- | --- |
+| announcement-pop | 1133 / 254 / 259 | 409 / 182 / 182 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| announcement-poster | 1016 / 253 / 268 | 413 / 183 / 183 | 0.17% / 0.00% / 0.00% | 33 / 17 / 17 |
+| announcement-night | 970 / 274 / 278 | 424 / 183 / 183 | 0.44% / 0.00% / 0.00% | 50 / 17 / 17 |
+| announcement-corporate | 990 / 261 / 274 | 425 / 183 / 182 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| countdown-pop | 629 / 205 / 204 | 223 / 99 / 98 | 0.17% / 0.00% / 0.00% | 33 / 17 / 17 |
+| countdown-poster | 594 / 196 / 212 | 304 / 99 / 100 | 0.44% / 0.00% / 0.00% | 67 / 17 / 17 |
+| countdown-night | 578 / 194 / 202 | 210 / 99 / 98 | 0.17% / 0.00% / 0.00% | 33 / 17 / 17 |
+| countdown-corporate | 584 / 199 / 199 | 229 / 99 / 99 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| info-frame-pop | 825 / 260 / 253 | 395 / 150 / 150 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| info-frame-poster | 811 / 242 / 247 | 411 / 149 / 149 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| info-frame-night | 762 / 251 / 306 | 394 / 133 / 132 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| info-frame-corporate | 762 / 259 / 260 | 392 / 150 / 165 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| news-pop | 551 / 161 / 173 | 200 / 99 / 99 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| news-poster | 557 / 181 / 171 | 204 / 100 / 99 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| news-night | 565 / 158 / 181 | 204 / 100 / 99 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| news-corporate | 558 / 174 / 175 | 193 / 98 / 99 | 0.17% / 0.00% / 0.00% | 33 / 17 / 17 |
+| room-status-pop | 596 / 182 / 178 | 236 / 99 / 96 | 0.28% / 0.00% / 0.00% | 50 / 17 / 17 |
+| room-status-poster | 574 / 194 / 160 | 226 / 100 / 97 | 0.22% / 0.00% / 0.00% | 50 / 17 / 17 |
+| room-status-night | 573 / 190 / 183 | 297 / 99 / 100 | 0.78% / 0.00% / 0.00% | 100 / 17 / 17 |
+| room-status-corporate | 573 / 182 / 181 | 234 / 96 / 96 | 0.33% / 0.00% / 0.00% | 50 / 17 / 17 |
+| alert-emergency | 401 / 143 / 136 | 261 / 82 / 82 | 0.28% / 0.17% / 0.17% | 50 / 34 / 33 |
+| alert-warning | 387 / 122 / 130 | 192 / 82 / 82 | 0.17% / 0.00% / 0.00% | 33 / 17 / 17 |
+| alert-advisory | 379 / 121 / 127 | 188 / 82 / 83 | 0.06% / 0.00% / 0.00% | 33 / 17 / 17 |
+| alert-notice | 378 / 125 / 122 | 191 / 82 / 83 | 0.06% / 0.00% / 0.00% | 33 / 17 / 17 |
+| menu-dark | 296 / 116 / 114 | 178 / 82 / 82 | 0.00% / 0.00% / 0.06% | 17 / 17 / 33 |
+| menu-light | 301 / 126 / 116 | 174 / 83 / 82 | 0.00% / 0.00% / 0.00% | 17 / 17 / 17 |
+| agenda | 310 / 110 / 109 | 150 / 84 / 82 | 0.00% / 0.00% / 0.00% | 17 / 17 / 17 |
+| clock | 325 / 119 / 119 | 202 / 83 / 83 | 0.28% / 0.00% / 0.17% | 50 / 17 / 33 |
+| cstore-promo | 349 / 130 / 119 | 197 / 82 / 82 | 0.17% / 0.00% / 0.00% | 33 / 17 / 17 |
+| photo-promo | 724 / 193 / 314 | 747 / 149 / 266 | 0.72% / 0.28% / 0.00% | 67 / 67 / 17 |
+| weather | 437 / 146 / 176 | 472 / 97 / 216 | 5.06% / 0.17% / 2.67% | 100 / 33 / 67 |
+
+**What it shows.**
+- **The N100 prepares 2 to 3 times faster than the Pi, at either size.** First prepares are 109 to 322 ms against the Pi's 292 to 1,133 ms, and median repeats 64 to 300 ms against 142 to 780 ms. The median of each spot's median is 99 ms on the N100 against the Pi's 214 (landscape) and 229 ms (portrait). Every spot is inside the 500 ms repeat budget and the proposed ~600 ms cold start, in both modes. 4K costs the N100 little in prepare, except where a template draws large images: Photo promo in portrait goes from 149 to 266 ms, and Weather from 97 to 216 ms.
+- **At 1080p60 the N100 drops almost nothing:** at most 0.28%, and the worst frame is 33 ms, apart from 67 ms once in Photo promo portrait. The Pi drops 0.00 to 5.06%, with worst frames of 50 to 283 ms. So a Pi number cannot be judged from the N100's at 1080p: the N100 hides what the Pi shows, as a laptop does.
+- **At 4K60, Weather is over 1% on the N100 too.** Across three passes, landscape dropped 1.50, 2.17 and 2.06% and portrait 2.67, 3.17 and 2.44% (in the two reruns, 1.7 to 1.8% and 2.3 to 2.6% while playing), with worst frames of 67 to 100 ms. On the Pi, Weather is the template over budget (#96). Its cost grows with the screen's pixels, so it is the template to look at for a 4K screen. Agenda (0.67%) and C-store promo (0.28%) also lost a few frames at 4K landscape; every other spot stays at 0.00 to 0.17%.
+- **Nothing was skipped** in any pass.
+
+**A rig fault, not a template's.** In the first pass of each landscape run, the player stopped getting any spot ready partway through: from the 11th spot at 4K and the 3rd at 1080p, every load reported `not ready within 2000 ms`. It stayed that way across fresh page loads, until the next `wlr-randr` mode change. The kiosk's journal had DRM page-flip errors (`Atomic commit failed: Device or resource busy`) as each stall began. Those errors also came during passes that ran clean, so they don't explain the stall alone. Plex (LXC 102) shares the iGPU, but its logs show no transcoding at those times. Both landscape passes were rerun spot by spot with memory logged, and came back whole: 31 of 31 each, memory steady (used 555 to 1,393 MB of 2,048, the most during Weather), with 13 of the same errors during the 1080p rerun and no stall. The tables use the reruns; the first passes are kept as `first-pass-*.jsonl`. On this rig, a run that stops getting spots ready is the rig: change the mode or restart the kiosk, and run it again.
+
+## Weather's rain without the rotated field (issue #96, 2026-11-26)
+
+Weather 1.6.0's rain was two layers in a field 150% of the screen, rotated 14°. **A trace showed where the cost went:** a Pi 4 at 1080p60 in landscape drew 3 render passes per frame, against 2 with no rain at all; the other is the player's. The GPU process spent about 200 ms per second finishing passes, against 38 ms with no rain. Rotated content inside a clip needs an offscreen pass of its whole area every frame, and the template's own frame is such a clip. It isn't one that can be removed: taking `overflow: hidden` off the field dropped one pass, and taking it off `.stage` too dropped none.
+
+**Weather 1.6.1** draws the slant into the rain's tile instead. The tile is 40 by 40 vmin, as master's was, so drawing it costs a prepare no more, and its pattern repeats no more often. Each layer slides one tile left and four tiles down per turn (atan(1/4), 14°), which lands the pattern on itself, at the same speed along the slant. It draws 2 passes per frame, as with no rain. A browser test pins the slide and checks that each layer covers the frame through its turn, at 16:9, 9:16, 8:1, 1:8 and 1:1.
+
+**A first version was held in review.** It used a 20 by 80 vmin tile (one across, one down) and showed columns that repeated every 20 vmin, with the card and clouds hidden. On the Pi it measured the same as 1.6.1.
+
+**Measured** on the Pi 400 at 1080p60: master's player with the stress example's rain spot alone, 10 s, cut, `isolate.py 30`, with the supervisor and soak logger stopped. ABBA twice, A = 1.6.0 and B = 1.6.1. Portrait with the output rotated (`wlr-randr --transform 90`) and restored.
+
+| | Overall | Playing | Loading next | Worst frame | Repeat prepares |
+| --- | --- | --- | --- | --- | --- |
+| landscape, 1.6.0 | 1.89, 1.94, 2.06, 1.83% | 1.21, 1.10, 1.22, 1.22% | 16–21% | 117 ms | 369–542 ms |
+| landscape, 1.6.1 | 0.50, 0.72, 0.50, 0.78% | 0.00, 0.35, 0.00, 0.23% | 11–15% | 50–100 ms | 327–427 ms |
+| portrait, 1.6.0 | 5.84, 6.00, 5.44, 5.83% | 4.69, 4.84, 4.43, 4.86% | 18–29% | 83–117 ms | 474–826 ms |
+| portrait, 1.6.1 | 1.39, 1.17, 1.33, 1.33% | 0.23, 0.23, 0.12, 0.18% | 19–25% | 67–83 ms | 462–836 ms |
+
+- **Landscape is within budget.**
+- **Portrait isn't, but not because of the rain.** With no rain at all (the field hidden), portrait dropped 0.94 and 1.05%, with prepares up to 643 ms. What is left over 1% is the rest of the template while the next spot loads.
+- **Repeat prepares** are the same in both builds, with one or two outliers over 800 ms in each.
+- **On the N100 at 3840x2160@60,** two rounds, the same builds and spot. 1.6.1 is better than 1.6.0 but less steady than the held 20 × 80 version. Its layer is taller (4 tiles above the screen, not 2), which at 4K is 4704 × 5616 px per layer.
+
+| N100 4K60 | 1.6.0 | 1.6.1 | held 20 × 80 |
+| --- | --- | --- | --- |
+| landscape, overall | 0.83, 2.06, 1.78, 1.56% | 1.11, 1.00, 1.61, 0.61% | 0.44, 0.44% |
+| portrait, overall | 3.78, 3.00, 3.49, 2.17% | 2.17, 0.89, 1.89, 0.33% | 0.89, 0.17% |
+
+## Contained bundles kept across page loads (issue #232, 2026-11-26)
+
+The first prepare after a page load re-measured on master `c0d984c2`, every look-kit template in every look: 498 to 671 ms in landscape and 510 to 974 ms in portrait, against 191 to 449 ms for a repeat. Built from the stress example's spots as in "The template set on master" (10 s spots, their own data, Announcement and Info frame over their 4K photos), served beside the deployed player, the supervisor and soak logger stopped, output rotated for portrait.
+
+**Where the first prepare goes.** A measuring build marked each prepare (`performance.mark` at its start and end), and a Chromium trace of a cold page load set the first prepare against a repeat of the same spot, in portrait:
+
+| Spot | First prepare (traced) | Repeat | Bundle read and contained | Template process, its first run | Photo decode |
+| --- | --- | --- | --- | --- | --- |
+| countdown-pop | 679 ms | 256 ms | 238 ms to the wrapper frame's load; 224 ms in the bundle worker, 233 ms of GC and compiling beside it | about 185 ms more than the repeat | - |
+| announcement-pop | 1045 ms | 463 ms | 244 ms to the wrapper frame's load | about 380 ms more | 361 ms decoding, against 159 in the repeat, and 85 ms reading the JPEG's YUV header |
+
+- **The bundle is contained again on every page load.** A repeat finds its frames in the page's cache; a new page has none. `containedFrames` is parse5 over the 385 to 400 kB bundle, most of it the four looks' inline fonts; the scripts it hashes are 12 to 19 kB, so the SHA-256 is under 1 ms of it.
+- **The template's new process** compiles its script and resolves its styles and faces for the first time.
+- **A photo's first decode** costs about twice a later one.
+
+**The fix: each bundle kept as contained** (`storedFrames` and `storeFrames` in `packages/player/src/store.ts`). A screen keeps the frames it made beside its file cache, under the player's version, and the next page load reads them back instead of containing the bundle again. The read-ahead stores them while a spot plays; storing during the prepare added about 20 ms to it.
+
+Per spot, through DevTools as `isolate.py` drives it: a page load with the HTTP cache and storage cleared, 12 s to settle, then three page loads keeping storage, as a kiosk restart does; the page's first prepare of each. Master `7ce782c7` (A) against the branch (B), ABBA, Pop:
+
+| Orientation | Template | A, storage kept | B, storage kept | A, cleared | B, cleared |
+| --- | --- | --- | --- | --- | --- |
+| landscape | Announcement | 581-609 ms (median 601) | 409-431 ms (median 422) | 611, 591 | 592, 600 |
+| | Countdown | 563-596 (572) | 388-420 (405) | 553, 552 | 567, 579 |
+| | Info frame | 623-652 (629) | 444-475 (455) | 613, 612 | 622, 632 |
+| | News | 502-525 (509) | 330-348 (341) | 477, 484 | 509, 500 |
+| | Room status | 530-600 (559) | 363-401 (369) | 513, 509 | 533, 531 |
+| portrait | Announcement | 913-950 (938) | 735-770 (759) | 900, 917 | 1207, 915 |
+| | Countdown | 569-620 (596) | 388-414 (412) | 559, 566 | 586, 597 |
+| | Info frame | 700-734 (713) | 520-550 (547) | 670, 691 | 712, 706 |
+| | News | 516-545 (540) | 351-583 (353) | 489, 514 | 517, 547 |
+| | Room status | 545-575 (549) | 368-391 (380) | 524, 539 | 549, 537 |
+
+- **A page load that keeps storage prepares its first spot 160 to 200 ms sooner**, every template in both orientations. All five are under 500 ms in landscape; in portrait Countdown, News and Room status are, Info frame is 520 to 550 ms and Announcement 735 to 770.
+- **A cleared load is about the same, 10 to 30 ms slower in four of five**: it looks for kept frames before it reads the bundle. That is a screen's first load and a load after its storage is wiped.
+- **What is left in portrait** is the template's new process and, over a photo, its first decode: not the bundle.
+
+**While the read-ahead keeps them** (review of #635). The first 12 s of plays after a cleared page load, when the read-ahead reads the bundles still to come and, on the branch, stores their frames: `room-status+announcement+countdown+info-frame`, cut, landscape, master `12f1f88b` (A) against the branch (B), ABBA, three loads a pass. Frames dropped while playing: A 0.00 to 0.15% (0 or 1 of about 675 a load), B the same, no stall over 50 ms in either; B had kept all five of the manifest's bundles by the end of each load.
+
+## The template renderer started at page load (issue #232, 2026-11-26)
+
+What #635 left of a look-kit template's first prepare after a page load that keeps storage: about 185 ms for the template's new process, and over a 4K photo its first decode. Pi 400 at 1080p 60 Hz, the supervisor and soak logger stopped while measured, portrait with the output rotated (`wlr-randr --transform 90`) and restored afterwards.
+
+**Content.** The stress example's Announcement (over the 4K river photo, with its QR code), Info frame (over the 4K kitchen photo) and Countdown (no photo), each in Pop, 10 s, their own data and no bindings, built with `sf build` once per orientation. Each build was served beside the deployed player under `players/0/m232*/<orientation>/`: master `4c1d81e7` (A) and the branch (B).
+
+**Method.** As for #635, through DevTools. For each spot and build: one page load with the HTTP cache and the origin's storage cleared, 12 s to settle, then three page loads keeping storage. The figure is the page's first prepare of each load. The runs were ABBA: A then B, then B then A.
+
+**What the new process is.** On the Pi, Chromium runs each template's sandboxed frame out of process, a DevTools `iframe` target. Both slots' templates share one renderer. Each page load starts that renderer afresh, while Chromium keeps a spare renderer of its own warm. A sandboxed frame placed directly in the player's page stays in the page's process. Only one inside a wrapper frame, as a template's is, joins the templates' renderer: burning CPU in each frame moved the same process.
+
+**The fix tried: a spare template frame** (`openSpareFrame`), from the page's start, holding an empty document. Each cell lists the six loads that kept storage, both passes, A's first pass first; the median follows. The two cleared loads are one per pass.
+
+| Orientation | Template | A, storage kept | B, storage kept | A, cleared | B, cleared |
+| --- | --- | --- | --- | --- | --- |
+| landscape | Announcement | 415, 425, 442, 440, 422, 439 (median 432) | 413, 419, 406, 398, 390, 425 (410) | 569, 600 | 565, 566 |
+| | Info frame | 452, 466, 476, 470, 463, 460 (465) | 432, 445, 432, 442, 429, 448 (437) | 620, 632 | 583, 593 |
+| | Countdown | 394, 404, 409, 400, 403, 396 (402) | 362, 411, 385, 356, 363, 355 (363) | 565, 559 | 541, 534 |
+| portrait | Announcement | 763, 748, 765, 762, 755, 759 (761) | 801, 754, 731, 749, 744, 753 (751) | 945, 931 | 896, 905 |
+| | Info frame | 542, 594, 538, 556, 561, 548 (552) | 508, 509, 505, 501, 506, 535 (507) | 701, 732 | 672, 680 |
+| | Countdown | 412, 415, 400, 382, 406, 436 (409) | 402, 375, 464, 430, 386, 384 (394) | 574, 572 | 544, 551 |
+
+- **With storage cleared, the spare takes 19 to 40 ms off the first prepare** in every spec (the means of the two loads).
+- **With storage kept, Info frame gains about 20 to 50 ms** (median 28 ms in landscape, 45 in portrait), the ranges apart. Announcement in landscape gains a little (median 22 ms, the ranges overlapping), and the rest are within the spread. Info frame in portrait stays at about 500 to 535 ms and Announcement in portrait does not move.
+- Starting a renderer costs the same for any template; what differs is what each one's own document costs after.
+
+**With the spare sandboxed with no allowances** (`sandbox=""`, review of #641, 2026-11-27, the branch at `f565a7ab`): the spare's frame is still out of process, in the template's renderer. Burning CPU in each frame moved one process.
+
+**Playback with the spare.** `isolate.py 30 fade announcement-pop+info-frame-pop+countdown-pop` was run twice per orientation. Master at `7c509ff7` was run after it, the same way:
+
+| | Overall | Playing | Loading next | Transition | Worst frame | Prepares |
+| --- | --- | --- | --- | --- | --- | --- |
+| branch, landscape | 0.33, 0.39% | 0.00, 0.00% | 9.1, 10.3% | 1.1, 1.1% | 50, 67 ms | 283-359 ms |
+| master, landscape | 0.44, 0.44 | 0.00, 0.00 | 12.3, 12.5 | 1.1, 1.1 | 67, 67 | 293-341 |
+| branch, portrait | 0.44, 0.44 | 0.06, 0.06 | 6.4, 7.6 | 3.3, 2.3 | 50, 50 | 258-429 |
+| master, portrait | 0.50, 0.44 | 0.06, 0.06 | 9.1, 4.4 | 2.2, 4.4 | 50, 33 | 251-443 |
+
+The spare costs playback nothing measurable: the branch is within master's spread throughout.
+- **The rest of the first run belongs to the template's own document.** A spare that also laid out text, ran a script and decoded a small JPEG (a third build, C) did no better than B: 379 to 451 ms in landscape, and in portrait 736 to 769 for Announcement and 495 to 556 for Info frame. Compiling the template's script, resolving its styles and decoding its faces are each paid by its own document. So is a photo's first decode: Chromium does not share decoded images across documents or processes. Only preparing the template pays them, and at a page load nothing plays before its first prepare to hide that behind.
+- **Why a photo costs more in portrait.** A 16:9 4K photo covering a 1080x1920 screen is drawn about 3413x1920, so it decodes near full size. In landscape it is drawn 1920x1080, where a JPEG decodes at half scale, a quarter of the pixels. A photo sized for the screen would cost less. That is a change to the media, not to the player.
+
+## Info frame's photo panel (issue #239, 2026-11-26)
+
+Info frame's portrait fades dropped 1.06 to 1.33% of frames in every look on master `c0d984c2`, 14 to 16% of the fade's own frames; landscape fades 0.44 to 0.72%, and the other look-kit templates' portrait fades 0.17 to 0.56%. Cuts and later prepares were within budget.
+
+**Where it goes.** A trace of a portrait fade puts it on the GPU process's main thread: 316 to 334 ms of a 500 ms fade, against 179 to 206 ms in landscape, most of it `SkiaOutputSurfaceImplOnGpu::FinishPaintRenderPass` (173 to 194 ms against 89 to 102). A `viz.quads` trace counts about one more render pass a frame with the caption than without (107 to 112 in a fade, against 85 to 87).
+
+**What makes it.** Scratch variants of Pop, faded in portrait, two runs each: off, the ticker, the rail, the logo, the clock and weather or the forecast, a 1080 photo, a photo frame not rounded, the caption without animations, without `overflow: hidden` or on a `will-change` layer, the price tag not animated, all left 0.94 to 1.39% dropped; the caption off took it to 0.50%, the photo panel off to 0.28 to 0.33%. Chromium's layer tree (CDP `LayerTree`, mid-intro, portrait) showed why: the photo panel (`.panel`, 1016x1356) is a layer whose intro animates its opacity, and the caption and its price tag, inside it, are layers of their own (they animate, and the kit gives them `will-change`). A layer whose opacity animates with layers of its own inside is drawn to an offscreen surface each frame. Without the caption the panel holds none, so the photo is drawn once.
+
+**The fix.** The caption, chip and logo sit beside the panel in a positioned `.photo-area`, at the same place; the panel holds only the photo. Night's caption rounds its own bottom corners, as the panel's clip did. Screenshots before and after match at 1920x1080 (at most 7 levels, anti-aliasing) and at 390 px (the caption a sub-pixel apart).
+
+Master's player, content built from master `9c09d376` (A) and from the branch (B), `isolate.py`'s method (30 s, fade 500 ms), ABBA, overall dropped:
+
+| Orientation | Look | A | B |
+| --- | --- | --- | --- |
+| portrait | Pop | 1.17, 1.06% | 0.61, 0.50% |
+| | Poster | 1.28, 1.11% | 0.67, 0.56% |
+| | Night | 1.33, 1.28% | 0.83, 0.72% |
+| | Corporate | 1.11, 1.22% | 0.72, 0.78% |
+| landscape | Pop | 0.39, 0.50% | 0.39, 0.44% |
+| | Poster | 1.17 (one 200 ms stall), 0.61% | 0.56, 0.56% |
+| | Night | 0.67, 0.83% | 0.78, 0.61% |
+| | Corporate | 0.50, 0.50% | 0.50, 0.44% |
+
+- **Every portrait fade is under 1% now**: the fade's own frames drop 2 to 9%, against 11 to 16%.
+- **Landscape is the same or better**, and later prepares are unchanged (portrait 356 to 410 ms in both; landscape 312 to 376 against 342 to 379).
+
+**Night's caption clipped again** (review of #638). Night's caption rises into place from just below the photo's edge (7 px at 380 ms); inside the panel, the panel's rounded clip hid that. `.photo-area` now clips to the same rounded edge in Night. It never animates, but a rounded clip over layers can take a render pass of its own, so Night portrait fades, the branch without the clip (A) against it (B), ABBA, two runs a pass: A 0.78, 0.78, 0.78, 0.72%; B 0.89, 0.89, 0.89, 0.94%. About 0.15 points, under 1%, so the clip stays.

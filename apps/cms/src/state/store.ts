@@ -8,16 +8,24 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { AnyRouter } from '@tanstack/react-router';
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import { saveWaiting, savesWaiting } from './versioned-draft';
 import { connectCommandMenu, createCommandMenuSlice, type CommandMenuSlice } from './command-menu';
 import { connectUi, createUiSlice, type UiSlice } from './ui';
+import { createAgentSlice, type AgentSlice } from './agent';
+import { createApprovalsSlice, type ApprovalsSlice } from './approvals';
+import { createAgentDrawerSlice, type AgentDrawerSlice } from './agent-drawer';
 import { createAssetsSlice, type AssetsSlice } from './assets';
 import { createAuditSlice, type AuditSlice } from './audit';
 import { createBrandKitsSlice, type BrandKitsSlice } from './brand-kits';
+import { createConnectSlice, type ConnectSlice } from './connect';
 import { createGroupsSlice, type GroupsSlice } from './groups';
 import { createIntegrationsSlice, type IntegrationsSlice } from './integrations';
+import { connectLabels, createLabelsSlice, type LabelsSlice } from './labels';
 import { createOrgsSlice, type OrgsSlice } from './orgs';
 import { createPlaylistEditorSlice, type PlaylistEditorSlice } from './playlist-editor';
+import { createProposalsSlice, type ProposalsSlice } from './proposals';
 import { createPublishingSlice, type PublishingSlice } from './publishing';
+import { connectSaveAsGroup, createSaveAsGroupSlice, type SaveAsGroupSlice } from './save-as-group';
 import { createScheduleSlice, type ScheduleSlice } from './schedule';
 import { createScreensSlice, type ScreensSlice } from './screens';
 import { createSettingsSlice, type SettingsSlice } from './settings';
@@ -30,6 +38,7 @@ export type AppState = UiSlice &
   SignInSlice &
   OrgsSlice &
   ScreensSlice &
+  LabelsSlice &
   AssetsSlice &
   CommandMenuSlice &
   SettingsSlice &
@@ -42,7 +51,13 @@ export type AppState = UiSlice &
   PublishingSlice &
   ScheduleSlice &
   TargetPickerSlice &
-  GroupsSlice;
+  SaveAsGroupSlice &
+  GroupsSlice &
+  ConnectSlice &
+  AgentSlice &
+  AgentDrawerSlice &
+  ProposalsSlice &
+  ApprovalsSlice;
 export type AppStore = StoreApi<AppState>;
 
 /** What actions may reach outside the store for. */
@@ -61,6 +76,7 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createSignInSlice(set, get, deps),
     ...createOrgsSlice(set, get, deps),
     ...createScreensSlice(set, get, deps),
+    ...createLabelsSlice(set, get, deps),
     ...createAssetsSlice(set, get, deps),
     ...createCommandMenuSlice(set, get, deps),
     ...createSettingsSlice(set, get, deps),
@@ -73,11 +89,25 @@ export function createAppStore(deps: StoreDeps): AppStore {
     ...createPublishingSlice(set, get, deps),
     ...createScheduleSlice(set, get, deps),
     ...createTargetPickerSlice(set, get, deps),
+    ...createSaveAsGroupSlice(set, get, deps),
     ...createGroupsSlice(set, get, deps),
+    ...createConnectSlice(set, get, deps),
+    ...createAgentSlice(set, get, deps),
+    ...createAgentDrawerSlice(set, get, deps),
+    ...createProposalsSlice(set, get, deps),
+    ...createApprovalsSlice(set, get, deps),
   }));
   if (typeof window !== 'undefined') {
     connectUi(store, deps);
     connectCommandMenu(store, deps);
+    connectLabels(store, deps);
+    connectSaveAsGroup(store, deps);
+    // An edit still to be saved would go with the tab: its save goes now, and the browser asks before the tab closes.
+    window.addEventListener('beforeunload', (e) => {
+      if (!savesWaiting()) return;
+      void saveWaiting();
+      e.preventDefault();
+    });
   }
   return store;
 }

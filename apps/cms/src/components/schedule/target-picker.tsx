@@ -8,6 +8,7 @@ import { CheckIcon, ChevronsUpDownIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import { useId, useRef } from 'react';
 import { KIND_WORD, StatusGlyph, toneOf } from '~/components/screens/status';
+import { Badge } from '~/components/ui/badge';
 import { Button } from '~/components/ui/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '~/components/ui/command';
 import type { ScheduleEntryView } from '~/lib/schedule';
@@ -34,6 +35,7 @@ export function TargetPicker({
   screens,
   groups,
   kinds = EVERY_KIND,
+  sentNow = false,
   onPick,
   className,
 }: {
@@ -43,6 +45,8 @@ export function TargetPicker({
   groups: GroupView[];
   /** What may be picked: the week view shows one screen, so it offers screens alone. */
   kinds?: readonly Target[];
+  /** A takeover's: a smart group's screens are the ones it reaches when sent, said so (#186). */
+  sentNow?: boolean;
   onPick: (aim: Aim) => void;
   className?: string;
 }) {
@@ -98,7 +102,7 @@ export function TargetPicker({
           </button>
         </DialogPrimitive.Trigger>
         <DialogPrimitive.Portal>
-          <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 dark:bg-black/70" />
+          <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-scrim" />
           {/* Full-screen on a phone, where a list in a dialog in a dialog has no room; a panel like ⌘K's above it. */}
           <DialogPrimitive.Content
             aria-describedby={undefined}
@@ -128,7 +132,7 @@ export function TargetPicker({
                   <CommandGroup heading="Every screen">
                     <CommandItem value="org" onSelect={() => pick({ target: 'org', groupId: '', screenId: '' })}>
                       <span className="min-w-0 flex-1 truncate">Every screen</span>
-                      <span className="text-[13px] text-muted-foreground">{count(screens.length)}</span>
+                      <span className="text-meta text-muted-foreground">{count(screens.length)}</span>
                       {tick('org')}
                     </CommandItem>
                   </CommandGroup>
@@ -138,7 +142,8 @@ export function TargetPicker({
                     {shownGroups.map((g) => (
                       <CommandItem key={g.id} value={`group:${g.id}`} onSelect={() => pick({ target: 'group', groupId: g.id, screenId: '' })}>
                         <span className="min-w-0 flex-1 truncate">{g.name}</span>
-                        <span className="text-[13px] text-muted-foreground">{count(g.screenIds.length)}</span>
+                        {g.selector && <Badge title="Its screens are the ones its rule matches">Rule</Badge>}
+                        <span className="text-meta text-muted-foreground">{count(g.screenIds.length)}</span>
                         {tick(`group:${g.id}`)}
                       </CommandItem>
                     ))}
@@ -153,9 +158,9 @@ export function TargetPicker({
                           <StatusGlyph tone={toneOf(s.state.kind)} />
                           <span className="flex min-w-0 flex-1 flex-col">
                             <span className="truncate">{s.name}</span>
-                            {inGroups.length > 0 && <span className="truncate text-[13px] text-muted-foreground">{inGroups.join(', ')}</span>}
+                            {inGroups.length > 0 && <span className="truncate text-meta text-muted-foreground">{inGroups.join(', ')}</span>}
                           </span>
-                          <span className="text-[13px] text-muted-foreground">{KIND_WORD[s.state.kind]}</span>
+                          <span className="text-meta text-muted-foreground">{KIND_WORD[s.state.kind]}</span>
                           {tick(`screen:${s.id}`)}
                         </CommandItem>
                       );
@@ -169,7 +174,7 @@ export function TargetPicker({
       </DialogPrimitive.Root>
       {group && (
         <p id={`${id}-reach`} className="text-xs text-muted-foreground">
-          {groupReach(group, screens)}
+          {groupReach(group, screens, sentNow)}
         </p>
       )}
     </div>

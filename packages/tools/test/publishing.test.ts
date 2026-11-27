@@ -2,13 +2,14 @@
 // database to `compileScreen`. See docs/backend-plan.md#publishing.
 import { compileScreen } from '@signforge/compiler';
 import { templateKey, type ScreenManifest, type Spot, type TemplateManifest } from '@signforge/contract';
-import { draftChanged, platform, published, StaleVersionError } from '@signforge/db';
+import { draftChanged, platform, published, StaleVersionError, STORAGE_GRACE_MS } from '@signforge/db';
 import { seedOrganization, seedScreen, testScope, type TestScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import stressGolden from '@signforge/cli/golden/stress.json';
 import { editorCalls, ok } from './calls';
 import { loadCompileInput, loadOrg, publishOrg } from '../src/publishing';
+import { CHANGES_BYTES, summarizeChanges } from '../src/publish';
 import { dispatch, manifestKey, registry, type Caller, type ScreenNotifier } from '../src';
 import { fakeServices } from './services';
 import { sha256Hex } from '../src/dispatch';
@@ -119,21 +120,26 @@ async function seedSmallOrg(orgId: string) {
   return { org, lobby, hall, front, version, photo };
 }
 
+/** A spot outside its template's duration range (`broken`), alone in a playlist (`side`) no screen plays yet. */
+async function brokenSide(org: Awaited<ReturnType<typeof seedSmallOrg>>['org'], versionId: string) {
+  await org.spots.insert({
+    id: x('broken'),
+    name: 'Broken',
+    kind: 'template',
+    durationMs: 1000,
+    templateVersionId: versionId,
+    dataJson: '{}',
+    assetMapJson: '{}',
+  });
+  const side = await org.playlists.insert({ id: x('side'), name: 'Side', transitionJson: JSON.stringify({ type: 'cut' }) });
+  await org.playlists.setItems(side.id, [x('broken')]);
+  return side;
+}
+
 describe('publishOrg', () => {
   it('publishes every screen when one draft spot is broken, and reports that spot', async () => {
     const { org, lobby, hall, version } = await seedSmallOrg('pub-broken');
-    // Broken: outside the template's duration range, and in a playlist no screen plays yet.
-    await org.spots.insert({
-      id: x('broken'),
-      name: 'Broken',
-      kind: 'template',
-      durationMs: 1000,
-      templateVersionId: version.id,
-      dataJson: '{}',
-      assetMapJson: '{}',
-    });
-    const side = await org.playlists.insert({ id: x('side'), name: 'Side', transitionJson: JSON.stringify({ type: 'cut' }) });
-    await org.playlists.setItems(side.id, [x('broken')]);
+    await brokenSide(org, version.id);
 
     const result = await publishOrg(org, opts);
     expect(result.screens.map((s) => [s.screenId, s.problems])).toEqual(
@@ -186,7 +192,7 @@ describe('publishOrg', () => {
     await org.commit((await publishOrg(org, opts)).writes);
     const countdown: TemplateManifest = { ...promo, id: 'countdown', name: 'Countdown', fields: { target: { type: 'datetime', label: 'Target' } } };
     const version = await addTemplate(org, countdown, sha('e'));
-    // As create_spot saves it from the New spot dialog: the target left for the editor to pick.
+    // As save_spot saves it from the New spot dialog: the target left for the editor to pick.
     await org.spots.insert({
       id: x('launch'),
       name: 'Launch',
@@ -218,6 +224,48 @@ describe('publishOrg', () => {
     const after = playing.screens.find((s) => s.screenId === lobby.id)!.manifest!;
     expect(after.spots[x('launch')]).toMatchObject({ kind: 'template', template: templateKey(countdown, org.orgId), data: { target: '2026-12-24T18:00' } });
     expect(after.playlists[x('main')]!.items.map((i) => i.spot)).toEqual([x('deal'), x('still'), x('launch')]);
+  });
+
+  it('publishes a spot whose photo is switched off, and still holds one switched on with no photo (#252)', async () => {
+    const { org, lobby } = await seedSmallOrg('pub-photo-off');
+    await org.commit((await publishOrg(org, opts)).writes);
+    const announcement: TemplateManifest = {
+      ...promo,
+      id: 'announcement',
+      name: 'Announcement',
+      fields: { ...promo.fields, showPhoto: { type: 'boolean', label: 'Show the photo', default: true } },
+    };
+    const version = await addTemplate(org, announcement, sha('f'));
+    const spot = (id: string, data: object) =>
+      org.spots.insert({
+        id: x(id),
+        name: id,
+        kind: 'template',
+        durationMs: 8000,
+        templateVersionId: version.id,
+        dataJson: JSON.stringify(data),
+        assetMapJson: '{}',
+      });
+    await spot('photo-off', { showPhoto: false });
+    await spot('photo-on', { showPhoto: true });
+    await org.playlists.setItems(x('main'), [x('deal'), x('photo-off'), x('photo-on')]);
+
+    const result = await publishOrg(org, opts);
+    expect(result.drafts.held).toEqual([
+      { kind: 'playlist', id: x('main'), problems: [`spot ${x('photo-on')} is not published`] },
+      { kind: 'spot', id: x('photo-on'), problems: [`spot ${x('photo-on')}: image field "photo" has no asset`] },
+    ]);
+    expect(result.drafts.promoted).toEqual([{ kind: 'spot', id: x('photo-off') }]);
+    await org.commit(result.writes);
+
+    // With the photo-on spot out of the playlist, the playlist goes out with the photo-off spot in it, and no file for the photo.
+    await org.playlists.setItems(x('main'), [x('deal'), x('photo-off')]);
+    const published = await publishOrg(org, opts);
+    // The photo-on spot is still a draft that cannot publish; nothing else is held.
+    expect(published.drafts.held.map((h) => h.id)).toEqual([x('photo-on')]);
+    const manifest = published.screens.find((s) => s.screenId === lobby.id)!.manifest!;
+    expect(manifest.spots[x('photo-off')]).toMatchObject({ kind: 'template', data: { showPhoto: false }, assets: {} });
+    expect(manifest.playlists[x('main')]!.items.map((i) => i.spot)).toEqual([x('deal'), x('photo-off')]);
   });
 
   it('keeps the published version of a draft that breaks, and reports it', async () => {
@@ -257,21 +305,52 @@ describe('publishOrg', () => {
 
   it('holds an entry whose playlist is not published', async () => {
     const { org, front, version } = await seedSmallOrg('pub-entry');
-    await org.spots.insert({
-      id: x('broken'),
-      name: 'Broken',
-      kind: 'template',
-      durationMs: 1000,
-      templateVersionId: version.id,
-      dataJson: '{}',
-      assetMapJson: '{}',
-    });
-    const side = await org.playlists.insert({ id: x('side'), name: 'Side', transitionJson: JSON.stringify({ type: 'cut' }) });
-    await org.playlists.setItems(side.id, [x('broken')]);
+    const side = await brokenSide(org, version.id);
     await org.scheduleEntries.insert({ id: x('side-show'), playlistId: side.id, target: 'group', groupId: front.id, priority: 9 });
     const result = await publishOrg(org, opts);
     expect(result.drafts.held).toContainEqual({ kind: 'schedule_entry', id: x('side-show'), problems: [`playlist ${x('side')} is not published`] });
     expect(result.screens.every((s) => s.manifest && s.manifest.schedule.length === 1)).toBe(true);
+  });
+
+  it('gives screens their entries in publish order, oldest first, whatever their ids or when they were made (review of #591)', async () => {
+    const { org, version, photo } = await seedSmallOrg('pub-order');
+    const at = (minutes: number) => ({ ...opts, now: new Date(NOW.getTime() + minutes * 60_000) });
+    await org.commit((await publishOrg(org, at(0))).writes);
+    // Made first, with the first id, but held: its playlist plays a spot that does not pass its checks.
+    const side = await brokenSide(org, version.id);
+    await org.scheduleEntries.insert({ id: x('a-held'), playlistId: side.id, target: 'org', priority: 1 });
+    await org.scheduleEntries.insert({ id: x('b-now'), playlistId: x('main'), target: 'org', priority: 1 });
+    await org.commit((await publishOrg(org, at(1))).writes);
+    await org.spots.update(x('broken'), { durationMs: 8000, assetMapJson: JSON.stringify({ photo: photo.id }) });
+    const last = await publishOrg(org, at(2));
+    expect(last.screens.map((s) => s.manifest?.schedule.map((e) => e.id))).toEqual(last.screens.map(() => [x('evening-takeover'), x('b-now'), x('a-held')]));
+  });
+
+  it("reaches exactly a smart group's matching screens, and a label edit only at the next publish (#186)", async () => {
+    const { org, lobby, hall } = await seedSmallOrg('pub-smart');
+    await org.commit((await org.screens.labels.stage.update([hall.id], { set: { region: 'North' }, remove: [] })).writes);
+    const north = await org.screenGroups.insert({ name: 'North', selectorJson: JSON.stringify({ all: [{ key: 'region', op: 'eq', values: ['north'] }] }) });
+    await org.scheduleEntries.insert({ id: x('north-only'), playlistId: x('evenings'), target: 'group', groupId: north.id, priority: 9 });
+    const ids = (r: Awaited<ReturnType<typeof publishOrg>>, screenId: string) =>
+      r.screens.find((s) => s.screenId === screenId)!.manifest!.schedule.map((e) => e.id);
+    // As the publish tool stores it: the batch, and each screen's desired manifest.
+    const commit = (r: Awaited<ReturnType<typeof publishOrg>>) =>
+      org.commit([...r.writes, ...r.screens.flatMap((x) => (x.manifest ? org.screens.stage.setDesiredManifest(x.screenId, x.manifest.id, null).writes : []))]);
+    const first = await publishOrg(org, opts);
+    await commit(first);
+    // Matched case-insensitively, as a selector matches: the hall, not the lobby.
+    expect(ids(first, hall.id)).toContain(x('north-only'));
+    expect(ids(first, lobby.id)).not.toContain(x('north-only'));
+
+    // Labelled into the group: nothing changes on the lobby until a publish.
+    const before = (await org.screens.get(lobby.id))!.desiredManifestId;
+    await org.commit((await org.screens.labels.stage.update([lobby.id], { set: { region: 'north' }, remove: [] })).writes);
+    expect(before).toBe(first.screens.find((x) => x.screenId === lobby.id)!.manifest!.id);
+    expect((await org.screens.get(lobby.id))!.desiredManifestId).toBe(before);
+    const next = await publishOrg(org, opts);
+    await commit(next);
+    expect(ids(next, lobby.id)).toContain(x('north-only'));
+    expect((await org.screens.get(lobby.id))!.desiredManifestId).not.toBe(before);
   });
 
   it('reports a screen it cannot publish without stopping the others', async () => {
@@ -311,7 +390,7 @@ describe('concurrent publishes (R09)', () => {
   const commitPublish = (org: TestScope, result: Publish) =>
     org.commit([
       ...result.writes,
-      ...result.screens.flatMap((s) => (s.manifest ? org.screens.stage.setDesiredManifest(s.screenId, s.manifest.id).writes : [])),
+      ...result.screens.flatMap((s) => (s.manifest ? org.screens.stage.setDesiredManifest(s.screenId, s.manifest.id, null).writes : [])),
     ]);
   const titleOn = (result: Publish, screenId: string) =>
     (result.screens.find((s) => s.screenId === screenId)!.manifest!.spots[x('deal')] as Extract<Spot, { kind: 'template' }>).data.title;
@@ -542,10 +621,10 @@ describe('loadCompileInput', () => {
     const call = async (name: string, input: unknown) => (await ok(tool(name, input))).playlist as { id: string; version: number };
     // The editor's path: make it empty, then add the spots and pick the transition, each an edit.
     const want = golden.playlists[golden.defaultPlaylist]!;
-    const made = await call('create_playlist', { name: want.name, transition: { type: 'cut' } });
-    const added = await call('update_playlist', { playlistId: made.id, spotIds: want.items.map((i) => i.spot).toReversed(), ifVersion: made.version });
-    const ordered = await call('update_playlist', { playlistId: made.id, spotIds: want.items.map((i) => i.spot), ifVersion: added.version });
-    await call('update_playlist', { playlistId: made.id, transition: want.transition, ifVersion: ordered.version });
+    const made = await call('save_playlist', { name: want.name, transition: { type: 'cut' } });
+    const added = await call('save_playlist', { playlistId: made.id, spotIds: want.items.map((i) => i.spot).toReversed(), ifVersion: made.version });
+    const ordered = await call('save_playlist', { playlistId: made.id, spotIds: want.items.map((i) => i.spot), ifVersion: added.version });
+    await call('save_playlist', { playlistId: made.id, transition: want.transition, ifVersion: ordered.version });
     await org.commit((await org.settings.stage.set({ defaultPlaylistId: made.id })).writes);
 
     const promotion = await publishOrg(org, opts);
@@ -573,6 +652,46 @@ describe('loadCompileInput', () => {
   });
 });
 
+/** A member of the bucket, a method bound to it: workerd refuses one called on a proxy. */
+const bound = (target: R2Bucket, key: string | symbol) => {
+  const v: unknown = Reflect.get(target, key, target);
+  return typeof v === 'function' ? v.bind(target) : v;
+};
+
+describe("a publish's changes, kept to a size (#370, review of #455)", () => {
+  it('keeps exact counts and a few names of 6,000 long CJK ones, in at most CHANGES_BYTES', () => {
+    const long = (i: number) => `${'看板'.repeat(49)}${String(i).padStart(4, '0')}`;
+    const items = [
+      ...Array.from({ length: 3000 }, (_, i) => ({ kind: 'spot' as const, name: long(i), removed: false })),
+      ...Array.from({ length: 2000 }, (_, i) => ({ kind: 'playlist' as const, name: long(i), removed: false })),
+      ...Array.from({ length: 1000 }, (_, i) => ({ kind: 'schedule_entry' as const, name: long(i % 7), removed: i % 2 === 0 })),
+    ];
+    const kept = summarizeChanges(items);
+    expect(new TextEncoder().encode(JSON.stringify(kept)).length).toBeLessThanOrEqual(CHANGES_BYTES);
+    expect(kept.map((g) => [g.kind, g.removed, g.count])).toEqual([
+      ['spot', false, 3000],
+      ['playlist', false, 2000],
+      ['schedule_entry', false, 500],
+      ['schedule_entry', true, 500],
+    ]);
+    // Each group keeps some names, and says how many it left out.
+    for (const g of kept) expect(g.names.length + g.omitted).toBe(g.kind === 'schedule_entry' ? 7 : g.count);
+  });
+
+  it('keeps every name of a small publish, each once', () => {
+    expect(
+      summarizeChanges([
+        { kind: 'spot', name: 'Deal', removed: false },
+        { kind: 'schedule_entry', name: 'Main', removed: false },
+        { kind: 'schedule_entry', name: 'Main', removed: false },
+      ]),
+    ).toEqual([
+      { kind: 'spot', removed: false, count: 1, names: ['Deal'], omitted: 0 },
+      { kind: 'schedule_entry', removed: false, count: 2, names: ['Main'], omitted: 0 },
+    ]);
+  });
+});
+
 describe('the publish tools (M3-18)', () => {
   /** Calls as an editor, with a notifier that records which screens it was told of and a bucket `put` can be wrapped around. */
   function publisher(org: TestScope, opts: { onPut?: (attempt: number) => Promise<void>; lock?: boolean } = {}) {
@@ -587,7 +706,7 @@ describe('the publish tools (M3-18)', () => {
               await opts.onPut?.(puts);
               return target.put(...args);
             }
-          : Reflect.get(target, key, target),
+          : bound(target, key),
     });
     const screens: ScreenNotifier = {
       manifest: async () => {},
@@ -640,6 +759,17 @@ describe('the publish tools (M3-18)', () => {
     expect(again.screens.map((s) => s.outcome)).toEqual(['unchanged', 'unchanged']);
     expect(p.told).toHaveLength(1);
     expect((await org.settings.get())!.publishRevision).toBe(1);
+    expect(await org.auditLog.list()).toHaveLength(audit);
+  });
+
+  it('writes nothing, no audit row either, when every pinned draft is live as it is (#396)', async () => {
+    const { org } = await seedSmallOrg('tool-pub-pins-live');
+    const p = publisher(org);
+    await ok(p.call('publish', {}));
+    const audit = (await org.auditLog.list()).length;
+    const deal = (await org.spots.get(x('deal')))!;
+    const again = (await ok(p.call('publish', { drafts: [{ kind: 'spot', id: deal.id, version: deal.rowVersion }] }))) as unknown as Out;
+    expect(again).toMatchObject({ publish: null, promoted: [] });
     expect(await org.auditLog.list()).toHaveLength(audit);
   });
 
@@ -734,9 +864,14 @@ describe('the publish tools (M3-18)', () => {
     const v2 = (await org.screens.get(lobby.id))!.desiredManifestId;
     expect(v2).not.toBe(v1);
 
+    // Each records what its manifest shows photos for beside it, for the feed poller (#486): this content shows none.
+    expect((await org.screens.get(lobby.id))!.desiredPhotoSourcesJson).toBe(JSON.stringify({ manifest: v2, sources: [] }));
+
     const back = (await ok(p.call('roll_back_publish', { publishId: first.publish!.id }))) as unknown as Out;
     expect(back.publish).toMatchObject({ revision: 3, screens: 2, previousId: second.publish!.id });
     expect((await org.screens.get(lobby.id))!).toMatchObject({ desiredManifestId: v1, previousManifestId: v2 });
+    // A roll back reads its manifests once to record theirs.
+    expect((await org.screens.get(lobby.id))!.desiredPhotoSourcesJson).toBe(JSON.stringify({ manifest: v1, sources: [] }));
     expect((await org.publishes.get(back.publish!.id))!.restoresId).toBe(first.publish!.id);
     expect((await ok(editorCalls(org)('get_publish', {}))).publish).toMatchObject({ revision: 3, restoresId: first.publish!.id, restoresRevision: 1 });
     expect(p.told.at(-1)).toContainEqual({ screenId: lobby.id, manifestId: v1 });
@@ -761,18 +896,25 @@ describe('the publish tools (M3-18)', () => {
     const { org, lobby, hall } = await seedSmallOrg('tool-rollout');
     const p = publisher(org);
     const call = editorCalls(org);
-    expect(await ok(call('get_publish', {}))).toEqual({ publish: null, screens: [] });
+    expect(await ok(call('get_publish', {}))).toEqual({ publish: null, screens: [], targets: null });
     const first = (await ok(p.call('publish', {}))) as unknown as Out;
     const manifest = (await org.screens.get(lobby.id))!.desiredManifestId!;
     await org.screens.reportManifest(lobby.id, manifest, { arrivedAt: Date.now() });
+    await org.screens.update(lobby.id, { lastSeenAt: Date.now() });
     await org.screens.update(hall.id, { lastSeenAt: Date.now() - 3_600_000 });
 
     const latest = await ok(call('get_publish', {}));
     expect(latest.publish).toMatchObject({ id: first.publish!.id, revision: 1, by: { kind: 'user', id: 'user-1' }, screens: 2, playing: 1, replaced: 0 });
     expect(latest.screens).toEqual([
-      expect.objectContaining({ screenId: hall.id, name: 'Hall', outcome: 'offline' }),
-      expect.objectContaining({ screenId: lobby.id, name: 'Lobby', outcome: 'playing', manifestId: manifest }),
+      expect.objectContaining({ screenId: hall.id, name: 'Hall', outcome: 'unreachable', state: { kind: 'needs_you', reason: 'behind' } }),
+      expect.objectContaining({ screenId: lobby.id, name: 'Lobby', outcome: 'playing', manifestId: manifest, state: { kind: 'online', reason: null } }),
     ]);
+    // Lobby played it, then went quiet: its outcome stays playing, and its state says it is unreachable now (#345).
+    await org.screens.update(lobby.id, { lastSeenAt: Date.now() - 3_600_000 });
+    expect((await ok(call('get_publish', {}))).screens).toContainEqual(
+      expect.objectContaining({ screenId: lobby.id, outcome: 'playing', state: { kind: 'unreachable', reason: null } }),
+    );
+    await org.screens.update(lobby.id, { lastSeenAt: Date.now() });
     await editDeal(org, 'Three for $5');
     await ok(p.call('publish', {}));
     expect((await ok(call('get_publish', { publishId: first.publish!.id }))).publish).toMatchObject({ revision: 1, playing: 1, replaced: 1 });
@@ -784,12 +926,267 @@ describe('the publish tools (M3-18)', () => {
     expect(await call('get_publish', { publishId: 'pub_gone' })).toMatchObject({ ok: false, error: 'not_found' });
   });
 
+  it('says what each publish changed, by kind with exact counts, named as published; a roll back says nothing (#370)', async () => {
+    const { org } = await seedSmallOrg('tool-changes');
+    const p = publisher(org);
+    const call = editorCalls(org);
+    const first = (await ok(p.call('publish', {}))) as unknown as Out;
+    type Changes = { kind: string; removed: boolean; count: number; names: string[]; omitted: number }[];
+    const made = ((await ok(call('get_publish', {}))).publish as { changes: Changes }).changes;
+    expect(made.reduce((n, g) => n + g.count, 0)).toBe(first.promoted.length);
+    expect(made.every((g) => !g.removed && g.names.every((n) => n !== ''))).toBe(true);
+
+    const deal = (await org.spots.get(x('deal')))!;
+    await org.spots.update(deal.id, { name: 'Deal of the week', dataJson: JSON.stringify({ title: 'Three for $5' }) });
+    await ok(p.call('publish', {}));
+    const page = await ok(call('list_publishes', {}));
+    expect((page.publishes as { revision: number; changes: unknown }[]).map((x) => [x.revision, x.changes])).toEqual([
+      [2, [{ kind: 'spot', removed: false, count: 1, names: ['Deal of the week'], omitted: 0 }]],
+      [1, made],
+    ]);
+    await ok(p.call('roll_back_publish', { publishId: first.publish!.id }));
+    expect((await ok(call('get_publish', {}))).publish).toMatchObject({ revision: 3, changes: null });
+  });
+
+  it('names a removed schedule entry by what screens played, not by its draft (review of #455)', async () => {
+    const { org } = await seedSmallOrg('tool-changes-removed');
+    const p = publisher(org);
+    const call = editorCalls(org);
+    await ok(p.call('publish', {}));
+    // Published playing Evenings; its draft then pointed at Main, and deleted.
+    const entry = (await org.scheduleEntries.get(x('evening-takeover')))!;
+    const edited = await ok(call('save_schedule_entry', { scheduleEntryId: entry.id, playlistId: x('main'), ifVersion: entry.rowVersion }));
+    await ok(call('delete', { type: 'schedule_entry', id: entry.id, ifVersion: (edited.entry as { version: number }).version }));
+    await ok(p.call('publish', {}));
+    expect(((await ok(call('get_publish', {}))).publish as { changes: unknown }).changes).toContainEqual({
+      kind: 'schedule_entry',
+      removed: true,
+      count: 1,
+      names: ['Evenings'],
+      omitted: 0,
+    });
+  });
+
+  it("names a schedule entry made live by its playlist as screens will have it, not that playlist's unpublished draft (review of #455)", async () => {
+    const { org } = await seedSmallOrg('tool-changes-entry-name');
+    const p = publisher(org);
+    const call = editorCalls(org);
+    await ok(p.call('publish', {}));
+    // Main is published; its draft renamed, not published. The entry is pointed at Main and published alone.
+    await org.playlists.update(x('main'), { name: 'Unpublished Main' });
+    const entry = (await org.scheduleEntries.get(x('evening-takeover')))!;
+    const edited = (await ok(call('save_schedule_entry', { scheduleEntryId: entry.id, playlistId: x('main'), ifVersion: entry.rowVersion }))).entry as {
+      version: number;
+    };
+    await ok(p.call('publish', { drafts: [{ kind: 'schedule_entry', id: entry.id, version: edited.version }] }));
+    expect(((await ok(call('get_publish', {}))).publish as { changes: unknown }).changes).toEqual([
+      { kind: 'schedule_entry', removed: false, count: 1, names: ['Main'], omitted: 0 },
+    ]);
+  });
+
+  it('reads a summary not of its shape as none, so the history still lists the publish (review of #455)', async () => {
+    const { org } = await seedSmallOrg('tool-changes-bad');
+    const p = publisher(org);
+    const call = editorCalls(org);
+    const first = (await ok(p.call('publish', {}))) as unknown as Out;
+    const negative = '[{"kind":"spot","removed":false,"count":-1,"names":[],"omitted":0}]';
+    for (const bad of ['{}', 'not json', '[{"kind":"spot"}]', negative]) {
+      await env.DB.prepare('UPDATE publishes SET changes_json = ? WHERE id = ?').bind(bad, first.publish!.id).run();
+      expect(((await ok(call('get_publish', {}))).publish as { changes: unknown }).changes, bad).toBeNull();
+    }
+  });
+
+  it('is refused at its commit when an asset its manifests name is deleted while it compiles, and runs again without it (review of #429, 5)', async () => {
+    const { org, lobby } = await seedSmallOrg('tool-pub-logo-race');
+    const logo = await addImage(org, sha('e'), sha('f'));
+    const kit = await org.brandKits.insert({
+      name: 'Brand',
+      colorsJson: JSON.stringify({ primary: '#1d4ed8', accent: '#f59e0b', background: '#0b0f17', surface: '#1a2130', text: '#f5f7fa', muted: '#a3acbb' }),
+      shape: 'soft',
+      logoOnDarkAssetId: logo.id,
+    });
+    await org.commit((await org.brandKits.assignments.stage.set({ target: 'org' }, kit.id)).writes);
+    // While the first attempt stores its manifests, a person takes the logo off the kit and deletes it.
+    const p = publisher(org, {
+      onPut: async (attempt) => {
+        if (attempt !== 1) return;
+        await org.brandKits.update(kit.id, { logoOnDarkAssetId: null });
+        expect(await editorCalls(org)('delete', { type: 'asset', id: logo.id })).toMatchObject({ ok: true });
+      },
+    });
+    const out = (await ok(p.call('publish', {}))) as unknown as Out;
+    expect(out.publish).toMatchObject({ revision: 1 });
+    // What screens play, and what the index keeps for them, name none of the deleted logo's files.
+    const desired = (await org.screens.get(lobby.id))!.desiredManifestId!;
+    const manifest: ScreenManifest = await (await env.BLOBS.get(manifestKey(org.orgId, lobby.id, desired)))!.json();
+    expect(Object.keys(manifest.files)).not.toContain(sha('e'));
+    const index = await env.DB.prepare('SELECT files_json AS f FROM stored_manifests WHERE org_id = ? AND manifest_id = ?')
+      .bind(org.orgId, desired)
+      .first<{ f: string }>();
+    expect(JSON.parse(index!.f)).not.toContain(sha('e'));
+  });
+
+  it('refuses a roll back to a publish made more than 90 days ago, saying why, and gives each publish its last day for one (#235)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const start = Date.UTC(2026, 3, 1);
+      vi.setSystemTime(start);
+      const { org } = await seedSmallOrg('tool-rollback-age');
+      const p = publisher(org);
+      const first = (await ok(p.call('publish', {}))) as unknown as Out;
+      await editDeal(org, 'Two for $4');
+      await ok(p.call('publish', {}));
+      const made = (await org.publishes.get(first.publish!.id))!.createdAt;
+      expect((await ok(editorCalls(org)('get_publish', { publishId: first.publish!.id }))).publish).toMatchObject({ rollBackUntil: made + STORAGE_GRACE_MS });
+      vi.setSystemTime(made + STORAGE_GRACE_MS + 1);
+      expect(await p.call('roll_back_publish', { publishId: first.publish!.id })).toMatchObject({
+        ok: false,
+        error: 'conflict',
+        details: { tooOld: true },
+        message: expect.stringContaining('more than 90 days ago'),
+      });
+      // On its last day it still may.
+      vi.setSystemTime(made + STORAGE_GRACE_MS);
+      expect(await p.call('roll_back_publish', { publishId: first.publish!.id })).toMatchObject({ ok: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /** Each screen's desired manifest. */
+  const desired = async (org: TestScope) => (await org.screens.list()).map((s) => ({ screenId: s.id, manifestId: s.desiredManifestId! }));
+  const stored = async (org: TestScope, rows: { screenId: string; manifestId: string }[]) =>
+    Promise.all(rows.map(async (r) => (await env.BLOBS.head(manifestKey(org.orgId, r.screenId, r.manifestId))) !== null));
+  /** What the storage sweep does to these manifests: claims them, as of `at`, until the claim runs out an hour on. */
+  const claimManifests = (org: TestScope, ids: string[], at: number) =>
+    env.DB.prepare(`UPDATE stored_manifests SET claim_owner = 'sweep', claim_until = ? WHERE org_id = ? AND manifest_id IN (SELECT value FROM json_each(?))`)
+      .bind(at + 3_600_000, org.orgId, JSON.stringify(ids))
+      .run();
+  /** ...then deletes their objects and, its claim forgotten, marks them deleted at `at`. */
+  async function sweptManifests(org: TestScope, rows: { screenId: string; manifestId: string }[], at: number) {
+    await env.BLOBS.delete(rows.map((r) => manifestKey(org.orgId, r.screenId, r.manifestId)));
+    await env.DB.prepare(
+      `UPDATE stored_manifests SET claim_owner = NULL, claim_until = 0, deleted_at = ? WHERE org_id = ? AND manifest_id IN (SELECT value FROM json_each(?))`,
+    )
+      .bind(at, org.orgId, JSON.stringify(rows.map((r) => r.manifestId)))
+      .run();
+  }
+
+  /** Runs `test` with the clock fixed at AT (review of #431): claims and deletions are timed against it. */
+  const AT = Date.UTC(2026, 4, 1, 9);
+  async function atFixedTime(test: () => Promise<void>) {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(AT);
+    try {
+      await test();
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it('publishes a manifest the storage sweep is deleting only once it is done, storing it again (#235)', () =>
+    atFixedTime(async () => {
+      const { org } = await seedSmallOrg('tool-manifest-sweep');
+      await editDeal(org, 'Two for $4');
+      await ok(publisher(org).call('publish', {}));
+      const a = await desired(org);
+      await editDeal(org, 'Three for $5');
+      await ok(publisher(org).call('publish', {}));
+      const b = await desired(org);
+      // Back to the first content: the same manifests, by their content-addressed ids.
+      await editDeal(org, 'Two for $4');
+      const ids = a.map((r) => r.manifestId);
+      // The sweep claims them as the publish stores them, before its batch: the batch is refused, and the run again too.
+      const raced = publisher(org, { onPut: async (n) => void (n === 1 && (await claimManifests(org, ids, AT))) });
+      expect(await raced.call('publish', {})).toMatchObject({ ok: false, error: 'conflict', message: expect.stringContaining('storage clean-up') });
+      expect(await desired(org)).toEqual(b);
+      // While the claim holds: refused before anything is stored.
+      expect(await publisher(org).call('publish', {})).toMatchObject({ ok: false, error: 'conflict', message: expect.stringContaining('storage clean-up') });
+      // The sweep deleted them after the publish stored them. A publish now stores them again and marks them stored.
+      await sweptManifests(org, a, AT - 1);
+      expect(await stored(org, a)).toEqual(a.map(() => false));
+      await ok(publisher(org).call('publish', {}));
+      expect(await desired(org)).toEqual(a);
+      expect(await stored(org, a)).toEqual(a.map(() => true));
+      const marked = await env.DB.prepare('SELECT count(*) AS n FROM stored_manifests WHERE org_id = ? AND deleted_at IS NOT NULL')
+        .bind(org.orgId)
+        .first<{ n: number }>();
+      expect(marked?.n).toBe(0);
+    }));
+
+  it('points a screen at an uploaded manifest only while the storage sweep is not deleting it (#235)', () =>
+    atFixedTime(async () => {
+      const { org, lobby } = await seedSmallOrg('tool-manifest-pointer');
+      await editDeal(org, 'Two for $4');
+      await ok(publisher(org).call('publish', {}));
+      const [a] = (await desired(org)).filter((r) => r.screenId === lobby.id);
+      await editDeal(org, 'Three for $5');
+      await ok(publisher(org).call('publish', {}));
+      const p = publisher(org);
+      await claimManifests(org, [a!.manifestId], AT);
+      expect(await p.call('publish_manifest_to_screen', a)).toMatchObject({
+        ok: false,
+        error: 'conflict',
+        message: expect.stringContaining('storage clean-up'),
+      });
+      // Deleted, then uploaded again (as `/admin` does): it is pointed at, and marked stored.
+      await sweptManifests(org, [a!], AT - 1);
+      expect(await p.call('publish_manifest_to_screen', a)).toMatchObject({ ok: false, error: 'not_found' });
+      await env.BLOBS.put(manifestKey(org.orgId, a!.screenId, a!.manifestId), JSON.stringify({ files: {}, spots: {}, templates: {}, screen: {} }));
+      expect(await p.call('publish_manifest_to_screen', a)).toMatchObject({ ok: true, output: { changed: true } });
+      expect(await org.screens.get(lobby.id)).toMatchObject({ desiredManifestId: a!.manifestId });
+      const row = await env.DB.prepare('SELECT deleted_at AS d FROM stored_manifests WHERE org_id = ? AND manifest_id = ?')
+        .bind(org.orgId, a!.manifestId)
+        .first<{ d: number | null }>();
+      expect(row?.d).toBeNull();
+    }));
+
+  it('rolls back to a publish of the last 90 days after the storage sweep has deleted older manifests (#235)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const start = Date.UTC(2026, 3, 1);
+      const DAY = 24 * 60 * 60_000;
+      vi.setSystemTime(start);
+      const { org } = await seedSmallOrg('tool-manifest-rollback');
+      const p = publisher(org);
+      const titles = ['One for $1', 'Two for $2', 'Three for $3', 'Four for $4'];
+      const at = [start, start + DAY, start + 100 * DAY, start + 101 * DAY];
+      const made: { id: string; screens: { screenId: string; manifestId: string }[] }[] = [];
+      for (const [i, title] of titles.entries()) {
+        vi.setSystemTime(at[i]!);
+        await editDeal(org, title);
+        const out = (await ok(p.call('publish', {}))) as unknown as Out;
+        made.push({ id: out.publish!.id, screens: await desired(org) });
+      }
+      // The sweep, a day on: v1 is outside what is kept (v2 is each screen's newest before the grace period), so it goes.
+      const now = start + 102 * DAY;
+      vi.setSystemTime(now);
+      expect(await org.storage.lease('sweep', now)).toBe(true);
+      const due = await org.storage.claim('sweep', now, 90);
+      const order = (x: { screenId: string }, y: { screenId: string }) => x.screenId.localeCompare(y.screenId);
+      expect(due.manifests.toSorted(order)).toEqual(made[0]!.screens.toSorted(order));
+      await sweptManifests(org, made[0]!.screens, now);
+      await org.commit(org.storage.stage.forget(due, 'sweep', now).writes);
+      // v3, of the last 90 days: rolled back to, every manifest stored.
+      expect(await p.call('roll_back_publish', { publishId: made[2]!.id })).toMatchObject({ ok: true, output: { publish: { revision: 5 } } });
+      expect(await desired(org)).toEqual(made[2]!.screens);
+      expect(await stored(org, made[2]!.screens)).toEqual(made[2]!.screens.map(() => true));
+      // v1 and v2 are older than 90 days: refused.
+      for (const old of [made[0]!, made[1]!])
+        expect(await p.call('roll_back_publish', { publishId: old.id })).toMatchObject({ ok: false, details: { tooOld: true } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('sets the default playlist, without which no screen can be published to', async () => {
     const { org } = await seedSmallOrg('tool-default');
     await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
     const p = publisher(org);
-    const none = (await ok(p.call('publish', {}))) as unknown as Out;
+    // No schedule entry made live, so no playlist to make the default (#243): no screen can be published to.
+    const none = (await ok(p.call('publish', { drafts: [] }))) as unknown as Out;
     expect(none.screens.map((s) => s.outcome)).toEqual(['failed', 'failed']);
+    expect(none).toMatchObject({ madeDefault: null });
     const call = editorCalls(org);
     expect(await ok(call('set_default_playlist', { playlistId: x('main') }))).toMatchObject({ playlist: { id: x('main'), isDefault: true } });
     expect((await ok(call('get_playlist', { playlistId: x('evenings') }))).playlist).toMatchObject({ isDefault: false });
@@ -801,6 +1198,120 @@ describe('the publish tools (M3-18)', () => {
     await org.commit((await org.settings.stage.set({ editorsPublish: false })).writes);
     expect(await call('set_default_playlist', { playlistId: x('evenings') })).toMatchObject({ ok: false, error: 'forbidden' });
     expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
+  });
+
+  /** A regular entry on every screen at all hours: what may make an org's first default (#243). */
+  const everywhere = (org: TestScope, id: string, playlistId: string) => org.scheduleEntries.insert({ id: x(id), playlistId, priority: 1, target: 'org' });
+
+  it('makes the playlist of an entry on every screen at all hours the default when the org has none, so its screens are reached, and audits it (#243)', async () => {
+    const { org } = await seedSmallOrg('tool-first-default');
+    await everywhere(org, 'all-day', x('main'));
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
+    const out = (await ok(publisher(org).call('publish', {}))) as unknown as Out & { madeDefault: { id: string; name: string } | null };
+    // All day plays Main everywhere: it becomes what every screen plays when nothing is scheduled. The
+    // evening entry, on one group for some hours, has no say.
+    expect(out.madeDefault).toEqual({ id: x('main'), name: 'Main' });
+    expect(out.screens.map((s) => s.outcome)).toEqual(['updated', 'updated']);
+    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
+    const row = (await org.auditLog.list({ limit: 100 })).find((e) => e.action === 'publish');
+    expect(JSON.parse(row!.detailJson!)).toMatchObject({ input: {}, detail: { madeDefault: { id: x('main'), name: 'Main' } } });
+    // The next publish finds it set, and leaves it.
+    await editDeal(org, 'Three for $5');
+    expect(await ok(publisher(org).call('publish', {}))).toMatchObject({ madeDefault: null });
+    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
+  });
+
+  it('never makes a default from a narrower entry or a takeover: the publish goes on, and says which screens got nothing (owner, #243)', async () => {
+    // Evenings on one group, 18:00 to 22:00: narrower than every screen at all hours.
+    const { org } = await seedSmallOrg('tool-default-narrow');
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
+    const narrow = (await ok(publisher(org).call('publish', {}))) as unknown as Out & { madeDefault: unknown };
+    expect(narrow.madeDefault).toBeNull();
+    expect(narrow.publish).not.toBeNull();
+    expect(narrow.screens.map((s) => s.outcome)).toEqual(['failed', 'failed']);
+    expect((await org.settings.get())!.defaultPlaylistId).toBeNull();
+
+    // A takeover on every screen: it ends, so it is never what screens fall back to.
+    const { org: two } = await seedSmallOrg('tool-default-takeover');
+    await two.scheduleEntries.delete(x('evening-takeover'));
+    const now = Date.now();
+    await two.scheduleEntries.insert({ id: x('flash'), playlistId: x('main'), priority: 100, target: 'org', startsAt: now - 60_000, endsAt: now + 3_600_000 });
+    await two.commit((await two.settings.stage.set({ defaultPlaylistId: null })).writes);
+    const takeover = (await ok(publisher(two).call('publish', {}))) as unknown as Out & { madeDefault: unknown };
+    expect(takeover.madeDefault).toBeNull();
+    expect(takeover.screens.map((s) => s.outcome)).toEqual(['failed', 'failed']);
+    expect((await two.settings.get())!.defaultPlaylistId).toBeNull();
+  });
+
+  it('leaves a default someone set while it compiled: its guard fails, and the run again finds it (#243)', async () => {
+    const { org } = await seedSmallOrg('tool-default-race');
+    await everywhere(org, 'all-day', x('evenings'));
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
+    // Main is made the default by hand between the publish's read and its commit (the first manifest's store).
+    const p = publisher(org, {
+      onPut: async (put) => {
+        if (put === 1) await org.commit((await org.settings.stage.set({ defaultPlaylistId: x('main') })).writes);
+      },
+    });
+    const out = (await ok(p.call('publish', {}))) as unknown as Out & { madeDefault: unknown };
+    expect(out.madeDefault).toBeNull();
+    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
+  });
+
+  it('makes no default from an entry whose playlist was never published, or from a takeover ended', async () => {
+    const { org } = await seedSmallOrg('tool-default-none');
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
+    // The entry alone, its playlist a draft never published: the entry is held, and nothing is made the default.
+    const entry = await org.scheduleEntries.get(x('evening-takeover'));
+    const held = (await ok(
+      publisher(org).call('publish', { drafts: [{ kind: 'schedule_entry', id: entry!.id, version: entry!.rowVersion }] }),
+    )) as unknown as Out & {
+      madeDefault: unknown;
+      held: { id: string }[];
+    };
+    expect(held.held.map((h) => h.id)).toContain(entry!.id);
+    expect(held.madeDefault).toBeNull();
+    expect((await org.settings.get())!.defaultPlaylistId).toBeNull();
+
+    // A takeover ended: no entry made live, so no default either.
+    const { org: two } = await seedSmallOrg('tool-default-end');
+    const now = Date.now();
+    await two.scheduleEntries.insert({ id: x('flash'), playlistId: x('main'), priority: 100, target: 'org', startsAt: now - 60_000, endsAt: now + 3_600_000 });
+    await ok(publisher(two).call('publish', {}));
+    await two.commit((await two.settings.stage.set({ defaultPlaylistId: null })).writes);
+    expect(await ok(publisher(two).call('takeover', { action: 'end', scheduleEntryId: x('flash') }))).toMatchObject({ madeDefault: null });
+    expect((await two.settings.get())!.defaultPlaylistId).toBeNull();
+  });
+
+  it("finds a publish that made the default under the What filter's set_default_playlist, beside set_default_playlist's own rows", async () => {
+    const { org } = await seedSmallOrg('tool-default-filter');
+    await everywhere(org, 'all-day', x('evenings'));
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: null })).writes);
+    await ok(publisher(org).call('publish', {}));
+    await ok(editorCalls(org)('set_default_playlist', { playlistId: x('main') }));
+    await editDeal(org, 'Four for $6');
+    await ok(publisher(org).call('publish', {}));
+    const { entries } = (await ok(editorCalls(org)('list_audit_log', { action: 'set_default_playlist' }))) as unknown as {
+      entries: { action: string; detail: Record<string, unknown> }[];
+    };
+    expect(entries.map((e) => e.action)).toEqual(['set_default_playlist', 'publish']);
+    expect(entries[1]!.detail).toMatchObject({ detail: { madeDefault: { id: x('evenings'), name: 'Evenings' } } });
+  });
+
+  it('leaves a default the org has alone, and makes none when the entries on every screen made live play several playlists', async () => {
+    const { org } = await seedSmallOrg('tool-default-kept');
+    expect(await ok(publisher(org).call('publish', {}))).toMatchObject({ madeDefault: null });
+    expect((await org.settings.get())!.defaultPlaylistId).toBe(x('main'));
+
+    const { org: two } = await seedSmallOrg('tool-default-several');
+    await everywhere(two, 'all-main', x('main'));
+    await everywhere(two, 'all-evenings', x('evenings'));
+    await two.commit((await two.settings.stage.set({ defaultPlaylistId: null })).writes);
+    const out = (await ok(publisher(two).call('publish', {}))) as unknown as Out & { madeDefault: { id: string; name: string } | null };
+    // Which of two would be a guess: nothing is set, and the screens say why.
+    expect(out.madeDefault).toBeNull();
+    expect(out.screens.map((s) => s.outcome)).toEqual(['failed', 'failed']);
+    expect((await two.settings.get())!.defaultPlaylistId).toBeNull();
   });
 
   it("deletes the spot editor's weather sources nothing binds, but not one a published version bound before the publish, nor one just made (#98)", async () => {
@@ -834,7 +1345,7 @@ describe('the publish tools (M3-18)', () => {
     await source(w4);
     await age(w4);
     await bind(w4);
-    expect(await call('delete_data_source', { dataSourceId: w1 })).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await call('delete', { type: 'data_source', id: w1 })).toMatchObject({ ok: false, error: 'conflict' });
     const second = (await ok(p.call('publish', {}))) as unknown as Out & { removedDataSources: string[] };
     expect(second.removedDataSources).toEqual([]);
     await ok(p.call('roll_back_publish', { publishId: first.publish!.id, ifLatest: second.publish!.id }));

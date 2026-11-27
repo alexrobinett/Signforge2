@@ -1,15 +1,14 @@
 import AxeBuilder from '@axe-core/playwright';
-import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-import { expect, request as playwrightRequest, type Page, type Route } from '@playwright/test';
+import { createHash, randomUUID } from 'node:crypto';
+import { type Browser, expect, request as playwrightRequest, type Frame, type Locator, type Page, type Route } from '@playwright/test';
 import { manifestIdInput, MANIFEST_SCHEMA, type ScreenManifest } from '@signforge/contract';
 import { png } from '@signforge/media/testing';
-import { ADMIN_TOKEN, API_PORT, CMS_URL, codeFor, RUN_DIR } from './servers';
+import { slugify } from '../src/lib/paths';
+import { ADMIN_TOKEN, API_PORT, CMS_URL, codeFor } from './servers';
 
 /**
  * Fill the email step and ask for a code. Retried until the page has hydrated: before that the
- * input takes text but React has not seen it, and the button stays disabled.
+ * input takes text but React has not seen it, and the button stays disabled. Bounded by the test.
  */
 export async function requestCode(page: Page, email: string) {
   const button = page.getByRole('button', { name: 'Email me a code' });
@@ -17,7 +16,7 @@ export async function requestCode(page: Page, email: string) {
     await page.getByLabel('Email').fill('');
     await page.getByLabel('Email').fill(email);
     await expect(button).toBeEnabled({ timeout: 1_000 });
-  }).toPass({ timeout: 30_000 });
+  }).toPass();
   await button.click();
   await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
 }
@@ -54,19 +53,19 @@ export async function screenshot(page: Page, name: string) {
 
 /**
  * Fill a field and wait until `button` is enabled, retrying until the page has hydrated: before
- * that the input takes text but React has not seen it.
+ * that the input takes text but React has not seen it. Bounded by the test.
  */
 export async function fillUntilEnabled(page: Page, label: string, value: string, button: string) {
   await expect(async () => {
     await page.getByLabel(label).fill('');
     await page.getByLabel(label).fill(value);
     await expect(page.getByRole('button', { name: button })).toBeEnabled({ timeout: 1_000 });
-  }).toPass({ timeout: 30_000 });
+  }).toPass();
 }
 
 /** Wait until React has hydrated the page (`data-hydrated` on body), so clicks reach handlers. */
 export async function hydrated(page: Page) {
-  await expect(page.locator('body[data-hydrated]')).toBeAttached({ timeout: 30_000 });
+  await expect(page.locator('body[data-hydrated]')).toBeAttached();
 }
 
 /**
@@ -125,12 +124,16 @@ export async function signInAs(page: Page, email: string, address: string) {
   await fromAddress(page, address);
 }
 
+/** Each page's client address (`fromAddress`): its tool calls come from it too (#333). */
+const addresses = new WeakMap<Page, string>();
+
 /**
  * The page's calls come from `address` (the CMS passes it to the API), sign-in's included. Better
  * Auth counts a path's calls per address until 10 s pass with none, so on one shared address every
  * spec's shell read added up and a long run got 429.
  */
 export async function fromAddress(page: Page, address: string) {
+  addresses.set(page, address);
   await page
     .context()
     .route(`${CMS_URL}/**`, async (route) => route.fallback({ headers: { ...(await route.request().allHeaders()), 'cf-connecting-ip': address } }));
@@ -171,40 +174,105 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
  * Run axe on the page as it is, in the light theme and the dark, and fail on any violation
  * (results axe cannot decide, such as text over a gradient, are not failures). Transitions and
  * animations are off in the top document while it runs: else it reads colours halfway through the
- * theme change, or a dialog's fade. The spot editor's preview is checked too: the real player
- * showing a template, so every base template's text must read on its colours (#57). Its template
- * frames keep playing, so each is held at rest, after its intro and before its outro (which starts
- * at least 0.6 s before the end): mid-fade, weather's last row once read 2.68:1 (#70). The next play
- * restarts them. The player's own slots fade between spots, and an analysis during that fade reads
- * a spot half shown: each analysis waits for the slots to settle and is repeated if a fade began
- * during it (#95).
+ * theme change, or a dialog's fade. The players' frames (the spot editor's preview and the like) are
+ * checked on their own, in the light theme: the real player showing a template, so every base
+ * template's text must read on its colours (#57). The CMS's `.dark` never reaches them. Their
+ * template frames keep playing, so each is held at rest, after its intro and before its outro
+ * (which starts at least 0.6 s before the end): mid-fade, weather's last row once read 2.68:1 (#70).
+ * The next play restarts them. The player's own slots fade between spots, and an analysis during
+ * that fade reads a spot half shown: each analysis waits for the slots to settle and is repeated if
+ * a fade began during it (#95). A player starts its next spot from a timer, so its timers are held
+ * while its frames are checked: else a busy machine, slower than a spot, never got a still stage
+ * (#310). A step already under way may start one spot more: then the next analysis is still.
  */
 export async function axe(page: Page) {
   const still = await page.addStyleTag({ content: '*, *::before, *::after { transition: none !important; animation: none !important; }' });
   const wasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
-  for (const dark of [false, true]) {
-    await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), dark);
-    // A play or slot fade that began during an analysis may have shown it a spot mid-intro or half
-    // faded: settle, hold, analyse again. A stage looping 4 s spots can do that several times.
-    let found: string[] = [];
-    let held = false;
-    for (let tries = 0; tries < 5 && !held; tries++) {
-      // Often: between 4 s spots with a long fade, the stage is still for about a second.
-      await expect.poll(() => slotFades(page), { message: 'a player slot is still fading', intervals: [50], timeout: 15_000 }).not.toBeUndefined();
-      const fades = await slotFades(page);
-      if (fades === undefined) continue;
-      await holdTemplates(page);
-      const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
-      found = violations.flatMap((v) =>
-        v.nodes.map((n) => `${dark ? 'dark' : 'light'} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`),
-      );
-      held = (await holdTemplates(page)) && (await slotFades(page)) === fades;
+  const report = (theme: string, violations: Awaited<ReturnType<AxeBuilder['analyze']>>['violations']) =>
+    violations.flatMap((v) => v.nodes.map((n) => `${theme} ${v.id}: ${n.target.join(' ')}: ${n.any[0]?.message ?? n.failureSummary}`));
+  try {
+    await page.evaluate(() => document.documentElement.classList.remove('dark'));
+    // The CMS's own document first, its transitions off: nothing in it moves, so one analysis.
+    expect(report('light', (await new AxeBuilder({ page }).withTags(WCAG).exclude('iframe').analyze()).violations), page.url()).toEqual([]);
+    // Then the players' frames alone, so each analysis is short beside the spots' 4 s. A play or slot
+    // fade that began during one may have shown it a spot mid-intro or half faded: settle, hold,
+    // analyse again.
+    if ((await page.locator('iframe').count()) > 0) {
+      const release = await holdPlayers(page);
+      let found: string[] = [];
+      let held = false;
+      try {
+        for (let tries = 0; tries < 5 && !held; tries++) {
+          await expect.poll(() => slotFades(page), { message: 'a player slot is still fading', intervals: [50], timeout: 15_000 }).not.toBeUndefined();
+          const fades = await slotFades(page);
+          if (fades === undefined) continue;
+          await holdTemplates(page);
+          found = report('light', (await new AxeBuilder({ page }).withTags(WCAG).include('iframe').analyze()).violations);
+          held = (await holdTemplates(page)) && (await slotFades(page)) === fades;
+        }
+      } finally {
+        await release();
+      }
+      expect(held, 'a template frame started a play, or a player slot a fade, during each of 5 analyses').toBe(true);
+      expect(found, page.url()).toEqual([]);
     }
-    expect(held, 'a template frame started a play, or a player slot a fade, during each of 5 analyses').toBe(true);
-    expect(found, page.url()).toEqual([]);
+    await page.evaluate(() => document.documentElement.classList.add('dark'));
+    expect(report('dark', (await new AxeBuilder({ page }).withTags(WCAG).exclude('iframe').analyze()).violations), page.url()).toEqual([]);
+  } finally {
+    // Also after a failure, so the test's own teardown and screenshots see the page as it was.
+    await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), wasDark);
+    await still.evaluate((el) => el.parentNode?.removeChild(el));
   }
-  await page.evaluate((d) => document.documentElement.classList.toggle('dark', d), wasDark);
-  await still.evaluate((el) => el.parentNode?.removeChild(el));
+}
+
+/**
+ * Holds the timers each player (a document with `.slot`s) sets from now until the returned release:
+ * one that comes due meanwhile runs then, and one cleared meanwhile never. Timers set before the
+ * hold run as set.
+ * A frame the player removed in the meantime is skipped.
+ */
+async function holdPlayers(page: Page): Promise<() => Promise<void>> {
+  const players: Frame[] = [];
+  for (const frame of page.frames()) {
+    const player = await frame
+      .evaluate(() => {
+        if (!document.querySelector('.slot')) return false;
+        const w: Window & { sfAxeRelease?: () => void } = window;
+        const { setTimeout: set, clearTimeout: clear } = window;
+        const due = new Map<number, () => void>();
+        let held = true;
+        // The player's own scripts, by their place in the call stack: axe runs in this document too, on its timers.
+        const player = new URL('.', location.href).href;
+        w.setTimeout = (fn: TimerHandler, ms?: number, ...args: unknown[]) => {
+          if (typeof fn === 'string' || !new Error().stack?.includes(player)) return set(fn, ms, ...args);
+          const run = () => fn(...args);
+          const id = set(() => (held ? due.set(id, run) : run()), ms);
+          return id;
+        };
+        w.clearTimeout = (id?: number) => {
+          if (id !== undefined) due.delete(id);
+          clear(id);
+        };
+        w.sfAxeRelease = () => {
+          held = false;
+          w.setTimeout = set;
+          w.clearTimeout = clear;
+          for (const run of due.values()) set(run);
+        };
+        return true;
+      })
+      .catch(() => false);
+    if (player) players.push(frame);
+  }
+  return async () => {
+    for (const frame of players)
+      await frame
+        .evaluate(() => {
+          const w: Window & { sfAxeRelease?: () => void } = window;
+          w.sfAxeRelease?.();
+        })
+        .catch(() => {});
+  };
 }
 
 /**
@@ -291,31 +359,95 @@ export async function stageShows(page: Page, text: string) {
 
 /** Call a tool as the signed-in member, as the CMS's pages do, and expect it to succeed. */
 export async function tool(page: Page, name: string, input: unknown) {
-  const res = await page.request.post(`/api/tools/${name}`, { data: input });
+  const res = await toolResponse(page, name, input);
   expect(res.status(), await res.text()).toBe(200);
   return res.json();
 }
 
-/** Runs SQL on the run's local D1, which the dev API reads (`e2e/global-setup.ts`): for what the test cannot wait for. */
-export function d1(command: string) {
-  const run = spawnSync(
-    'pnpm',
-    ['exec', 'wrangler', 'd1', 'execute', 'DB', '--local', '--env', 'dev', '--persist-to', `${RUN_DIR}state`, '--command', command],
-    {
-      cwd: fileURLToPath(new URL('../../api/', import.meta.url)),
-      env: { ...process.env, CLOUDFLARE_ENV: 'dev', NO_COLOR: '1' },
-      encoding: 'utf8',
-    },
-  );
-  expect(run.status, run.stderr).toBe(0);
+/**
+ * A tool call as the page's session, from the page's own address (`fromAddress`; `signInAs` sets it), and its response
+ * as it came. `page.request` goes past the page's routes, so the address is sent here: on one shared address every
+ * spec's calls counted against one rate limit, a screen's claims 10 a minute among them (#333).
+ */
+export function toolResponse(page: Page, name: string, input: unknown) {
+  const address = addresses.get(page);
+  if (!address) throw new Error(`${name}: the page has no address of its own: sign it in with signInAs, or call fromAddress, first`);
+  return page.request.post(`/api/tools/${name}`, { data: input, headers: { 'cf-connecting-ip': address } });
 }
 
-/** As a member with no org yet: make one called `name`, as the first page asks, and land on it. */
-export async function createOrg(page: Page, name: string) {
+/** The dev API's D1, by the placeholder id `env.dev` gives it in apps/api/wrangler.jsonc. */
+const DEV_DB_ID = '00000000-0000-0000-0000-000000000000';
+
+/**
+ * Runs SQL on the run's local D1, which the dev API reads (`e2e/global-setup.ts`): for what the
+ * test cannot wait for. It goes through the dev API's own Local Explorer, so the process that
+ * holds the database runs it. `wrangler d1 execute`, a second process on the same file, found it
+ * locked (SQLITE_BUSY) once specs ran side by side, and could lock the API's own writes out (#249).
+ */
+export async function d1(sql: string) {
+  const res = await fetch(`http://127.0.0.1:${API_PORT}/cdn-cgi/local/explorer/api/d1/database/${DEV_DB_ID}/raw`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sql }),
+  });
+  const body = await res.text();
+  expect(res.status, body).toBe(200);
+  expect(JSON.parse(body), body).toMatchObject({ success: true });
+}
+
+/**
+ * Make an org called `name` through the API, as the CMS does (it becomes the active org), and land
+ * on it, hydrated, from the spec's own `address` (as `fromAddress`, whose route `page.request` does
+ * not go through). Only sign-in-and-orgs.spec.ts makes one through the page. Slugs are global and a spec may
+ * make two orgs of one name, so each gets its own.
+ */
+export async function createOrg(page: Page, name: string, address: string) {
+  const slug = `${slugify(name)}-${randomUUID().slice(0, 8)}`;
+  const headers = { origin: CMS_URL, 'cf-connecting-ip': address };
+  const res = await page.request.post('/api/auth/organization/create', { headers, data: { name, slug } });
+  expect(res.status(), await res.text()).toBe(200);
   await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', name, 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
+  // A fresh load, as the page's own create was not: a click before this would go nowhere.
+  await hydrated(page);
+}
+
+/**
+ * A box's corner and the corner that fits it inside `outer` (#383), by default its parent: the outer
+ * radius less its padding, so the two curves keep one distance apart. In px.
+ */
+export async function innerCorner(inner: Locator, outer?: Locator) {
+  const box = outer ? await outer.elementHandle() : null;
+  try {
+    return await inner.evaluate((e, o) => {
+      const around = getComputedStyle(o ?? e.parentElement!);
+      return {
+        radius: Number.parseFloat(getComputedStyle(e).borderTopLeftRadius),
+        fits: Number.parseFloat(around.borderTopLeftRadius) - Number.parseFloat(around.paddingTop),
+      };
+    }, box);
+  } finally {
+    await box?.dispose();
+  }
+}
+
+/**
+ * A page's title as laid out (#382): the lines shown, the lines its text would take unclamped (`full`),
+ * whether they are balanced, and whether any of it spills sideways. Measured in Geist, once its face has
+ * loaded: in the fallback face the lines break elsewhere.
+ */
+export async function titleLayout(page: Page) {
+  return page.getByRole('heading', { level: 1 }).evaluate(async (h) => {
+    const style = getComputedStyle(h);
+    await document.fonts.load(`${style.fontWeight} ${style.fontSize} "Geist Variable"`);
+    const line = Number.parseFloat(style.lineHeight);
+    return {
+      lines: Math.round(h.getBoundingClientRect().height / line),
+      full: Math.round(h.scrollHeight / line),
+      balanced: style.textWrapStyle === 'balance',
+      spills: h.scrollWidth > h.clientWidth,
+    };
+  });
 }
 
 /** The org of the spot, in SQL: source ids are per org, and other specs' orgs share the database. */
@@ -328,7 +460,7 @@ export async function newSpot(page: Page, template: string, name: string) {
   await page.goto('/spots');
   await hydrated(page);
   await page.getByRole('button', { name: 'New spot' }).click();
-  await page.getByRole('combobox', { name: 'Template' }).selectOption({ label: template });
+  await page.getByRole('radio', { name: template, exact: true }).check();
   await page.getByLabel('Name').fill(name);
   await page.getByRole('button', { name: 'Create spot' }).click();
   await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
@@ -337,16 +469,68 @@ export async function newSpot(page: Page, template: string, name: string) {
 }
 
 /** Holds the first request to `path` until the test continues it; later ones go through, counted. */
-export async function holdFirst(page: Page, path: string) {
+export async function holdFirst(page: Page, path: string, which?: (body: Record<string, unknown>) => boolean) {
   let calls = 0;
   let hold: (route: Route) => void = () => {};
   const arrived = new Promise<Route>((resolve) => {
     hold = resolve;
   });
   await page.route(`**${path}`, (route) => {
+    // A tool that creates and changes (#345's saves): only the calls `which` picks, the rest to the next route.
+    if (which && !which(route.request().postDataJSON())) return void route.fallback();
     calls += 1;
     if (calls === 1) hold(route);
     else void route.continue();
   });
   return { arrived, calls: () => calls };
+}
+
+/**
+ * `email` joins the org `owner` is on as an editor: invited by the owner (whose page closes), then
+ * signed in on `page` from `address`, accepting.
+ */
+export async function joinAsEditor(owner: Page, page: Page, email: string, address: string) {
+  const invited = await owner.request.post('/api/auth/organization/invite-member', { headers: { origin: CMS_URL }, data: { email, role: 'editor' } });
+  expect(invited.status(), await invited.text()).toBe(200);
+  const { id: invitationId } = (await invited.json()) as { id: string };
+  await owner.close();
+  await signInAs(page, email, address);
+  const accepted = await page.request.post('/api/auth/organization/accept-invitation', { headers: { origin: CMS_URL }, data: { invitationId } });
+  expect(accepted.status(), await accepted.text()).toBe(200);
+}
+
+/** A test screen in a new tab, the real player, showing its pairing code as the Screens page pairs one: the tab, and the code. */
+export async function testScreenToPair(browser: Browser): Promise<{ screen: Page; code: string }> {
+  const screen = await (await browser.newContext()).newPage();
+  await screen.goto('/test-screen/?kind=browser&content=/v1/device');
+  const pairing = () => screen.evaluate(() => (window as Window & { __sf?: { pairing: string } }).__sf?.pairing ?? '');
+  await expect.poll(pairing, { timeout: 20_000 }).not.toBe('');
+  return { screen, code: await pairing() };
+}
+
+/**
+ * The page's ⋯ menu, opened by keyboard, and its delete question closed by Escape and by Cancel: each time, focus is
+ * back on ⋯ at once, in the key's own event (#378). Radix gave it back only once the question's closing had played,
+ * the page's body focused until then.
+ */
+export async function deleteQuestionGivesFocusBack(page: Page) {
+  const more = page.getByRole('button', { name: 'More actions: delete' });
+  const question = page.getByRole('alertdialog');
+  for (const close of ['Escape', 'Cancel'] as const) {
+    await more.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menuitem', { name: 'Delete…' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(question).toBeVisible();
+    // Read, as a person would: the menu has gone by then, and its Delete… item with it.
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    if (close === 'Cancel') {
+      await question.getByRole('button', { name: 'Cancel' }).focus();
+      await page.keyboard.press('Enter');
+    } else await page.keyboard.press('Escape');
+    // At once, in the key's own event: not after the question's closing has played, with the body focused meanwhile.
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), close).toBe('More actions: delete');
+    await expect(question).toBeHidden();
+    await expect(more, close).toBeFocused();
+  }
 }

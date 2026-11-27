@@ -34,7 +34,7 @@ describe('row versions', () => {
     const org = testScope(env.DB, o.orgId);
     const read = (await org.screens.get(o.screen))!;
     const mine = org.screens.stage.update(read, { name: 'Mine' }, read.rowVersion);
-    const audit = org.auditLog.stage({ actorKind: 'user', actorId: 'u', action: 'rename_screen' });
+    const audit = org.auditLog.stage({ actorKind: 'user', actorId: 'u', action: 'update_screen' });
     // Someone else's change lands between the read and the commit.
     await org.commit(org.screens.stage.update(read, { timezone: 'Asia/Tokyo' }).writes);
 
@@ -43,7 +43,7 @@ describe('row versions', () => {
     expect(err).toMatchObject({ id: o.screen, version: 2 });
     const now = (await org.screens.get(o.screen))!;
     expect(now).toMatchObject({ name: read.name, timezone: 'Asia/Tokyo', rowVersion: 2 });
-    expect((await org.auditLog.list()).filter((a) => a.action === 'rename_screen')).toEqual([]);
+    expect((await org.auditLog.list()).filter((a) => a.action === 'update_screen')).toEqual([]);
   });
 
   it('commit a change made at the current version', async () => {
@@ -100,5 +100,53 @@ describe('row versions', () => {
     await expect(org.settings.stage.set({ locale: 'en-GB' }, 1)).rejects.toBeInstanceOf(StaleVersionError);
     await org.commit((await org.settings.stage.set({ locale: 'en-GB' })).writes);
     expect(await org.settings.get()).toMatchObject({ locale: 'en-GB', rowVersion: 3 });
+  });
+});
+
+describe('a batch a guard failed, though every guard holds again by the time it is diagnosed (round 3 of #393)', () => {
+  it('is still a refusal, StaleVersionError, never the raw database error', async () => {
+    const o = await seedOrg(env.DB, 'ver-reverted');
+    const setDefault = async (playlistId: string | null) => {
+      const org = testScope(env.DB, o.orgId);
+      await org.commit((await org.settings.stage.set({ defaultPlaylistId: playlistId })).writes);
+    };
+    await setDefault(o.playlist);
+    // A switch to none lands as the batch runs, and is taken back before the failure is diagnosed.
+    const racing = new Proxy(env.DB, {
+      get(target, prop) {
+        const v = Reflect.get(target, prop, target);
+        if (prop !== 'batch') return typeof v === 'function' ? v.bind(target) : v;
+        return async (statements: D1PreparedStatement[]) => {
+          await setDefault(null);
+          try {
+            return await target.batch(statements);
+          } finally {
+            await setDefault(o.playlist);
+          }
+        };
+      },
+    });
+    const org = testScope(racing, o.orgId);
+    const renamed = org.screens.stage.update((await org.screens.get(o.screen))!, { name: 'Renamed' });
+    const err = await org.commit([...org.settings.stage.defaultIs(o.playlist).writes, ...renamed.writes]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StaleVersionError);
+    expect(err).toMatchObject({ id: 'batch', version: 0 });
+    expect((await testScope(env.DB, o.orgId).screens.get(o.screen))!.name).not.toBe('Renamed');
+  });
+});
+
+describe('a batch the database failed, not a guard, though a guard is in it (round 4 of #393)', () => {
+  it('is the database error, as it is: never a conflict', async () => {
+    const o = await seedOrg(env.DB, 'ver-not-guard');
+    const org = testScope(env.DB, o.orgId);
+    await org.commit((await org.settings.stage.set({ defaultPlaylistId: o.playlist })).writes);
+    // A spot whose bindings are not JSON: the feed cleanup's statement reads them, and SQLite refuses it.
+    const spot = await org.spots.insert({ name: 'Broken', kind: 'template', durationMs: 8000, templateVersionId: o.templateVersion });
+    await env.DB.prepare("UPDATE spots SET bindings_json = '{not json' WHERE id = ?").bind(spot.id).run();
+    const err = await org
+      .commit([...org.settings.stage.defaultIs(o.playlist).writes, ...org.dataSources.stage.deleteUnbound([o.dataSource], Date.now()).writes])
+      .catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(StaleVersionError);
+    expect(String(err)).toMatch(/malformed JSON/);
   });
 });

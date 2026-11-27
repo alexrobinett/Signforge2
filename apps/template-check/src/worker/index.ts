@@ -7,10 +7,14 @@
  * nothing but its object: the bundle comes in with the request and the report goes back.
  *
  * At most MAX_CONTAINERS run at once (CheckSlots). Past that a new org's check is refused with a
- * 503 to retry, never sent to another org's container.
+ * 503 to retry, never sent to another org's container. A slot is held for the check at SLOT_MS, and
+ * once the check has finished or failed, let go with its container: at once when the container is
+ * not running, else when it will stop on its own, IDLE_MS on (SLOT_MS stays as the net for a Worker
+ * that dies mid-check).
  */
 import { isId } from '@signforge/contract';
 import { DurableObject } from 'cloudflare:workers';
+import { claimSlot, type Ledger, settleSlot } from './slots';
 
 const PORT = 8080;
 /** Chromium's first launch in a fresh container is the slow part of a start. */
@@ -60,6 +64,11 @@ export class TemplateCheckContainer extends DurableObject<Env> {
     return this.starting;
   }
 
+  /** Whether the container is up: what the slot is for. */
+  running(): boolean {
+    return !!this.ctx.container?.running;
+  }
+
   override async fetch(request: Request): Promise<Response> {
     const container = this.ctx.container;
     if (!container) throw new Error('TemplateCheckContainer has no container configured');
@@ -73,19 +82,33 @@ export class TemplateCheckContainer extends DurableObject<Env> {
 }
 
 /**
- * Which containers may run: one slot per instance name, held until SLOT_MS after its last check.
- * One object for the whole Worker, so the count is exact.
+ * Which containers may run, by the ledger in ./slots.ts: a slot per instance name, held for a check
+ * at SLOT_MS and, once it is done, only as long as its container lives (`settle`). One object for
+ * the whole Worker, so the count is exact.
  */
 export class CheckSlots extends DurableObject<Env> {
+  private async ledger(): Promise<Ledger> {
+    const [until, busy] = await Promise.all([this.ctx.storage.get<Record<string, number>>('slots'), this.ctx.storage.get<Record<string, number>>('busy')]);
+    return { until: until ?? {}, busy: busy ?? {} };
+  }
+
   /** Hold or renew `name`'s slot; false when MAX_CONTAINERS other instances hold one. */
   async claim(name: string): Promise<boolean> {
-    const now = Date.now();
-    const slots = (await this.ctx.storage.get<Record<string, number>>('slots')) ?? {};
-    for (const [held, until] of Object.entries(slots)) if (until <= now) delete slots[held];
-    if (!(name in slots) && Object.keys(slots).length >= Number(this.env.MAX_CONTAINERS)) return false;
-    slots[name] = now + SLOT_MS;
-    await this.ctx.storage.put('slots', slots);
-    return true;
+    const ledger = await this.ledger();
+    const held = claimSlot(ledger, name, Date.now(), Number(this.env.MAX_CONTAINERS), SLOT_MS);
+    await this.ctx.storage.put({ slots: ledger.until, busy: ledger.busy });
+    return held;
+  }
+
+  /**
+   * `name`'s check is over, finished or failed. A container that is not running holds no slot. One
+   * that is stops after IDLE_MS without a check, and holds it until then: a new org's container
+   * must not start beside it past MAX_CONTAINERS.
+   */
+  async settle(name: string, running: boolean): Promise<void> {
+    const ledger = await this.ledger();
+    settleSlot(ledger, name, running, Date.now(), IDLE_MS);
+    await this.ctx.storage.put({ slots: ledger.until, busy: ledger.busy });
   }
 }
 
@@ -106,9 +129,23 @@ export default {
         { status: 503, headers: { 'retry-after': '60' } },
       );
     }
-    const res = await env.TEMPLATE_CHECK.getByName(name).fetch(request);
+    const checker = env.TEMPLATE_CHECK.getByName(name);
+    let res: Response;
+    let body: ArrayBuffer;
+    try {
+      res = await checker.fetch(request);
+      // Read here, so the check is over when its slot is settled.
+      body = await res.arrayBuffer();
+    } finally {
+      // Conservative default (true): an RPC failure while checking state keeps the slot for IDLE_MS
+      // rather than risking a start past MAX_CONTAINERS or masking the check's own error.
+      const running = await checker.running().catch(() => true);
+      await env.CHECK_SLOTS.getByName('slots')
+        .settle(name, running)
+        .catch(() => undefined);
+    }
     // Which instance answered, for the API's logs and the isolation test; the runner adds its boot id.
-    const answer = new Response(res.body, res);
+    const answer = new Response(body, res);
     answer.headers.set('x-check-instance', name);
     return answer;
   },

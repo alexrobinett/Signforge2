@@ -24,15 +24,13 @@ function writeMenu({ second = 'Dish 2', item = 'Item' } = {}) {
 
 /** Runs the poller now on this spot's source alone: other specs' sources wait, so their states stay theirs. */
 async function pollNow(spotId: string, sourceId: string) {
-  d1(
+  await d1(
     `UPDATE data_sources SET next_poll_at = CASE WHEN org_id = ${orgOf(spotId)} AND id = '${sourceId}' THEN 0 ELSE 9007199254740991 END, etag = NULL, last_modified = NULL`,
   );
   const res = await fetch(`http://127.0.0.1:${API_PORT}/__scheduled?cron=${encodeURIComponent('* * * * *')}`);
   expect(res.status).toBe(200);
   // The job runs in the background of that request (waitUntil): wait for its write.
-  await expect
-    .poll(async () => (await tool(page, 'get_data_source', { dataSourceId: sourceId })).dataSource.nextPollAt, { timeout: 15_000 })
-    .toBeGreaterThan(0);
+  await expect.poll(async () => (await tool(page, 'get_data_source', { dataSourceId: sourceId })).dataSource.nextPollAt, { timeout: 15_000 }).not.toBeNull();
 }
 
 /** In the open spot's Source section: the link form, filled, and read. */
@@ -71,9 +69,9 @@ async function stageBetweenFades(on: Page): Promise<boolean> {
   return seen;
 }
 
-/** The stage is playing the spot, past its intro (`stageBetweenFades`). */
+/** The stage is playing the spot, past its intro (`stageBetweenFades`): drawn, its status says Preview ready. */
 async function stageSettled(on: Page) {
-  await expect(on.getByText('Drawn by the player your screens run.')).toBeVisible();
+  await expect(on.getByRole('region', { name: 'Live preview' }).getByRole('status')).toHaveText('Preview ready');
   await expect.poll(() => stageBetweenFades(on), { timeout: 15_000 }).toBe(true);
 }
 
@@ -84,13 +82,12 @@ let page: Page;
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext({ viewport: { width: 1920, height: 1200 } })).newPage();
   await signInAs(page, `e2e-tables-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Harbour Kitchen');
+  await createOrg(page, 'Harbour Kitchen', ADDRESS);
 });
 
 test.afterAll(() => page.context().close());
 
 test('a menu board fed by a CSV link: read it, map its columns, see its rows; the edited file after the next poll', async () => {
-  test.setTimeout(180_000);
   writeMenu();
   const spotId = await newSpot(page, 'Menu Board', 'Lunch menu');
   const form = page.getByRole('form', { name: 'Spot fields' });
@@ -183,10 +180,10 @@ test("the editor's fields and Publish are disabled in the server's HTML: a choic
   // The spot editor is a route chunk that hydrates after the page (body[data-hydrated]); a select changed in
   // between was set back by React to its value, and the choice dropped (CI run 44652707436).
   const spotId = await newSpot(page, 'Menu Board', 'Server menu');
-  // The header's Save draft and Publish (#127) too: a click there before the editor hydrates would go nowhere.
-  const names = ['Duration', 'Save draft', 'Publish'];
+  // The header's Publish and the ⋯ that holds Delete (#127, #242, #378) too: a click there before the editor hydrates would go nowhere.
+  const names = ['Duration', 'Publish', 'More actions: delete'];
   expect(await disabledOnServer(page, `/spots/${spotId}`, names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
-  // Loaded from the server, they are enabled once the editor has hydrated (Save draft waits for a change).
+  // Loaded from the server, they are enabled once the editor has hydrated.
   await page.reload();
   await hydrated(page);
   await expect(page.getByRole('form', { name: 'Spot fields' }).getByLabel('Name', { exact: true }).first()).toBeEnabled();

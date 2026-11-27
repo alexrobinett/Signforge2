@@ -24,7 +24,7 @@
  * Every tenant `org_id` references Better Auth's `organization` table, with no cascade: an org
  * cannot be deleted while it holds content.
  */
-import { SCREEN_KINDS } from '@signforge/contract';
+import { PLAYER_CHANNELS, SCREEN_KINDS } from '@signforge/contract';
 import { sql } from 'drizzle-orm';
 import { check, customType, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { newId } from './ids';
@@ -58,6 +58,11 @@ const publishedJson = () => text('published_json');
 const rowVersion = () => integer('row_version').notNull().default(1);
 const publishedAt = () => integer('published_at');
 /**
+ * The `row_version` a publish promoted (#361): the draft has changes screens do not have while it is
+ * behind `row_version`, as every edit moves that on and a publish does not. Null until published.
+ */
+const publishedVersion = () => integer('published_version');
+/**
  * Which row a draft is across delete and make-again: a content id may be chosen again once its
  * row is deleted, and `stage.publish` checks this with the version. Since migration 0020 the
  * version alone tells the rows apart (`draft_tombstones`); this stays as a second check, as
@@ -71,7 +76,7 @@ const incarnation = () => text('incarnation').$defaultFn(() => newId('inc'));
 /*
  * Better Auth's tables (M3-09), as `auth generate` in apps/api writes them for its options:
  * camelCase columns, `date` columns holding ISO strings. Better Auth reads and writes them
- * itself; apps/api/test/auth-schema.test.ts checks it finds nothing missing. Not tenant tables.
+ * itself; apps/api/test/auth-platform.test.ts checks it finds nothing missing. Not tenant tables.
  */
 const date = customType<{ data: string }>({ dataType: () => 'date' });
 const bigint = customType<{ data: number }>({ dataType: () => 'bigint' });
@@ -185,6 +190,186 @@ export const invitation = sqliteTable(
   (t) => [index('invitation_organizationId_idx').on(t.organizationId), index('invitation_email_idx').on(t.email)],
 );
 
+/*
+ * Better Auth's OAuth provider (`@better-auth/oauth-provider`, M4-04): the clients agents register,
+ * the one resource (`/mcp`), consents, and tokens, stored only as SHA-256 hashes. Columns as its CLI
+ * generates them for apps/api's options. `referenceId` on a consent, a token or a refresh token is
+ * the agent grant's id (`agentGrants`); the indexes on it are ours, for revoking a grant's tokens.
+ */
+export const oauthClient = sqliteTable(
+  'oauthClient',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('clientId').notNull().unique(),
+    clientSecret: text('clientSecret'),
+    clientDiscoveryId: text('clientDiscoveryId'),
+    disabled: integer('disabled'),
+    skipConsent: integer('skipConsent'),
+    enableEndSession: integer('enableEndSession'),
+    subjectType: text('subjectType'),
+    scopes: text('scopes'),
+    clientCredentialsScopes: text('clientCredentialsScopes'),
+    userId: text('userId').references(() => user.id, { onDelete: 'cascade' }),
+    createdAt: date('createdAt'),
+    updatedAt: date('updatedAt'),
+    name: text('name'),
+    uri: text('uri'),
+    icon: text('icon'),
+    contacts: text('contacts'),
+    tos: text('tos'),
+    policy: text('policy'),
+    softwareId: text('softwareId'),
+    softwareVersion: text('softwareVersion'),
+    softwareStatement: text('softwareStatement'),
+    redirectUris: text('redirectUris').notNull(),
+    postLogoutRedirectUris: text('postLogoutRedirectUris'),
+    backchannelLogoutUri: text('backchannelLogoutUri'),
+    backchannelLogoutSessionRequired: integer('backchannelLogoutSessionRequired'),
+    tokenEndpointAuthMethod: text('tokenEndpointAuthMethod'),
+    applicationType: text('applicationType'),
+    jwks: text('jwks'),
+    jwksUri: text('jwksUri'),
+    grantTypes: text('grantTypes'),
+    responseTypes: text('responseTypes'),
+    requirePKCE: integer('requirePKCE'),
+    dpopBoundAccessTokens: integer('dpopBoundAccessTokens'),
+    referenceId: text('referenceId'),
+    metadata: text('metadata'),
+  },
+  (t) => [index('oauthClient_userId_idx').on(t.userId)],
+);
+
+export const oauthResource = sqliteTable('oauthResource', {
+  id: text('id').primaryKey(),
+  identifier: text('identifier').notNull().unique(),
+  name: text('name').notNull(),
+  accessTokenTtl: integer('accessTokenTtl'),
+  refreshTokenTtl: integer('refreshTokenTtl'),
+  signingAlgorithm: text('signingAlgorithm'),
+  signingKeyId: text('signingKeyId'),
+  allowedScopes: text('allowedScopes'),
+  customClaims: text('customClaims'),
+  dpopBoundAccessTokensRequired: integer('dpopBoundAccessTokensRequired'),
+  disabled: integer('disabled'),
+  createdAt: date('createdAt'),
+  updatedAt: date('updatedAt'),
+  policyVersion: integer('policyVersion'),
+  metadata: text('metadata'),
+});
+
+export const oauthClientResource = sqliteTable(
+  'oauthClientResource',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('clientId')
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
+    resourceId: text('resourceId')
+      .notNull()
+      .references(() => oauthResource.identifier, { onDelete: 'cascade' }),
+    metadata: text('metadata'),
+    createdAt: date('createdAt'),
+  },
+  (t) => [
+    index('oauthClientResource_clientId_idx').on(t.clientId),
+    index('oauthClientResource_resourceId_idx').on(t.resourceId),
+    uniqueIndex('oauthClientResource_clientId_resourceId_uidx').on(t.clientId, t.resourceId),
+  ],
+);
+
+export const oauthRefreshToken = sqliteTable(
+  'oauthRefreshToken',
+  {
+    id: text('id').primaryKey(),
+    token: text('token').notNull().unique(),
+    clientId: text('clientId')
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
+    sessionId: text('sessionId').references(() => session.id, { onDelete: 'set null' }),
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    referenceId: text('referenceId'),
+    authorizationCodeId: text('authorizationCodeId'),
+    resources: text('resources'),
+    requestedUserInfoClaims: text('requestedUserInfoClaims'),
+    expiresAt: date('expiresAt').notNull(),
+    createdAt: date('createdAt').notNull(),
+    revoked: date('revoked'),
+    rotatedAt: date('rotatedAt'),
+    rotationReplayResponse: text('rotationReplayResponse'),
+    rotationReplayExpiresAt: date('rotationReplayExpiresAt'),
+    authTime: date('authTime'),
+    confirmation: text('confirmation'),
+    scopes: text('scopes').notNull(),
+  },
+  (t) => [
+    index('oauthRefreshToken_clientId_idx').on(t.clientId),
+    index('oauthRefreshToken_sessionId_idx').on(t.sessionId),
+    index('oauthRefreshToken_userId_idx').on(t.userId),
+    index('oauthRefreshToken_authorizationCodeId_idx').on(t.authorizationCodeId),
+    index('oauthRefreshToken_referenceId_idx').on(t.referenceId),
+  ],
+);
+
+export const oauthAccessToken = sqliteTable(
+  'oauthAccessToken',
+  {
+    id: text('id').primaryKey(),
+    token: text('token').notNull().unique(),
+    clientId: text('clientId')
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
+    sessionId: text('sessionId').references(() => session.id, { onDelete: 'set null' }),
+    userId: text('userId').references(() => user.id, { onDelete: 'cascade' }),
+    referenceId: text('referenceId'),
+    authorizationCodeId: text('authorizationCodeId'),
+    resources: text('resources'),
+    requestedUserInfoClaims: text('requestedUserInfoClaims'),
+    refreshId: text('refreshId').references(() => oauthRefreshToken.id, { onDelete: 'cascade' }),
+    expiresAt: date('expiresAt').notNull(),
+    createdAt: date('createdAt').notNull(),
+    revoked: date('revoked'),
+    confirmation: text('confirmation'),
+    scopes: text('scopes').notNull(),
+  },
+  (t) => [
+    index('oauthAccessToken_clientId_idx').on(t.clientId),
+    index('oauthAccessToken_sessionId_idx').on(t.sessionId),
+    index('oauthAccessToken_userId_idx').on(t.userId),
+    index('oauthAccessToken_authorizationCodeId_idx').on(t.authorizationCodeId),
+    index('oauthAccessToken_refreshId_idx').on(t.refreshId),
+    index('oauthAccessToken_referenceId_idx').on(t.referenceId),
+  ],
+);
+
+export const oauthConsent = sqliteTable(
+  'oauthConsent',
+  {
+    id: text('id').primaryKey(),
+    clientId: text('clientId')
+      .notNull()
+      .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
+    userId: text('userId').references(() => user.id, { onDelete: 'cascade' }),
+    referenceId: text('referenceId'),
+    resources: text('resources'),
+    requestedUserInfoClaims: text('requestedUserInfoClaims'),
+    scopes: text('scopes').notNull(),
+    createdAt: date('createdAt').notNull(),
+    updatedAt: date('updatedAt').notNull(),
+  },
+  (t) => [
+    index('oauthConsent_clientId_idx').on(t.clientId),
+    index('oauthConsent_userId_idx').on(t.userId),
+    index('oauthConsent_referenceId_idx').on(t.referenceId),
+  ],
+);
+
+export const oauthClientAssertion = sqliteTable('oauthClientAssertion', {
+  id: text('id').primaryKey(),
+  expiresAt: date('expiresAt').notNull(),
+});
+
 /** Better Auth's rate-limit counters, per IP and path: in D1 so they survive restarts. */
 export const rateLimit = sqliteTable('rateLimit', {
   id: text('id').primaryKey(),
@@ -211,6 +396,12 @@ export const screens = sqliteTable(
     desiredManifestId: text('desired_manifest_id'),
     /** The desired manifest before the current one. A screen may still be fetching its files, so they stay servable. */
     previousManifestId: text('previous_manifest_id'),
+    /**
+     * The sources a desired manifest shows photos for, as `{"manifest": <its id>, "sources": [...]}`, written with it
+     * when it becomes desired (`stage.setDesiredManifest`), so the feed poller reads no manifest from R2 (#486). It
+     * counts only while `manifest` is still `desiredManifestId`: null, or another manifest's, is not known.
+     */
+    desiredPhotoSourcesJson: text('desired_photo_sources_json'),
     reportedManifestId: text('reported_manifest_id'),
     /**
      * When the screen observed `reported_manifest_id`, on the server's clock: a report replaces it
@@ -221,10 +412,21 @@ export const screens = sqliteTable(
     lastSeenAt: integer('last_seen_at'),
     playerVersion: text('player_version'),
     /**
+     * Which player releases the screen's device supervisor is offered (#628): `stable` unless it is a canary, which
+     * gets each release first (`player_releases`).
+     */
+    playerChannel: text('player_channel', { enum: PLAYER_CHANNELS }).notNull().default('stable'),
+    /**
      * The screen's last heartbeat (`ScreenHeartbeat` in the API): display, clock, cache, fallback and
      * refused data, as its last sync reported them. Null until it first syncs.
      */
     heartbeatJson: text('heartbeat_json'),
+    /**
+     * When its heartbeat first said it fell back from the manifest it says now (`manifest.fallbackFrom`), kept while it
+     * says the same, null while it says none: the publish it fell back from is the newest of that manifest at or
+     * before then, not one that sent it again later (#367).
+     */
+    fallbackSince: integer('fallback_since'),
     /**
      * The contract's `DisplayOverride` set from the CMS (wake now, sleep now), or null. Sent to the
      * screen over its socket when set, and in each sync while the screen reports something else.
@@ -247,7 +449,12 @@ export const screenGroups = sqliteTable(
     id: text('id').primaryKey(),
     orgId: orgId(),
     name: text('name').notNull(),
-    /** Moves on when the name or the members change. */
+    /**
+     * A smart group's rule (#186): a selector (`@signforge/compiler/selector`) as JSON, whose members are every screen it
+     * matches at publish; null for a group of listed screens (`screen_group_members`). A rule group has no member rows.
+     */
+    selectorJson: text('selector_json'),
+    /** Moves on when the name, the rule or the members change. */
     rowVersion: rowVersion(),
     createdAt: created(),
     updatedAt: updated(),
@@ -361,7 +568,12 @@ export const assets = sqliteTable(
     createdAt: created(),
     updatedAt: updated(),
   },
-  (t) => [uniqueIndex('assets_org_id_uq').on(t.orgId, t.id), index('assets_org_sha_idx').on(t.orgId, t.sha256)],
+  (t) => [
+    uniqueIndex('assets_org_id_uq').on(t.orgId, t.id),
+    index('assets_org_sha_idx').on(t.orgId, t.sha256),
+    // The storage sweep's unfinished uploads, by age (#433).
+    index('assets_pending_idx').on(t.orgId, t.createdAt).where(sql`status = 'pending'`),
+  ],
 );
 
 export const assetRenditions = sqliteTable(
@@ -457,11 +669,17 @@ export const spots = sqliteTable(
     fit: text('fit', { enum: ['cover', 'contain'] }),
     /** URL spots: an https page on another origin. */
     url: text('url'),
+    /**
+     * Template spots: the contract's `SampleFields`, the fields of the draft still holding the
+     * template's sample copy New spot started it with (#360); null for none. Draft only: never published.
+     */
+    sampleFieldsJson: text('sample_fields_json'),
     /** Moves on with every edit of the draft; publishing does not move it. */
     rowVersion: rowVersion(),
     incarnation: incarnation(),
     publishedJson: publishedJson(),
     publishedAt: publishedAt(),
+    publishedVersion: publishedVersion(),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -485,6 +703,7 @@ export const playlists = sqliteTable(
     incarnation: incarnation(),
     publishedJson: publishedJson(),
     publishedAt: publishedAt(),
+    publishedVersion: publishedVersion(),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -504,6 +723,36 @@ export const playlistItems = sqliteTable(
     index('playlist_items_spot_idx').on(t.orgId, t.spotId),
     foreignKey({ columns: [t.orgId, t.playlistId], foreignColumns: [playlists.orgId, playlists.id] }).onDelete('cascade'),
     foreignKey({ columns: [t.orgId, t.spotId], foreignColumns: [spots.orgId, spots.id] }),
+  ],
+);
+
+/**
+ * The draft kept beside a spot's or playlist's draft while an agent's draft is on it (#116), so a
+ * person's edit is never lost to an agent's. `holds: 'person'`: the draft an agent first wrote over
+ * (a person's, or the published version as it stood in the draft), which Reject puts back. `holds:
+ * 'agent'`: the agent's draft a Reject set aside, which its Undo puts back. One per draft; it goes
+ * with a publish, a person's edit and the draft itself (the foreign keys cascade, so a draft deleted
+ * and made again with its id starts with none).
+ */
+export const draftSnapshots = sqliteTable(
+  'draft_snapshots',
+  {
+    orgId: orgId(),
+    spotId: text('spot_id'),
+    playlistId: text('playlist_id'),
+    holds: text('holds', { enum: ['person', 'agent'] }).notNull(),
+    /** The kept draft's content as `published_json` holds content (`contentJson`, a playlist's with its items). */
+    contentJson: text('content_json').notNull(),
+    /** A spot's `sample_fields_json` as it was with that draft (#360, #392): it goes back with it. */
+    sampleFieldsJson: text('sample_fields_json'),
+    createdAt: created(),
+  },
+  (t) => [
+    uniqueIndex('draft_snapshots_spot_uq').on(t.orgId, t.spotId),
+    uniqueIndex('draft_snapshots_playlist_uq').on(t.orgId, t.playlistId),
+    foreignKey({ columns: [t.orgId, t.spotId], foreignColumns: [spots.orgId, spots.id] }).onDelete('cascade'),
+    foreignKey({ columns: [t.orgId, t.playlistId], foreignColumns: [playlists.orgId, playlists.id] }).onDelete('cascade'),
+    check('draft_snapshots_one_draft', sql`(${t.spotId} IS NULL) <> (${t.playlistId} IS NULL)`),
   ],
 );
 
@@ -541,6 +790,7 @@ export const scheduleEntries = sqliteTable(
     incarnation: incarnation(),
     publishedJson: publishedJson(),
     publishedAt: publishedAt(),
+    publishedVersion: publishedVersion(),
     createdAt: created(),
     updatedAt: updated(),
   },
@@ -664,6 +914,42 @@ export const alertChannels = sqliteTable(
 );
 
 /**
+ * The model an org's built-in agent uses with its own key (#261, docs/proposals/cms-agent.md): one
+ * row per org, absent while the org uses SignForge's demo model. The key is sealed by the API
+ * (`ai-key:<org>/<provider>`) and never read back out but to call the provider; `key_last4` is all a
+ * person is shown. Model ids are the exact ones the owner chose from the provider's list.
+ */
+export const orgAiProviders = sqliteTable('org_ai_providers', {
+  orgId: text('org_id')
+    .primaryKey()
+    .references(() => organization.id),
+  provider: text('provider', { enum: ['anthropic', 'openai-compatible'] }).notNull(),
+  /** An OpenAI-compatible endpoint's base address (#262), https and public; null for Anthropic, whose address is fixed. */
+  baseUrl: text('base_url'),
+  /**
+   * Whether an OpenAI-compatible endpoint takes images and returns output to a JSON schema, as its owner
+   * says: what Fill from a flyer needs (#262). Not read for Anthropic, which does both.
+   */
+  acceptsImages: integer('accepts_images', { mode: 'boolean' }).notNull().default(false),
+  jsonSchemaOutput: integer('json_schema_output', { mode: 'boolean' }).notNull().default(false),
+  keySealed: text('key_sealed').notNull(),
+  keyLast4: text('key_last4').notNull(),
+  /** The user who saved the key, and when. */
+  keySavedBy: text('key_saved_by').notNull(),
+  keySavedAt: integer('key_saved_at').notNull(),
+  /** When a test last reached the provider with this key; null until one does, and again when the key is replaced. */
+  verifiedAt: integer('verified_at'),
+  /** For fills (fast) and the drawer (capable); null until chosen. */
+  fastModel: text('fast_model'),
+  capableModel: text('capable_model'),
+  /** Agent turns a day across the org, then it pauses until midnight in the org's time zone; null for no ceiling. */
+  dailyTurnCeiling: integer('daily_turn_ceiling'),
+  rowVersion: rowVersion(),
+  createdAt: created(),
+  updatedAt: updated(),
+});
+
+/**
  * One alert event on its way to one channel (#88), queued by the alert check or a test send and
  * sent by the delivery run (apps/api src/deliveries.ts), which retries with backoff until
  * `give_up_at`. Kept 7 days, as the delivery log (./retention.ts). `event_json` is the event as a
@@ -782,7 +1068,7 @@ export const publishes = sqliteTable(
   {
     id: text('id').primaryKey(),
     orgId: orgId(),
-    /** `pending` waits for a person to approve (an agent without publish scope). */
+    /** `pending` is not written: a publish waiting for a person to approve is a `publish_requests` row (M4-09). */
     status: text('status', { enum: ['pending', 'scheduled', 'publishing', 'published', 'failed', 'cancelled'] }).notNull(),
     /** When it is due. Null means now. */
     publishAt: integer('publish_at'),
@@ -797,6 +1083,17 @@ export const publishes = sqliteTable(
     finishedAt: integer('finished_at'),
     /** How many of its screens the check saw playing it then: 0 when replaced before any check saw one report it. Null until finished. */
     reached: integer('reached'),
+    /**
+     * What it made live and removed, named as published (#370): `{ kind, name, removed }[]`, as JSON. Null for a roll back,
+     * and for a publish made before this was kept.
+     */
+    changesJson: text('changes_json'),
+    /**
+     * Whom each group reached at this publish (#187): every group's members as resolved then, lists and smart groups
+     * alike, as JSON `{ screens: string[], groups: [{ id, name, rule, members: number[] }] }`, each member an index into
+     * `screens` so a large fleet's record stays small. Null for a roll back, and for a publish made before this was kept.
+     */
+    targetsJson: text('targets_json'),
   },
   (t) => [
     uniqueIndex('publishes_org_id_uq').on(t.orgId, t.id),
@@ -821,6 +1118,51 @@ export const publishScreens = sqliteTable(
     index('publish_screens_screen_idx').on(t.orgId, t.screenId),
     foreignKey({ columns: [t.orgId, t.publishId], foreignColumns: [publishes.orgId, publishes.id] }).onDelete('cascade'),
     foreignKey({ columns: [t.orgId, t.screenId], foreignColumns: [screens.orgId, screens.id] }).onDelete('cascade'),
+  ],
+);
+
+/**
+ * A request to publish chosen drafts (M4-09): made by an agent without `content:publish`, or a
+ * person who may not publish, and approved or declined by a person who may. It pins each draft at
+ * the version it was asked for (`drafts_json`, `[{ kind, id, version }]` sorted by kind and id, so
+ * the same pins are the same text), so approval publishes all of them at those versions, or none.
+ * Pending until a decision; a pending one past `expires_at` (7 days) is expired and can no longer be
+ * decided. Decided and expired ones are kept for the org's audit retention (./retention.ts).
+ */
+export const publishRequests = sqliteTable(
+  'publish_requests',
+  {
+    id: text('id').primaryKey(),
+    orgId: orgId(),
+    /** Who asked: a user id, or an agent grant id with its OAuth client. */
+    requestedByKind: text('requested_by_kind', { enum: ['user', 'agent'] }).notNull(),
+    requestedBy: text('requested_by').notNull(),
+    clientId: text('client_id'),
+    draftsJson: text('drafts_json').notNull(),
+    /** The asker's own words for approvers, at most 500 characters: shown as theirs, never as instructions. */
+    reason: text('reason').notNull(),
+    /** The org's brand state when asked (`brandKits.state`): kits have no draft, so approval publishes only while it is unchanged. */
+    brandState: text('brand_state').notNull(),
+    status: text('status', { enum: ['pending', 'approved', 'declined'] })
+      .notNull()
+      .default('pending'),
+    createdAt: created(),
+    expiresAt: integer('expires_at').notNull(),
+    /** The person who approved or declined it, and when. */
+    decidedBy: text('decided_by'),
+    decidedAt: integer('decided_at'),
+    /** The publish its approval made; null until then, and when there was nothing to publish (every pin already live at its version). */
+    publishId: text('publish_id'),
+    rowVersion: rowVersion(),
+  },
+  (t) => [
+    uniqueIndex('publish_requests_org_id_uq').on(t.orgId, t.id),
+    // The list, newest first, all of them or the pending ones, each read in index order.
+    index('publish_requests_org_created_idx').on(t.orgId, t.createdAt, t.id),
+    index('publish_requests_org_status_created_idx').on(t.orgId, t.status, t.createdAt, t.id),
+    // One asker's pending requests: the same pins asked again, and the cap.
+    index('publish_requests_org_asker_idx').on(t.orgId, t.requestedBy, t.status),
+    foreignKey({ columns: [t.orgId, t.publishId], foreignColumns: [publishes.orgId, publishes.id] }),
   ],
 );
 
@@ -856,9 +1198,12 @@ export const dataSources = sqliteTable(
     horizonDays: integer('horizon_days'),
     /** `json-table`: the dot path to the list of objects. Null: the document is the list. */
     rowsPath: text('rows_path'),
-    /** `rss`: whether the poller fetches and stores its stories' photos (apps/api src/data/images.ts). On unless a person turns it off. */
+    /** `rss`: whether the poller fetches and stores its stories' photos (./feed-photos.ts, apps/api src/data/feed-photos.ts). On unless a person turns it off. */
     photos: integer('photos', { mode: 'boolean' }).notNull().default(true),
-    /** `rss`: { stories: (URL | null)[] } in snapshot order. Older rows held a flat list of URLs. Null until polled with photos active. */
+    /**
+     * `rss`: { version, stories: (URL | null)[] }, the stories in snapshot order and the snapshot version they were read
+     * from (#481). Older rows held { stories } or a flat list of URLs. Null until polled with photos active.
+     */
     photoUrlsJson: text('photo_urls_json'),
     /** Moves on when a photo delivery invalidates RSS validators, even if they were already clear. */
     photoGeneration: integer('photo_generation').notNull().default(0),
@@ -896,7 +1241,7 @@ export const dataSnapshots = sqliteTable(
 );
 
 /**
- * The photos the org's news sources name, by the URL a feed gives (apps/api src/data/images.ts):
+ * The photos the org's news sources name, by the URL a feed gives (./feed-photos.ts, apps/api src/data/feed-photos.ts):
  * the stored copy's hashes once one was fetched and checked, the validators it came with, and when
  * to look at the URL again. One row per URL however many of the org's sources name it. A failed
  * fetch keeps the last good hashes. The files live in the feed-owned R2 prefix `o/<org>/f/<sha256>`.
@@ -918,6 +1263,12 @@ export const feedImages = sqliteTable(
     thumbSha256: text('thumb_sha256'),
     etag: text('etag'),
     lastModified: text('last_modified'),
+    /**
+     * The URL `etag` and `lastModified` came from: a CDN's copy (#488) or the feed's own, whose sizes some CDNs answer
+     * with one ETag, so they are sent only to it. Null: the feed's own, as every fetch was before #488; a row stored from
+     * a copy between #512 and #518 is null too, and fetches its copy once without them.
+     */
+    validatedFrom: text('validated_from'),
     /** When a poll that finds this URL queues it to be fetched again; moved on when it is queued, so the next poll does not queue it twice. */
     nextCheckAt: integer('next_check_at').notNull(),
     /** Why the last fetch failed, as a category; null once one succeeds. */
@@ -928,14 +1279,24 @@ export const feedImages = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: updated(),
   },
-  (t) => [primaryKey({ columns: [t.orgId, t.url] }), index('feed_images_org_source_sha_idx').on(t.orgId, t.sourceSha256)],
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.url] }),
+    index('feed_images_org_source_sha_idx').on(t.orgId, t.sourceSha256),
+    // The sweep asks, of each blob queued for delete, whether a row still names it as its file or its thumbnail.
+    index('feed_images_org_file_sha_idx').on(t.orgId, t.fileSha256),
+    index('feed_images_org_thumb_sha_idx').on(t.orgId, t.thumbSha256),
+    // A poll's hold counts the org's photos of the last day: read by their time, not every row the org has (review of #497).
+    index('feed_images_org_created_idx').on(t.orgId, t.createdAt),
+    // The hourly sweep finds the rows past their check across orgs, oldest first, without reading the rest.
+    index('feed_images_next_check_idx').on(t.nextCheckAt),
+  ],
 );
 
 /**
  * Feed photo blobs (`o/<org>/f/<sha256>`) queued for R2 deletion when a `feed_images` row expires
  * or replaces its hashes at the same URL. Kept until R2 delete succeeds so failures retry on the
- * next cleanup run; a grace window (`FEED_IMAGE_DELETE_GRACE_MS`) plus `deleting_until` lease keep
- * cleanup from racing a concurrent consumer putting or reusing the same hash.
+ * next cleanup run; a grace window (`FEED_IMAGE_DELETE_GRACE_MS`) plus `deleting_until` lease (held by its sweep's
+ * `claim_owner`) keep cleanup from racing a concurrent consumer putting or reusing the same hash.
  */
 export const feedImageDeletes = sqliteTable(
   'feed_image_deletes',
@@ -944,9 +1305,81 @@ export const feedImageDeletes = sqliteTable(
     sha256: text('sha256').notNull(),
     queuedAt: integer('queued_at').notNull(),
     deletingUntil: integer('deleting_until').notNull().default(0),
+    claimOwner: text('claim_owner'),
   },
   (t) => [primaryKey({ columns: [t.orgId, t.sha256] })],
 );
+
+/** A row for an R2 object the storage sweep deletes (#235): its claim while it deletes it (owner, until when), and when it did. */
+const sweptObject = () => ({
+  claimOwner: text('claim_owner'),
+  claimUntil: integer('claim_until').notNull().default(0),
+  deletedAt: integer('deleted_at'),
+});
+
+/**
+ * A deleted asset's files (`o/<org>/b/<sha256>`), queued by `delete` of an asset in its batch for the storage sweep (#235),
+ * which deletes one past the grace period once nothing the org keeps names its bytes (packages/db `storage.ts`).
+ * `claim_owner` and `claim_until`: the sweep's claim while it deletes the object; a writer that could reuse the bytes is
+ * refused while it holds.
+ */
+export const blobDeletes = sqliteTable(
+  'blob_deletes',
+  {
+    orgId: orgId(),
+    sha256: text('sha256').notNull(),
+    queuedAt: integer('queued_at').notNull(),
+    // Once its object is deleted, kept a week as a tombstone: a writer that names the hash after it checked the file was
+    // there finds out at its commit (#432). `deleted_at` null while queued.
+    ...sweptObject(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.sha256] }),
+    // The storage sweep's due files, by age (#433): queued rows only, tombstones outside (#432).
+    index('blob_deletes_due_idx').on(t.orgId, t.queuedAt, t.claimUntil).where(sql`deleted_at IS NULL`),
+    // The tombstones, by age: what is pruned, and what a writer may be refused by (#432).
+    index('blob_deletes_tombstone_idx').on(t.orgId, t.deletedAt).where(sql`deleted_at IS NOT NULL`),
+  ],
+);
+
+/**
+ * The files each stored manifest names (`ScreenManifest.files`' hashes, as a JSON array), by the screen it is stored for
+ * and its content-addressed id, as R2 keys it (#235): written in the batch of the publish or `/admin` push that stores
+ * it, and by the storage sweep for one stored before this table. What the sweep keeps a file for. `files_json` is null
+ * for one the sweep found no object for: its files are unknown, the screen can fetch nothing through it, and a real
+ * write replaces it. The sweep deletes a row's object once its screen no longer keeps it, and marks it deleted.
+ */
+export const storedManifests = sqliteTable(
+  'stored_manifests',
+  {
+    orgId: orgId(),
+    screenId: text('screen_id').notNull(),
+    manifestId: text('manifest_id').notNull(),
+    filesJson: text('files_json'),
+    storedAt: integer('stored_at').notNull(),
+    ...sweptObject(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.orgId, t.screenId, t.manifestId] }),
+    // The rows the storage sweep may delete, by age: it looks for an org's old ones without reading the deleted (#235).
+    index('stored_manifests_live_idx').on(t.orgId, t.storedAt).where(sql`files_json IS NOT NULL AND deleted_at IS NULL`),
+  ],
+);
+
+/**
+ * Each org's storage sweep (#235): its lease (`owner`, `lease_until`), so two never run on one org, and when it was last
+ * swept, so the orgs least recently swept go first and none waits behind others' backlogs.
+ */
+export const storageSweeps = sqliteTable('storage_sweeps', {
+  orgId: text('org_id')
+    .primaryKey()
+    .references(() => organization.id),
+  owner: text('owner'),
+  leaseUntil: integer('lease_until').notNull().default(0),
+  sweptAt: integer('swept_at').notNull().default(0),
+  // When its stored manifests were last looked at with none left due: looked at again a week on (STORAGE_RECHECK_MS).
+  manifestsCheckedAt: integer('manifests_checked_at').notNull().default(0),
+});
 
 // --------------------------------------------------------------- connections
 
@@ -1120,4 +1553,80 @@ export const syncEpochs = sqliteTable(
     primaryKey({ columns: [t.orgId, t.screenId, t.epoch] }),
     foreignKey({ columns: [t.orgId, t.screenId], foreignColumns: [screens.orgId, screens.id] }).onDelete('cascade'),
   ],
+);
+
+// ------------------------------------------------------------------ agent grants
+
+/**
+ * What an agent's OAuth client may do in one org, as one member (M4-04): its id (`agt_…`) is the
+ * dispatcher's agent actor id and the provider's consent reference id, on every token issued under
+ * it. Scopes are those the member chose at consent, capped by their role then; the dispatcher caps
+ * them again on every call. It ends when revoked (by the person, an owner, or the membership
+ * ending, with the provider's tokens) or 90 days after it was last used (`expires_at`).
+ */
+export const agentGrants = sqliteTable(
+  'agent_grants',
+  {
+    id: text('id').primaryKey(),
+    orgId: orgId(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** The OAuth client's id, and its name as it registered (unverified for an open registration). */
+    clientId: text('client_id').notNull(),
+    clientName: text('client_name'),
+    /** A JSON array of the tool scopes granted. */
+    scopesJson: text('scopes_json').notNull(),
+    createdAt: created(),
+    /** Written at most once an hour per grant by `/mcp` (M4-06), with `expires_at`. */
+    lastUsedAt: integer('last_used_at'),
+    expiresAt: integer('expires_at').notNull(),
+    revokedAt: integer('revoked_at'),
+    revokedBy: text('revoked_by'),
+    rowVersion: rowVersion(),
+  },
+  (t) => [uniqueIndex('agent_grants_org_id_uq').on(t.orgId, t.id), index('agent_grants_org_user_idx').on(t.orgId, t.userId)],
+);
+
+/**
+ * The Images transformations this environment's feed photos asked for, by UTC month (`YYYY-MM`, #500): no org's, but
+ * the account's allowance (5,000 a month on the Free plan, past which Images fails with 9422 for every environment).
+ */
+export const imagesUsage = sqliteTable('images_usage', {
+  month: text('month').primaryKey(),
+  transforms: integer('transforms').notNull(),
+});
+
+/**
+ * The feed photos' queue messages a UTC day, counted for the environment, not an org (#339): every hold counts what it
+ * queues, rechecks and retries too, and stops at `PhotoBudget.queuedPerDay`, so the account's Queues operations are
+ * left for publish notices. Holds no org's data, as `images_usage` does not.
+ */
+export const feedPhotoQueueUsage = sqliteTable('feed_photo_queue_usage', {
+  day: text('day').primaryKey(),
+  messages: integer('messages').notNull(),
+});
+
+/**
+ * Player builds a device supervisor may install (#628), platform-wide: not a tenant table, no org reads or writes it.
+ * CI registers each release on `canary` with the exact manifest text it signed and the Ed25519 signature; promoting it
+ * moves it to `stable`. The tarball is in R2 at `sys/player/<sha256>` (`playerReleaseKey` in packages/tools). Read
+ * through `platform(db).playerReleases`.
+ */
+export const playerReleases = sqliteTable(
+  'player_releases',
+  {
+    /** The build number in the manifest, which only goes up. */
+    version: integer('version').primaryKey(),
+    sha256: text('sha256').notNull(),
+    size: integer('size').notNull(),
+    /** The release manifest as CI signed it, byte for byte: a device verifies these bytes, then parses them. */
+    manifest: text('manifest').notNull(),
+    /** Its Ed25519 signature, base64. */
+    signature: text('signature').notNull(),
+    channel: text('channel', { enum: PLAYER_CHANNELS }).notNull(),
+    createdAt: created(),
+    promotedAt: integer('promoted_at'),
+  },
+  (t) => [uniqueIndex('player_releases_sha256_uq').on(t.sha256), index('player_releases_channel_version_idx').on(t.channel, t.version)],
 );

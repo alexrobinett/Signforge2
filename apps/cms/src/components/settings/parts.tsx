@@ -3,12 +3,13 @@
  * the save row with its error.
  */
 import { Link } from '@tanstack/react-router';
-import { LoaderCircleIcon, RotateCwIcon } from 'lucide-react';
+import { RotateCwIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { saveWord } from '~/components/editor';
 import { Button } from '~/components/ui/button';
 import { useOrgOnScreen } from '~/lib/live';
 import { useAppStore } from '~/state/provider';
-import { errorOf, hasEdits, runningIn, type SettingsScope } from '~/state/settings';
+import { errorOf, runningIn, type SettingsScope } from '~/state/settings';
 
 const LINK =
   'flex min-h-10 shrink-0 items-center rounded-md px-3 whitespace-nowrap text-sm font-medium text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[status=active]:bg-accent data-[status=active]:text-accent-foreground';
@@ -16,9 +17,10 @@ const LINK =
 const ORG_PAGES = [
   { to: '/settings/general', label: 'General' },
   { to: '/settings/members', label: 'Members & roles' },
-  { to: '/settings/brand-kits', label: 'Brand kits' },
   { to: '/settings/screens', label: 'Screens & groups' },
   { to: '/settings/notifications', label: 'Notifications' },
+  { to: '/settings/ai', label: 'AI model' },
+  { to: '/settings/api', label: 'Connected agents (MCP)' },
 ] as const;
 
 export function SettingsNav() {
@@ -68,8 +70,11 @@ export function useRunning(scope: SettingsScope): string | undefined {
   return useAppStore((s) => runningIn(s.settings, scope));
 }
 
-/** The error of the action `at`, in the org on screen; a reload when the settings changed since the edits were made. */
-export function ActionError({ at }: { at: string }) {
+/**
+ * The error of the action `at`, in the org on screen; a reload when the settings changed since the edits were made, or,
+ * with `onRetry`, Try again for one that got no answer or was refused, its edit still here (#479).
+ */
+export function ActionError({ at, onRetry }: { at: string; onRetry?: () => void }) {
   const orgId = useOrgOnScreen();
   // One value per selector: errorOf builds the error of a form's save afresh each time.
   const text = useAppStore((s) => errorOf(s.settings, at, orgId)?.text);
@@ -83,25 +88,38 @@ export function ActionError({ at }: { at: string }) {
           <RotateCwIcon aria-hidden /> Reload
         </Button>
       )}
+      {text && !stale && onRetry && (
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+          Try again
+        </Button>
+      )}
     </div>
   );
 }
 
-/** A form's save button and its error; only owners get the button. */
-export function SaveRow({ at, scope, canEdit, label = 'Save changes' }: { at: string; scope: SettingsScope; canEdit: boolean; label?: string }) {
-  const running = useRunning(scope);
-  const edited = useAppStore((s) => hasEdits(s.settings, at, scope.orgId));
+/**
+ * How a form's save is going, quietly, in the editors' words (#366): each change saves itself, so
+ * there is no Save button. A refusal is said here, with Reload after a conflict.
+ */
+export function SaveState({ form, canEdit }: { form: string; canEdit: boolean }) {
+  const orgId = useOrgOnScreen();
+  const draft = useAppStore((s) => (s.settings.drafts[form]?.orgId === orgId ? s.settings.drafts[form] : undefined));
   if (!canEdit) return <p className="text-sm text-muted-foreground">Only owners can change these.</p>;
   return (
     <div className="space-y-2">
-      <ActionError at={at} />
-      <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" aria-disabled={running !== undefined || undefined}>
-          {running === at && <LoaderCircleIcon className="animate-spin" aria-hidden />} {label}
-        </Button>
-        {/* Edits are kept on leaving the page, until saved or reloaded; this says they are there. */}
-        {edited && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
-      </div>
+      <ActionError at={form} />
+      <p className="text-sm text-muted-foreground" aria-live="polite">
+        {draft ? saveWord(draft.status, draft.savedAt) : 'Changes save as you make them.'}
+      </p>
     </div>
   );
+}
+
+/** Why a typed field would be refused, under it; `id` is what the field's `aria-describedby` names. */
+export function FieldProblem({ id, text }: { id: string; text: string | undefined }) {
+  return text ? (
+    <p id={id} className="text-sm font-medium text-destructive">
+      {text}
+    </p>
+  ) : null;
 }

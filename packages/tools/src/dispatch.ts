@@ -6,7 +6,9 @@
  *   2. Check the caller's role reaches the tool's minimum and its scopes include the tool's. An
  *      editor's scopes are read per call from the org's settings: with `editorsPublish` off, they
  *      lack `content:publish` (owner decision Q7).
- *   3. Validate the input with the tool's zod schema.
+ *   3. Open a list's cursor, sealed for the org, the tool and `read`'s type where the caller has the `cursors` service
+ *      (#345), refusing one longer than a sealed cursor can be, or not sealed for this list; `dispatch` seals the
+ *      page's `next` as it returns. Then validate the input with the tool's zod schema.
  *      A call whose caller lacks a service the tool `needs` (`ToolServices`) is refused with
  *      `forbidden` before its handler runs, the same for every tool.
  *   4. Run the handler with `scoped(db, orgId)`, the actor and the parsed input. A handler reads
@@ -29,7 +31,7 @@
  * in `platform_audit_log`, since what it changes belongs to no org.
  */
 import { NotInOrgError, StaleVersionError, type OrgScope, type Staged, type Write } from '@signforge/db';
-import { canonicalJson } from '@signforge/contract';
+import { canonicalJson, ID_PATTERN } from '@signforge/contract';
 import { z } from 'zod';
 import { checkOutput } from './output';
 import { orgSettings } from './settings';
@@ -37,6 +39,7 @@ import {
   AGENT_LIMITS,
   ROLE_SCOPES,
   ROLES,
+  isAgent,
   SERVICE_WORDS,
   ToolError,
   type Actor,
@@ -52,7 +55,7 @@ import {
 } from './tool';
 import type { ToolErrorCode } from './outputs';
 
-/** Who is calling, resolved by the adapter (the `/api` route, `/admin`, later MCP and WebMCP). */
+/** Who is calling, resolved by the adapter (the `/api` route, `/admin`, `/mcp`, later WebMCP). */
 export interface Caller<D extends DataScope = OrgScope> {
   /** `scoped(db, orgId)` for the caller's active org: the only org it can reach. For the platform registry, `platform(db)`. */
   org: D;
@@ -64,8 +67,8 @@ export interface Caller<D extends DataScope = OrgScope> {
   blobs: R2Bucket;
   /**
    * What its tools may use (`ToolServices`). Each adapter builds them with its environment's one
-   * constructor: the API's (apps/api/src/tool-services.ts) for `/api` and `/admin`, and Milestone 4's
-   * `/mcp` through the same; a test's fakes (test/services.ts).
+   * constructor: the API's (apps/api/src/tool-services.ts) for `/api`, `/admin` and `/mcp`; a test's
+   * fakes (test/services.ts).
    */
   services: ToolServices;
   /**
@@ -75,11 +78,23 @@ export interface Caller<D extends DataScope = OrgScope> {
   publishLock?: <T>(run: () => Promise<T>) => Promise<T>;
   /** Counts an agent's calls against its grant's limits. Required when the actor is an agent: dispatch throws without it. */
   agentLimiter?: AgentLimiter;
+  /**
+   * The user whose membership `role` is: the session's, or an agent's grant's (the API sets it). A
+   * publish reads that role again under the org's lock, on every attempt, and its batch holds the
+   * role and the org's `editorsPublish` to the commit, so a member demoted meanwhile publishes nothing.
+   */
+  member?: string;
+  /**
+   * The confirmation card the person pressed for this call (#269, the CMS agent's drawer): its summary,
+   * and the agent run and call it resumed, on the audit row, which a confirmed read gets too.
+   */
+  confirmed?: { summary: string; runId: string; callId: string };
 }
 
 export type DispatchResult = { ok: true; output: unknown } | { ok: false; error: ToolErrorCode; message: string; details?: unknown };
 
 const rank = (r: Role) => ROLES.indexOf(r);
+const isRole = (r: unknown): r is Role => ROLES.some((x) => x === r);
 
 /** A caller's role and grant, and whether its org lets editors publish (`editorsPublish` in its settings). */
 export type Grant = Pick<Caller, 'role' | 'scopes'> & { editorsPublish: boolean };
@@ -103,8 +118,9 @@ export async function grantOf(caller: Pick<Caller<DataScope>, 'org' | 'role' | '
   return { role: caller.role, scopes: caller.scopes, editorsPublish };
 }
 
+/** Keys redacted from an audit row; a list's cursor too, which names rows by their ids once opened (#345). */
 const SECRET_KEY =
-  /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|feed_?url|webhook_?url|pairing_?code|oauth_?state|^code$|^resource$/i;
+  /secret|token|password|passcode|otp|authorization|cookie|api_?key|private_?key|credential$|url_?encrypted|feed_?url|webhook_?url|pairing_?code|oauth_?state|^code$|^resource$|^cursor$/i;
 const REDACTED = '[redacted]';
 
 /**
@@ -142,6 +158,73 @@ export async function dispatch<D extends DataScope>(
   rawInput: unknown,
   caller: Caller<D>,
 ): Promise<DispatchResult> {
+  const audited = { row: false };
+  const result = await dispatchCall(registry, name, rawInput, caller, audited);
+  // A person's press of a card (#269) is recorded however it is refused: by role, scope, a check, a lost race.
+  if (caller.confirmed && !result.ok && !audited.row) return refusedPress(registry, name, rawInput, caller, result);
+  // The page's next, sealed as the cursor it comes back as is opened (step 3).
+  const scope = cursorScope(caller, name, rawInput);
+  if (scope && result.ok && isRecord(result.output) && typeof result.output.next === 'string')
+    return { ok: true, output: { ...result.output, next: await scope.sealer.seal(scope, result.output.next) } };
+  return result;
+}
+
+/** The longest cursor a list takes as it is sent: a sealed one is longer than the key it holds, which `pageInput` bounds. */
+const MAX_CURSOR = 2000;
+
+/**
+ * Whom a list's cursor is sealed for, with the caller's sealer (#345): its org, its tool, and for `read` the type it
+ * reads, so a cursor opens only for the list that made it. None without a sealer, or for a platform call.
+ */
+function cursorScope<D extends DataScope>(caller: Caller<D>, name: string, rawInput: unknown) {
+  const sealer = caller.services.cursors;
+  const orgId = 'orgId' in caller.org ? caller.org.orgId : null;
+  if (!sealer || !orgId) return undefined;
+  const type = name === 'read' && isRecord(rawInput) && typeof rawInput.type === 'string' ? `/${rawInput.type}` : '';
+  return { sealer, orgId, tool: `${name}${type}` };
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/**
+ * A person's press of a confirmation card (`Caller.confirmed`), refused: its audit row alone, with the
+ * input it would have run and why not. Nothing the call staged is written, and no screen is told.
+ * The row's target is named from the input only, as a refused call has no output.
+ */
+export async function refusedPress<D extends DataScope>(
+  registry: ReadonlyMap<string, AnyTool<D>>,
+  name: string,
+  rawInput: unknown,
+  caller: Caller<D>,
+  refusal: Extract<DispatchResult, { ok: false }>,
+): Promise<DispatchResult> {
+  const tool = registry.get(name);
+  const parsed = tool?.input.safeParse(rawInput ?? {});
+  const target = tool?.target && parsed?.success ? tool.target(parsed.data, undefined) : undefined;
+  const audit = caller.org.auditLog.stage({
+    actorKind: caller.actor.kind,
+    actorId: caller.actor.id,
+    clientId: caller.actor.clientId ?? null,
+    action: name,
+    targetKind: target?.kind ?? null,
+    targetId: target?.id ?? null,
+    detailJson: JSON.stringify({
+      input: redact(parsed?.success ? parsed.data : rawInput),
+      refused: { error: refusal.error, message: refusal.message },
+      confirmed: caller.confirmed,
+    }),
+  });
+  await caller.org.commit(audit.writes);
+  return refusal;
+}
+
+async function dispatchCall<D extends DataScope>(
+  registry: ReadonlyMap<string, AnyTool<D>>,
+  name: string,
+  rawInput: unknown,
+  caller: Caller<D>,
+  audited: { row: boolean },
+): Promise<DispatchResult> {
   const tool = registry.get(name);
   // Before the name is checked: a call to no tool still counts, as a call.
   if (caller.actor.kind === 'agent') {
@@ -149,11 +232,57 @@ export async function dispatch<D extends DataScope>(
     if (refused) return refused;
   }
   if (!tool) return fail('unknown_tool', `no tool named ${JSON.stringify(name)}`);
+  if (tool.people && isAgent(caller.actor)) return fail('forbidden', `${tool.name} is for people only: a person does it in the CMS`);
   const grant = await grantOf(caller);
-  if (!permits(grant, tool)) {
-    if (permits({ ...grant, editorsPublish: true }, tool)) return fail('forbidden', 'Only owners publish in this organization');
+  /** Refused unless `g` permits the tool. Asked again under a publish's lock, for each attempt, as the setting may have changed meanwhile. */
+  const refusedBy = (g: Grant): DispatchResult | undefined => {
+    if (permits(g, tool)) return undefined;
+    if (permits({ ...g, editorsPublish: true }, tool)) return fail('forbidden', 'Only owners publish in this organization');
     return fail('forbidden', `${tool.name} needs the ${tool.scope} scope and at least the ${tool.minRole} role`);
+  };
+  const refused = refusedBy(grant);
+  if (refused) return refused;
+  // A list's cursor as its tool made it, opened for this org, tool and type alone (#345); sealed again by `dispatch`.
+  const scope = cursorScope(caller, name, rawInput);
+  if (scope && isRecord(rawInput) && typeof rawInput.cursor === 'string') {
+    const notOurs = () =>
+      fail('invalid_input', 'cursor is not one this list returned; start again without it', [{ path: 'cursor', message: 'not a cursor from this list' }]);
+    if (rawInput.cursor.length > MAX_CURSOR) return notOurs();
+    const cursor = await scope.sealer.open(scope, rawInput.cursor);
+    if (cursor === undefined) return notOurs();
+    rawInput = { ...rawInput, cursor };
   }
+  // The role a change was checked for, held to the commit, checked by the batch as it runs: the right to publish (the
+  // member still in a role that may, and an editor only while editors publish; without a member to read, the setting
+  // alone), and an owner's (review of #414: one demoted between the read and the batch is refused), for whatever the
+  // batch commits, an audit row alone included (#417). An owner's change made through Better Auth stages nothing and
+  // commits nothing here, and Better Auth checks the role as it makes it.
+  // A tool of a lesser scope whose call reaches screens all the same asks for the right to publish (`ctx.publishRight`):
+  // checked as it asks, and held to the commit as a publish's is (#122).
+  let holdsPublish = false;
+  const roleRight = (): Write[] => {
+    if (!tool.mutates || !('settings' in caller.org)) return [];
+    const publishing = tool.scope === 'content:publish' || holdsPublish;
+    if (!publishing && tool.minRole !== 'owner') return [];
+    const least = publishing && rank(tool.minRole) < rank('editor') ? 'editor' : tool.minRole;
+    if (caller.member) return caller.org.members.stage.stillMay(caller.member, ROLES.slice(rank(least)), publishing).writes;
+    return publishing && caller.role === 'editor' ? caller.org.settings.stage.editorsPublish().writes : [];
+  };
+  /** The right the role guard held, lost by the commit: why, as the role and setting are now. */
+  const lostRight = async (): Promise<DispatchResult> => {
+    const role = caller.member && 'members' in caller.org ? await caller.org.members.roleOf(caller.member) : caller.role;
+    if (!isRole(role)) return fail('forbidden', 'you are no longer a member of this organization');
+    const now = await grantOf({ ...caller, role });
+    const refusal = refusedBy(now);
+    if (refusal) return refusal;
+    if (holdsPublish && !effectiveScopes(now).includes('content:publish'))
+      return fail(
+        'forbidden',
+        now.role === 'editor' && !now.editorsPublish ? 'Only owners publish in this organization' : `${tool.name} needs the right to publish here`,
+      );
+    // Back by the time it is read: it changed and changed back meanwhile.
+    return fail('forbidden', `your right to ${tool.name} changed while it ran: read again and retry`);
+  };
 
   const parsed = tool.input.safeParse(rawInput ?? {});
   if (!parsed.success) {
@@ -204,7 +333,7 @@ export async function dispatch<D extends DataScope>(
   };
   // The writes and their audit row, in one atomic batch. Nothing staged, nothing written.
   const commit = async (target: { kind: string; id: string } | undefined, detail: Record<string, unknown>) => {
-    if (!writes.length && !tool.alwaysAudited) return;
+    if (!writes.length && !tool.alwaysAudited && !caller.confirmed) return;
     const audit = caller.org.auditLog.stage({
       actorKind: caller.actor.kind,
       actorId: caller.actor.id,
@@ -212,9 +341,10 @@ export async function dispatch<D extends DataScope>(
       action: tool.name,
       targetKind: target?.kind ?? null,
       targetId: target?.id ?? null,
-      detailJson: JSON.stringify({ input: redact(parsed.data), ...detail }),
+      detailJson: JSON.stringify({ input: redact(parsed.data), ...detail, ...(caller.confirmed !== undefined && { confirmed: caller.confirmed }) }),
     });
-    await caller.org.commit([...writes, ...audit.writes]);
+    await caller.org.commit([...roleRight(), ...writes, ...audit.writes]);
+    audited.row = true;
   };
 
   /** What the handler asked to undo if the call does not succeed (`onDiscard`). Best effort: a failure is logged. */
@@ -222,23 +352,83 @@ export async function dispatch<D extends DataScope>(
   const onDiscard = (undo: () => Promise<void>) => {
     discards.push(undo);
   };
-  /** A commit that failed: a refusal, if a guard or the tool says what refused it. */
+  /** A commit that failed: a refusal, the tool's own words for it first, then a guard's. */
   const refusedCommit = async (err: unknown): Promise<DispatchResult | undefined> => {
+    const refusal = await tool.refuseFailedCommit?.({ org: caller.org, input: parsed.data, actor: caller.actor });
+    // A role guard (`stillMay`, first in its batch): the member lost the right between the read and the batch, whatever
+    // else changed meanwhile (#417). Said in the tool's own words when it has them, else as the role and setting are now.
+    if (err instanceof StaleVersionError && err.id === 'member') {
+      if (refusal?.code === 'forbidden') return fail(refusal.code, refusal.message, refusal.details);
+      return lostRight();
+    }
+    if (refusal) return fail(refusal.code, refusal.message, refusal.details);
     // An `ifVersion` guard: the row changed between the handler's read and the commit.
     if (err instanceof StaleVersionError) return stale(err);
     if (err instanceof NotInOrgError) return fail('not_found', err.message);
-    const refusal = await tool.refuseFailedCommit?.({ org: caller.org, input: parsed.data });
-    return refusal && fail(refusal.code, refusal.message, refusal.details);
+    return undefined;
+  };
+
+  const publishRight = (why: string) => {
+    if (!tool.mutates) throw new Error(`${tool.name} is a read and cannot ask for the right to publish`);
+    if (!effectiveScopes(grant).includes('content:publish')) throw new ToolError('forbidden', why);
+    holdsPublish = true;
+  };
+
+  // A dispatch's shared reads, made again for each run of its handler (a retried write starts afresh).
+  let shared = new Map<string, Promise<unknown>>();
+  const memo = <T>(key: string, make: () => Promise<T>): Promise<T> => {
+    // Each key is only ever made by `make` of its own type: the reads that share one agree on what it holds.
+    if (!shared.has(key)) shared.set(key, make());
+    return shared.get(key) as Promise<T>;
+  };
+
+  const runRead = async (name: string, input: unknown): Promise<unknown> => {
+    const other = registry.get(name);
+    if (!other || other.mutates || other.people || tool.mutates) throw new Error(`${tool.name} cannot run ${name}`);
+    if (!permits(grant, other)) throw new ToolError('forbidden', `${name} needs the ${other.scope} scope and at least the ${other.minRole} role`);
+    const args = other.input.safeParse(input ?? {});
+    if (!args.success)
+      throw new ToolError(
+        'invalid_input',
+        z.prettifyError(args.error),
+        args.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
+      );
+    if (!provides(services, other.needs ?? [])) {
+      const lacking = (other.needs ?? []).filter((n) => services[n] === undefined).map((n) => SERVICE_WORDS[n]);
+      throw new ToolError('forbidden', `${name} needs ${lacking.join(' and ')}, and this caller has none`);
+    }
+    const output = await other.handler({
+      org: caller.org,
+      actor: caller.actor,
+      role: caller.role,
+      scopes: effectiveScopes(grant),
+      confirmed: caller.confirmed !== undefined,
+      input: args.data,
+      blobs: caller.blobs,
+      services,
+      write,
+      notify,
+      deliverNow,
+      onDiscard,
+      publishRight,
+      run: runRead,
+      memo,
+    });
+    checkOutput(other, output);
+    return output;
   };
 
   const run = async (): Promise<DispatchResult> => {
     let output: unknown;
+    holdsPublish = false;
+    shared = new Map();
     try {
       output = await tool.handler({
         org: caller.org,
         actor: caller.actor,
         role: caller.role,
         scopes: effectiveScopes(grant),
+        confirmed: caller.confirmed !== undefined,
         input: parsed.data,
         blobs: caller.blobs,
         services,
@@ -246,13 +436,20 @@ export async function dispatch<D extends DataScope>(
         notify,
         deliverNow,
         onDiscard,
+        publishRight,
+        run: runRead,
+        memo,
       });
     } catch (err) {
       if (err instanceof ToolError) {
-        // A refusal that changed something is recorded too, with what was refused.
+        // A refusal that changed something is recorded too, with what was refused. One that changed nothing writes nothing it
+        // staged: a person's press of a card (#269) refused so gets its row alone (`refusedPress`).
         if (err.changed) {
           try {
-            await commit(tool.target?.(parsed.data, undefined as never), { refused: { error: err.code, message: err.message } });
+            await commit(tool.target?.(parsed.data, undefined), {
+              refused: { error: err.code, message: err.message },
+              ...(err.auditDetail ? { detail: redact(err.auditDetail) } : {}),
+            });
           } catch (commitErr) {
             // What it staged was refused too (another call changed it first): say so, as for a change.
             const refusal = await refusedCommit(commitErr);
@@ -271,7 +468,9 @@ export async function dispatch<D extends DataScope>(
     checkOutput(tool, output);
     if (keyed && writes.length) writes.push(...(await keyed.record(output)));
     try {
-      await commit(tool.target?.(parsed.data, output), {});
+      // Under its own key, redacted: it cannot stand for the input or a refusal, nor carry a secret.
+      const more = tool.auditDetail?.(output);
+      await commit(tool.target?.(parsed.data, output), more ? { detail: redact(more) } : {});
     } catch (err) {
       // A publish that lost a race runs again (`publishAttempts`).
       if (tool.publishes && err instanceof StaleVersionError) throw err;
@@ -292,10 +491,20 @@ export async function dispatch<D extends DataScope>(
     for (let attempt = 1; ; attempt++) {
       writes.length = 0;
       notices.length = 0;
+      // Under the lock and on every attempt: a role or a setting changed while it waited or lost a race takes effect.
+      const role = caller.member && 'members' in caller.org ? await caller.org.members.roleOf(caller.member) : caller.role;
+      if (!isRole(role)) return fail('forbidden', 'you are no longer a member of this organization');
+      const now = refusedBy(await grantOf({ ...caller, role }));
+      if (now) return now;
       try {
         return await run();
       } catch (err) {
         if (!(err instanceof StaleVersionError)) throw err;
+        // The role guard, on any attempt: the right is gone, not a race to run again (#419).
+        if (err.id === 'member') return lostRight();
+        // A guard of the tool's own that no fresh read passes: said at once, not after every attempt (#530).
+        const final = await tool.refuseStale?.({ org: caller.org, input: parsed.data, failed: { id: err.id, version: err.version, staged: err.staged } });
+        if (final) return fail(final.code, final.message, final.details);
         if (attempt === PUBLISH_ATTEMPTS) return stale(err);
       }
     }
@@ -325,8 +534,9 @@ const OVER: Record<AgentLimit, string> = {
 /**
  * An agent's call counted against its grant's limits, before anything else is read or run. A
  * refused call writes nothing, except the audit row of the first one refused in each window.
+ * `dispatch` counts every tool call through it; `/mcp` counts its `tools/list` too (M4-06).
  */
-async function overLimit(name: string, write: boolean, caller: Caller<DataScope>): Promise<DispatchResult | undefined> {
+export async function overLimit(name: string, write: boolean, caller: Caller<DataScope>): Promise<DispatchResult | undefined> {
   if (!caller.agentLimiter) throw new Error(`an agent called ${JSON.stringify(name)} without a limiter for its grant`);
   const allowance = await caller.agentLimiter.take(caller.actor.id, write);
   if (allowance.ok) return undefined;
@@ -337,6 +547,8 @@ async function overLimit(name: string, write: boolean, caller: Caller<DataScope>
   if (allowance.audit) {
     if (!('appendOnce' in org.auditLog)) throw new Error('an agent acts only in an org');
     const { window, start } = allowance.audit;
+    // Still a refusal, not an error, if either step fails: the window keeps asking for its row, and its next refused call writes it.
+    let recorded = false;
     try {
       // One row per grant and window, however many refused calls race to write it.
       await org.auditLog.appendOnce(`rate_limited_${actor.id}_${window}_${start}`, {
@@ -349,10 +561,15 @@ async function overLimit(name: string, write: boolean, caller: Caller<DataScope>
         // The name as the agent sent it, which may name no tool.
         detailJson: JSON.stringify({ tool: redact(name), refused: { error: 'rate_limited', message, details } }),
       });
+      recorded = true;
       await agentLimiter.audited(actor.id, allowance.audit);
     } catch (err) {
-      // Still a refusal, not an error: the window keeps asking for its row, and its next refused call writes it.
-      console.warn(`[tools] could not record that agent grant ${actor.id} was refused`, err);
+      console.warn(
+        recorded
+          ? `[tools] recorded that agent grant ${actor.id} was refused, but could not tell its limiter: the window's next refusal tries again and writes nothing`
+          : `[tools] could not record that agent grant ${actor.id} was refused`,
+        err,
+      );
     }
   }
   return fail('rate_limited', message, details);
@@ -385,17 +602,70 @@ export async function sha256Hex(text: string) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role, and JSON Schema input and output. */
-export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, grant: Grant) {
+/**
+ * A tool's input as an agent is shown it (#345). As JSON (`tools/list`, `GET /api/tools`, what a model is sent) it is
+ * the zod input's JSON Schema with only what helps write a call: no `$schema` line, id pattern or safe-integer bounds.
+ * As a Standard Schema (`~standard`, which JSON leaves out) it is the whole zod input, so TanStack AI checks a drawer's
+ * call against it before the tool runs or pauses for a card, and tells the model what was wrong. The dispatcher checks
+ * it again.
+ */
+/** `input`'s JSON Schema for `target` as listed: no `$schema`, id pattern or safe-integer bound. */
+function listedSchema(input: z.ZodType, target: z.core.JSONSchemaGenerator['target'] = 'draft-2020-12'): Record<string, unknown> {
+  const { $schema: _dropped, ...schema } = z.toJSONSchema(input, {
+    target,
+    io: 'input',
+    unrepresentable: 'any',
+    override: ({ jsonSchema: s }) => {
+      if (s.pattern === ID_PATTERN.source) delete s.pattern;
+      if (s.maximum === Number.MAX_SAFE_INTEGER) delete s.maximum;
+      if (s.minimum === Number.MIN_SAFE_INTEGER) delete s.minimum;
+    },
+  });
+  return schema;
+}
+
+export class ListedInput {
+  [field: string]: unknown;
+  readonly #input: z.ZodType;
+  readonly #schema: Record<string, unknown>;
+
+  constructor(input: z.ZodType) {
+    const schema = listedSchema(input);
+    Object.assign(this, schema);
+    this.#input = input;
+    this.#schema = schema;
+  }
+
+  /**
+   * As zod's own, with the input's JSON Schema the listed one for the target asked (2020-12 the one built), and its output
+   * zod's: what a call parses to, not the input again (review of #475).
+   */
+  get '~standard'(): z.ZodType['~standard'] {
+    const own = this.#input['~standard'];
+    return {
+      ...own,
+      jsonSchema: {
+        input: ({ target }) => (target === 'draft-2020-12' ? structuredClone(this.#schema) : listedSchema(this.#input, target)),
+        output: (options) => own.jsonSchema.output(options),
+      },
+    };
+  }
+}
+
+/**
+ * What a caller may use, for `GET /api/tools` and the MCP `tools/list`: name, description, scope, role, and JSON Schema
+ * input and output. With `services`, a tool that lists by them (`read`'s types) leaves out what they cannot serve.
+ */
+export function describeTools(registry: ReadonlyMap<string, AnyTool<any>>, grant: Grant, services?: ToolServices) {
   return [...registry.values()]
     .filter((t) => permits(grant, t))
     .map((t) => ({
       name: t.name,
-      description: t.description,
+      description: t.listedDescription?.(grant, services) ?? t.description,
       scope: t.scope,
       minRole: t.minRole,
       mutates: t.mutates,
-      inputSchema: z.toJSONSchema(t.input, { io: 'input', unrepresentable: 'any' }),
+      inputSchema: new ListedInput(t.listedInput?.(grant, services) ?? t.input),
       outputSchema: z.toJSONSchema(t.output, { io: 'output', unrepresentable: 'any' }),
       example: t.example,
     }));

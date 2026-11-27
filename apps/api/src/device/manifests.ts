@@ -6,16 +6,14 @@
  * A manifest's id is the hash of its body, so the object at a manifest key never changes and
  * its parsed summary can be kept for the life of the isolate.
  */
-import { baseTemplateHtml, type ScreenManifest } from '@signforge/contract';
+import { baseTemplateHtml, type ManifestNeeds, manifestNeeds, type ScreenManifest } from '@signforge/contract';
 import type { DeviceScreen } from '@signforge/db';
 import { type BoundField, manifestBoundFields } from '@signforge/player-core';
 import { manifestKey } from '../r2';
 
-export interface ManifestSummary {
+/** A manifest as a screen's sync reads it: what it needs of a player (`manifestNeeds`), and what the screen may fetch. */
+export interface ManifestSummary extends ManifestNeeds {
   id: string;
-  schema: number;
-  /** The frame protocol of each template, 1 where a bundle names none. */
-  protocols: number[];
   /** File hash to content type. */
   files: Map<string, string>;
   /** Hashes of base templates' HTML, which may live under `sys/b/`. */
@@ -25,14 +23,18 @@ export interface ManifestSummary {
   bound: Map<string, BoundField[]>;
 }
 
-const MAX_CACHED = 256;
+/**
+ * A summary is a few kB: 1,024 hold the current and previous manifest of 512 screens, and a sync reads both. 1,000 screens
+ * need about 2,000 across the isolates that serve them (a screen's syncs spread over Cloudflare's), so a smaller cache
+ * would drop an entry before its screen's next sync and read R2 again.
+ */
+export const MAX_CACHED = 1024;
 const cache = new Map<string, ManifestSummary>();
 
 function summarise(id: string, m: ScreenManifest): ManifestSummary {
   return {
     id,
-    schema: m.schema,
-    protocols: [...new Set(Object.values(m.templates ?? {}).map((t) => t.manifest?.protocol ?? 1))],
+    ...manifestNeeds(m),
     files: new Map(Object.entries(m.files ?? {}).map(([sha, f]) => [sha, f.type])),
     baseHtml: baseTemplateHtml(m),
     dataSources: new Set(Object.keys(m.dataSources ?? {})),
@@ -51,10 +53,11 @@ async function load(bucket: R2Bucket, key: string, id: string): Promise<Manifest
   return summary;
 }
 
+/** One screen's manifest `id`, summarised, or undefined if R2 has none: for the poller, which reads what screens play (#481). */
+export const manifestSummary = (bucket: R2Bucket, orgId: string, screenId: string, id: string) => load(bucket, manifestKey(orgId, screenId, id), id);
+
 const summaries = async (bucket: R2Bucket, screen: DeviceScreen, ids: (string | null)[]): Promise<ManifestSummary[]> => {
-  const found = await Promise.all(
-    [...new Set(ids)].filter((id): id is string => !!id).map((id) => load(bucket, manifestKey(screen.orgId, screen.screenId, id), id)),
-  );
+  const found = await Promise.all([...new Set(ids)].filter((id): id is string => !!id).map((id) => manifestSummary(bucket, screen.orgId, screen.screenId, id)));
   return found.filter((m): m is ManifestSummary => !!m);
 };
 

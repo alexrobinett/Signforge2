@@ -4,13 +4,15 @@
  * `/admin`'s take only what their tools need. Each is cheap to build: none calls a binding or a
  * provider until a tool uses it.
  *
- * Milestone 4's `/mcp` caller is the third adapter: it builds its services here, with its own
- * `ServiceScope` (the grant's org, and whoever the rate limits should count).
+ * `/mcp` (M4-06, src/mcp) is the third adapter: it builds its services here, with the grant's org and
+ * member as its `ServiceScope`.
  */
 import type { RateLimitBucket, ToolServices } from '@signforge/tools';
 import type { Context } from 'hono';
+import { aiProviders } from './agent/provider';
+import { agentCallLog } from './agents/calls';
 import { CALLBACK_PATH, type ConnectorDeps, connectorDeps, connectorsFor, workerFetch } from './connectors';
-import { alertSecretSealer, feedUrlSealer } from './data/cipher';
+import { alertSecretSealer, cursorSealer, feedUrlSealer } from './data/cipher';
 import { feedGuards } from './data/fetch';
 import { openMeteoPlaces } from './data/places';
 import { tableReader } from './data/tables';
@@ -26,6 +28,8 @@ const LIMITS: Record<Exclude<RateLimitBucket, 'template_check'>, (env: Env) => R
   pairing_claim: (env) => env.PAIR_CLAIM_LIMIT,
   place_search: (env) => env.PLACE_SEARCH_LIMIT,
   table_read: (env) => env.TABLE_READ_LIMIT,
+  page_read: (env) => env.PAGE_READ_LIMIT,
+  chat_turn: (env) => env.CHAT_TURN_LIMIT,
 };
 
 /** Who a call's services act for. */
@@ -54,6 +58,9 @@ export function toolServices<E extends { Bindings: Env }>(c: Context<E>, scope: 
     tables: tableReader(feedGuards(env, workerFetch)),
     templateCheck: templateChecker(env),
     connectors: connectorsFor(env, scope.connectors ?? connectorDeps(env), new URL(CALLBACK_PATH, c.req.url).href),
+    aiProviders: aiProviders(env),
+    // One org's: what its agents called over /mcp (M4-08).
+    agentCalls: orgId === null ? undefined : agentCallLog(env, orgId),
     rateLimit: async (bucket) => {
       // A template check counts against the org, whose one container it uses. The platform's templates are not checked here.
       if (bucket === 'template_check') return orgId !== null && templateCheckAllowed(env, orgId);
@@ -65,6 +72,8 @@ export function toolServices<E extends { Bindings: Env }>(c: Context<E>, scope: 
       return user.success && ip.success;
     },
     notify: screenNotifier(env),
+    cursors: cursorSealer(env),
+    cmsOrigin: env.CMS_ORIGIN,
     deliverNow:
       orgId === null
         ? undefined

@@ -9,7 +9,7 @@ import type { Frame } from 'playwright';
 import { describe, expect, it } from 'vitest';
 import { buildContent, type FixtureMode } from './content';
 import { attribute, childPage, childScript } from './fixtures/child';
-import { spotsPlayed, useHarness, type Player } from './harness';
+import { NO_REACH, reachOf, spotsPlayed, useHarness, type Player } from './harness';
 
 // As on the Pi, so a template frame that shares the player's process is seen (the last test).
 const h = useHarness({ siteIsolation: true });
@@ -19,13 +19,13 @@ const h = useHarness({ siteIsolation: true });
  * popup. (Playwright also reports requests CSP blocked before they were sent, so its request
  * events are not evidence.)
  */
-async function hostile(mode: FixtureMode, target?: string, templateHtml = h.templateHtml) {
+async function hostile(mode: FixtureMode, target?: string, templateHtml = h.templateHtml, evilMs = 800) {
   const popups: string[] = [];
   const p = await h.openPlayer((server) => {
     server.publish(
       buildContent(templateHtml, [
         { id: 'a', durationMs: 800 },
-        { id: 'evil', mode, target: target ?? `${server.url}/leak/${mode}`, durationMs: 800 },
+        { id: 'evil', mode, target: target ?? `${server.url}/leak/${mode}`, durationMs: evilMs },
         { id: 'b', durationMs: 800 },
       ]),
     );
@@ -83,14 +83,17 @@ describe('a template that navigates its own frame', () => {
     });
   }
 
-  it('is stopped and blanked when it navigates while playing, and the next spot plays', async () => {
-    const { p, leaks } = await hostile('navigate-on-play');
-    await p.until((s) => spotsPlayed(s).includes('evil'));
-    await expect.poll(() => p.console.some((l) => l.includes('navigated'))).toBe(true);
-    // Blanked: no template is left on screen during the rest of its play.
-    expect(await p.onScreen()).toBeUndefined();
+  it('is stopped and skipped when it navigates as it starts to play, and the next spot cuts in (#522)', async () => {
+    // An hour long: b plays within the wait only if evil gives way when it dies.
+    const { p, leaks } = await hostile('navigate-on-play', undefined, h.templateHtml, 3_600_000);
     const s = await afterEvil(p);
-    expect(spotsPlayed(s)).toEqual(['a', 'evil', 'b']);
+    // Never played: had its play counted before the navigation landed, it is taken back (#528).
+    expect(spotsPlayed(s)).toEqual(['a', 'b']);
+    expect(s.lastError).toBe('evil: template navigated away');
+    // Its frame is gone: no template on the page still shows it.
+    const labels = await Promise.all(p.page.frames().map((f) => f.evaluate(() => document.getElementById('label')?.textContent).catch(() => undefined)));
+    expect(labels).not.toContain('evil');
+    expect(p.console.some((l) => l.includes('navigated'))).toBe(true);
     expect(leaks()).toEqual([]);
   });
 });
@@ -200,26 +203,7 @@ describe('the template frame', () => {
     let template: Frame | undefined;
     for (const f of p.page.frames()) if (await f.evaluate(() => !!document.getElementById('label')).catch(() => false)) template = f;
     expect(template).toBeDefined();
-    const reach = await template!.evaluate(() => {
-      const tries: Record<string, () => unknown> = {
-        origin: () => origin,
-        top: () => top!.document.title,
-        parent: () => parent.document.title,
-        caches: () => (typeof caches === 'undefined' ? 'none' : caches.keys()),
-        storage: () => localStorage.length,
-      };
-      return Object.fromEntries(
-        Object.entries(tries).map(([k, f]) => {
-          try {
-            const v = f();
-            return [k, v instanceof Promise ? 'promise' : String(v)];
-          } catch {
-            return [k, 'blocked'];
-          }
-        }),
-      );
-    });
-    expect(reach).toEqual({ origin: 'null', top: 'blocked', parent: 'blocked', caches: expect.stringMatching(/blocked|none/), storage: 'blocked' });
+    expect(await reachOf(template!)).toEqual(NO_REACH);
   });
 });
 
@@ -228,14 +212,21 @@ describe('a template frame', () => {
   it('runs in a process of its own, not the player’s', async () => {
     const p = await h.openPlayer((server) => server.publish(h.content([{ id: 'a', durationMs: 5000 }])));
     await p.until((s) => s.spot === 'a');
-    // A template's frame is the child of a wrapper frame, which is the child of the player.
-    const templates = p.page.frames().filter((f) => f.parentFrame()?.parentFrame() === p.page.mainFrame());
+    // A template's frame is the child of a wrapper frame in a slot, which is the child of the player; the spare template
+    // frame (#232) is a wrapper outside the slots.
+    const inSlot = async (f: Frame) =>
+      f.parentFrame()?.parentFrame() === p.page.mainFrame() &&
+      (await (await f.parentFrame()!.frameElement()).evaluate((e) => e instanceof Element && !!e.closest('.slot')));
+    const frames = p.page.frames();
+    const slotted = await Promise.all(frames.map(inSlot));
+    const templates = frames.filter((_, i) => slotted[i]);
     expect(templates.length).toBeGreaterThan(0);
     // DevTools makes a target of type "iframe" only for a frame in another renderer process
     // (IsolateSandboxedIframes); a frame that shares the player's process has none.
     const cdp = await p.page.context().newCDPSession(p.page);
     const { targetInfos } = await cdp.send('Target.getTargets');
     const outOfProcess = targetInfos.filter((t) => t.type === 'iframe' && t.url === 'about:srcdoc');
-    expect(outOfProcess.length).toBe(templates.length);
+    // Each template's, and the spare's.
+    expect(outOfProcess.length).toBe(templates.length + 1);
   });
 });

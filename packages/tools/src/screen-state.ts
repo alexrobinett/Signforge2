@@ -72,7 +72,7 @@ export interface ShouldBeShowing {
   /** Whether a takeover plays it. */
   takeover: boolean;
   /** The playlist's first spot: the loop's position on the screen is not known here. */
-  spot: { id: string; name: string; kind: Spot['kind']; template: string | null; image: string | null } | null;
+  spot: { id: string; name: string; kind: Spot['kind']; template: string | null; templateName: string | null; image: string | null } | null;
   /** How many spots the playlist plays. */
   spots: number;
 }
@@ -101,7 +101,14 @@ export function shouldBeShowing(m: ScreenManifest, now: number, override?: Displ
     playlist: { id: playlist.id, name: playlist.name },
     takeover: activeTakeover(m, at) !== undefined,
     spot: first
-      ? { id: first.id, name: first.name, kind: first.kind, template: first.kind === 'template' ? first.template : null, image: imageOf(first, m) }
+      ? {
+          id: first.id,
+          name: first.name,
+          kind: first.kind,
+          template: first.kind === 'template' ? first.template : null,
+          templateName: first.kind === 'template' ? (m.templates[first.template]?.manifest.name ?? null) : null,
+          image: imageOf(first, m),
+        }
       : null,
     spots: playlist.items.length,
   };

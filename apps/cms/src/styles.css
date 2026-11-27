@@ -68,6 +68,8 @@
   --status-needs-you-muted: #fee4e2;
   /* Who did it, in the audit log (canvas board SettingsAudit): agents and screens apart from people. */
   --actor-agent: #5b2a86;
+  /* The agent's pill and banner (#263): what it filled, apart from what a person typed. */
+  --actor-agent-muted: #f3ebfa;
   --actor-device: #2b4c7e;
 
   /* Rollout bars and play counts; every bar carries a text legend. */
@@ -81,6 +83,35 @@
   --org-saturation: 60%;
   --org-lightness: 29%;
   --org-foreground: #ffffff;
+  /* An editor's height: the viewport under the page's header and the editor's own (#363), which wraps to two
+     lines from 1024 px; its stage column fills it, its status line inside the window before any scroll. */
+  --editor-height: calc(100dvh - 10rem);
+
+  /* A screen's dark surround (the editors' stage #363, screen and asset thumbnails), the same in both
+     themes: .dark does not set them. */
+  --stage: #18181a;
+  --stage-foreground: #e8e8e8;
+  --stage-muted-foreground: #c8c8c8;
+  --stage-asleep: #a5b4fc;
+  --stage-control: #2a2a2d;
+  --stage-edge: #3a3a3d;
+  --stage-ring: #8fa3ff;
+  --stage-warning: #fdb022;
+
+  /* Toasts: dark in both themes, the action a light button on it. */
+  --toast: #101828;
+  --toast-foreground: #ffffff;
+  --toast-muted-foreground: #d0d5dd;
+  --toast-edge: #101828;
+  --toast-link: #c7d2fe;
+  --toast-action: #ffffff;
+  --toast-action-foreground: #101828;
+
+  /* What a screen shows around a spot that does not fill it, behind every preview: black, as a panel is. The same in
+     both themes. */
+  --letterbox: #000000;
+  /* The page behind a dialog, a sheet or the command menu, dimmed. */
+  --scrim: rgb(0 0 0 / 0.5);
   color-scheme: light;
 }
 
@@ -132,6 +163,7 @@
   --status-needs-you-foreground: #fca5a5;
   --status-needs-you-muted: #3f0d0d;
   --actor-agent: #c9a7eb;
+  --actor-agent-muted: #2a1a3a;
   --actor-device: #9db8e8;
 
   --chart-1: #7b93ff;
@@ -143,6 +175,16 @@
   --org-saturation: 60%;
   --org-lightness: 66%;
   --org-foreground: #0b0d12;
+
+  --toast: #262b36;
+  --toast-foreground: #ffffff;
+  --toast-muted-foreground: #d0d5dd;
+  --toast-edge: #3a4150;
+  --toast-link: #c7d2fe;
+  --toast-action: #ffffff;
+  --toast-action-foreground: #101828;
+
+  --scrim: rgb(0 0 0 / 0.7);
   color-scheme: dark;
 }
 
@@ -195,12 +237,52 @@
   --color-status-needs-you-foreground: var(--status-needs-you-foreground);
   --color-status-needs-you-muted: var(--status-needs-you-muted);
   --color-actor-agent: var(--actor-agent);
+  --color-actor-agent-muted: var(--actor-agent-muted);
   --color-actor-device: var(--actor-device);
+  --color-stage: var(--stage);
+  --color-stage-foreground: var(--stage-foreground);
+  --color-stage-muted-foreground: var(--stage-muted-foreground);
+  --color-stage-asleep: var(--stage-asleep);
+  --color-stage-control: var(--stage-control);
+  --color-stage-edge: var(--stage-edge);
+  --color-stage-ring: var(--stage-ring);
+  --color-stage-warning: var(--stage-warning);
+  --color-toast: var(--toast);
+  --color-toast-foreground: var(--toast-foreground);
+  --color-toast-muted-foreground: var(--toast-muted-foreground);
+  --color-toast-edge: var(--toast-edge);
+  --color-toast-link: var(--toast-link);
+  --color-toast-action: var(--toast-action);
+  --color-toast-action-foreground: var(--toast-action-foreground);
+  --color-letterbox: var(--letterbox);
+  --color-scrim: var(--scrim);
+  /* Type steps between Tailwind's (#372): row and meta lines, large controls and lead text, and the
+     smallest labels on a thumbnail. Every size in the CMS is one of these or Tailwind's own. */
+  --text-2xs: 0.6875rem;
+  --text-meta: 0.8125rem;
+  --text-md: 0.9375rem;
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  /* Between pages (#376, components/pending.tsx): the bar appears past 300 ms, then slides. */
+  --animate-pending-appear: pending-appear 0s 300ms forwards;
+  --animate-pending-slide: pending-slide 1.2s ease-in-out infinite;
+  @keyframes pending-appear {
+    to {
+      opacity: 1;
+      visibility: visible;
+    }
+  }
+  @keyframes pending-slide {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(250%);
+    }
+  }
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -214,12 +296,29 @@
   html {
     -webkit-text-size-adjust: 100%;
   }
+  /* A field focused by Tab or Shift+Tab scrolls clear of an editor's save alert stuck at the top (#479): room for the
+     alert as it is measured (--save-alert-height, SaveAlert; none while it scrolls with the form, #495), and under 64rem
+     for the phone's top bar above it too, 3.5rem (WCAG 2.4.11, review of #485). */
+  html:has([data-save-alert]) {
+    scroll-padding-top: calc(var(--save-alert-height, 0px) + 0.5rem);
+  }
+  @media (width < 64rem) {
+    html:has([data-save-alert]) {
+      scroll-padding-top: calc(3.5rem + var(--save-alert-height, 0px) + 0.5rem);
+    }
+  }
   /* A fieldset shrinks like any box (browsers default it to its content's width), so a row of chips can wrap. */
   fieldset {
     min-width: 0;
   }
   body {
     @apply bg-background text-foreground antialiased;
+  }
+  /* A title that wraps does so in lines of even length, not one word left alone on the last (#382). */
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
   }
   @media (prefers-reduced-motion: reduce) {
     *,

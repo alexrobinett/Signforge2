@@ -5,37 +5,29 @@
  */
 import { foldValue, systemLabels } from '@signforge/compiler/selector';
 import { LABEL_LIMITS } from '@signforge/db';
-import { z } from 'zod';
-import { id, labelKey, labels } from './fields';
+import { labelsByScreen, ruleOf } from './memberships';
 import { outputs } from './outputs';
-import { page, pageInput } from './paging';
+import { page } from './paging';
 import { defineTool, ToolError } from './tool';
+import { inputs } from './inputs';
 
 type LabelRow = { screenId: string; key: string; value: string };
 
-/** Each screen's labels, by screen id: a screen without any is absent. */
-export function labelsByScreen(rows: readonly LabelRow[]): Map<string, Record<string, string>> {
-  const by = new Map<string, Record<string, string>>();
-  for (const r of rows) by.set(r.screenId, { ...by.get(r.screenId), [r.key]: r.value });
-  return by;
-}
-
-/** A merge into screens' labels. */
-type Change = { set: Readonly<Record<string, string>>; remove: readonly string[] };
+/** A merge into one screen's labels. */
+type Change = { screenId: string; set: Readonly<Record<string, string>>; remove: readonly string[] };
 
 /**
- * Why a change would give a screen more labels, or the org more keys, than `LABEL_LIMITS`, from
- * the org's labels as read (`rows`); undefined if it would not. The batch checks again as it
- * commits (`labels.stage.update`), in case another change lands in between.
+ * Why changes would give a screen more labels, or the org more keys, than `LABEL_LIMITS`, from the org's labels as
+ * read (`rows`); undefined if they would not. The batch checks again as it commits (`labels.stage.update` and
+ * `each`), in case another change lands in between.
  */
-export function overLimit(rows: readonly LabelRow[], screenIds: readonly string[], change: Change): ToolError | undefined {
-  const targets = new Set(screenIds);
-  const removed = new Set(change.remove);
+export function overLimit(rows: readonly LabelRow[], changes: readonly Change[]): ToolError | undefined {
+  const by = new Map(changes.map((c) => [c.screenId, c]));
   const keysOf = new Map<string, Set<string>>();
   const add = (screenId: string, key: string) => keysOf.set(screenId, (keysOf.get(screenId) ?? new Set()).add(key));
-  for (const r of rows) if (!(targets.has(r.screenId) && removed.has(r.key))) add(r.screenId, r.key);
-  for (const screenId of targets) for (const key of Object.keys(change.set)) add(screenId, key);
-  const crowded = [...targets].filter((s) => (keysOf.get(s)?.size ?? 0) > LABEL_LIMITS.perScreen);
+  for (const r of rows) if (!by.get(r.screenId)?.remove.includes(r.key)) add(r.screenId, r.key);
+  for (const c of changes) for (const key of Object.keys(c.set)) add(c.screenId, key);
+  const crowded = [...by.keys()].filter((s) => (keysOf.get(s)?.size ?? 0) > LABEL_LIMITS.perScreen);
   if (crowded.length)
     return new ToolError('conflict', `a screen has at most ${LABEL_LIMITS.perScreen} labels; ${crowded.length} of these would have more`, {
       screenIds: crowded,
@@ -49,40 +41,71 @@ export function overLimit(rows: readonly LabelRow[], screenIds: readonly string[
   return undefined;
 }
 
-const change = z
-  .object({
-    screenIds: z.array(id('screen')).min(1).max(1000).describe('The screens to change, up to 1000'),
-    set: labels.default({}).describe('Labels to set, by key: a key a screen has takes the new value'),
-    remove: z.array(labelKey).default([]).describe('Keys to remove; a key a screen does not have is ignored'),
-  })
-  .refine((v) => Object.keys(v.set).length > 0 || v.remove.length > 0, 'give labels to set or keys to remove')
-  .refine((v) => !v.remove.some((k) => Object.hasOwn(v.set, k)), 'a key cannot be both set and removed');
+/** One change for each of `screenIds`, as `update_screen_labels` makes it. */
+const forEach = (screenIds: readonly string[], change: { set: Readonly<Record<string, string>>; remove: readonly string[] }) =>
+  screenIds.map((screenId) => ({ screenId, ...change }));
 
 const updateScreenLabels = defineTool({
   name: 'update_screen_labels',
-  description: `Set and remove labels on screens, as a merge: each key in set takes that value on every screen given, each key in remove goes, and the screens' other labels stay, so it is safe alongside other changes. Values are stored as typed and matched case-insensitively. A screen has at most ${LABEL_LIMITS.perScreen} labels, and an organization's screens at most ${LABEL_LIMITS.keys} keys between them (conflict past either). orientation, kind, timezone and locale are system labels, from the screen's settings, and cannot be set. A screen picks a label change up with the next publish. Returns { screens: [{ id, labels }] }, ordered by id.`,
+  description: `Set and remove labels on screens, as a merge: each key in set takes its value on every screen given, each in remove goes, the others stay. Values are stored as typed and matched case-insensitively. At most ${LABEL_LIMITS.perScreen} labels a screen and ${LABEL_LIMITS.keys} keys an organization (conflict past either). orientation, kind, timezone and locale are system labels, from the screen's settings. Screens get a change at the next publish. Returns { screens: [{ id, labels }], groupsUsingRemoved }: the smart groups whose rule names a removed key.`,
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
-  input: change,
+  input: inputs.update_screen_labels,
   output: outputs.update_screen_labels,
   example: { screenIds: ['scr_example'], set: { region: 'north', type: 'drive-thru' }, remove: ['legacy'] },
   target: (input) => (new Set(input.screenIds).size === 1 ? { kind: 'screen', id: input.screenIds[0]! } : undefined),
   handler: async ({ org, input, write }) => {
     const screenIds = [...new Set(input.screenIds)].toSorted();
     const rows = await org.screens.labels.list();
-    const over = overLimit(rows, screenIds, input);
+    const over = overLimit(rows, forEach(screenIds, input));
     if (over) throw over;
     write(await org.screens.labels.stage.update(screenIds, input));
     const before = labelsByScreen(rows);
+    // A removed key a smart group's rule names: allowed, and said, as that group may now match fewer screens (#186).
+    const rules = input.remove.length ? (await org.screenGroups.list()).filter((g) => ruleOf(g)?.all.some((t) => input.remove.includes(t.key))) : [];
     return {
+      groupsUsingRemoved: rules.map((g) => ({ id: g.id, name: g.name })).toSorted((a, b) => (a.id < b.id ? -1 : 1)),
       screens: screenIds.map((s) => {
         const kept = Object.entries(before.get(s) ?? {}).filter(([k]) => !input.remove.includes(k));
         return { id: s, labels: { ...Object.fromEntries(kept), ...input.set } };
       }),
     };
   },
-  refuseFailedCommit: async ({ org, input }) => overLimit(await org.screens.labels.list(), input.screenIds, input),
+  refuseFailedCommit: async ({ org, input }) => overLimit(await org.screens.labels.list(), forEach([...new Set(input.screenIds)], input)),
+});
+
+const importScreenLabels = defineTool({
+  name: 'import_screen_labels',
+  description: `A label import (a CSV file in the CMS, #188): each screen its own merge, set and removed as update_screen_labels does, all written or none. Up to 1000 screens. For people only. Returns { screens: [{ id, labels }] }, ordered by id.`,
+  scope: 'screens:manage',
+  minRole: 'editor',
+  mutates: true,
+  // A file of a fleet's labels is a person's to send: an agent labels with update_screen_labels.
+  people: true,
+  input: inputs.import_screen_labels,
+  output: outputs.import_screen_labels,
+  example: { screens: [{ screenId: 'scr_example', set: { region: 'north' }, remove: ['legacy'] }] },
+  // As update_screen_labels: one screen's import is in its events (review of #612).
+  target: (input) => (input.screens.length === 1 ? { kind: 'screen', id: input.screens[0]!.screenId } : undefined),
+  // The row's input lists the first 100 screens, as every audit row cuts a list; the count says how many it changed.
+  auditDetail: (output) => ({ screenCount: output.screens.length }),
+  handler: async ({ org, input, write }) => {
+    const rows = await org.screens.labels.list();
+    const over = overLimit(rows, input.screens);
+    if (over) throw over;
+    write(await org.screens.labels.stage.each(input.screens));
+    const before = labelsByScreen(rows);
+    return {
+      screens: input.screens
+        .map((c) => {
+          const kept = Object.entries(before.get(c.screenId) ?? {}).filter(([k]) => !c.remove.includes(k));
+          return { id: c.screenId, labels: { ...Object.fromEntries(kept), ...c.set } };
+        })
+        .toSorted((a, b) => (a.id < b.id ? -1 : 1)),
+    };
+  },
+  refuseFailedCommit: async ({ org, input }) => overLimit(await org.screens.labels.list(), input.screens),
 });
 
 /** The spelling a value is shown in: the one most screens have, then the first in code-unit order. */
@@ -95,7 +118,7 @@ const listLabelKeys = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_label_keys,
   output: outputs.list_label_keys,
   example: {},
   handler: async ({ org, input }) => {
@@ -121,4 +144,4 @@ const listLabelKeys = defineTool({
   },
 });
 
-export const labelTools = [updateScreenLabels, listLabelKeys];
+export const labelTools = [updateScreenLabels, listLabelKeys, importScreenLabels];

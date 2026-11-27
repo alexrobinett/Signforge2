@@ -9,7 +9,7 @@ import { runInDurableObject } from 'cloudflare:test';
 import { env, exports } from 'cloudflare:workers';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { mintCredential } from '../src/device/credential';
-import { HOLDER_HEADER, ScreenObject, type SocketHolder } from '../src/device/screen-object';
+import { HOLDER_HEADER, D1_LIMIT_MS, ScreenObject, type SocketHolder } from '../src/device/screen-object';
 import { screenNotifier, screenObject } from '../src/device/screens';
 import { issueTicket, verifyTicket } from '../src/device/ticket';
 import { manifestKey } from '../src/r2';
@@ -217,13 +217,9 @@ describe('GET /v1/device/ws', () => {
 
   it('carries identify, restart and a display override from the CMS to the screen at once', async () => {
     const s = await connect(((await (await sync(a.credential)).json()) as SyncResponse).socketTicket);
-    for (const [tool, input] of [
-      ['identify_screen', {}],
-      ['restart_screen', {}],
-      ['set_display_override', { state: 'off' }],
-    ] as const) {
-      const r = await dispatch(registry, tool, { screenId: a.seed.screen, ...input }, caller(a, 'editor'));
-      expect(r.ok, tool).toBe(true);
+    for (const command of ['identify', 'restart', 'display_off'] as const) {
+      const r = await dispatch(registry, 'screen_command', { screenId: a.seed.screen, command }, caller(a, 'editor'));
+      expect(r.ok, command).toBe(true);
     }
     const commands = (await s.received(3)).flatMap((m) => (typeof m === 'object' && m.type === 'command' ? [m.command] : []));
     expect(commands).toEqual([
@@ -250,7 +246,7 @@ describe('GET /v1/device/ws', () => {
     expect(await reported(a)).toBe(M1);
     await sync(a.credential, { ...syncBody(), manifest: { active: M1, filesMissing: 0 } });
     expect(await a.seed.scope.screens.get(a.seed.screen)).toMatchObject({ rowVersion: before.rowVersion, updatedAt: before.updatedAt });
-    const r = await dispatch(registry, 'rename_screen', { screenId: a.seed.screen, name: 'Lobby', ifVersion: before.rowVersion }, caller(a, 'editor'));
+    const r = await dispatch(registry, 'update_screen', { screenId: a.seed.screen, name: 'Lobby', ifVersion: before.rowVersion }, caller(a, 'editor'));
     expect(r.ok).toBe(true);
     s.ws.close(1000);
   });
@@ -279,7 +275,7 @@ describe('GET /v1/device/ws', () => {
     await dispatch(registry, 'publish_manifest_to_screen', { screenId: b.seed.screen, manifestId: M2 }, caller(b));
     expect(await sb.received(1)).toEqual([{ type: 'manifest', id: M2 }]);
     // A dispatch returns once the object has sent, so whatever the publish sent A's socket comes before this.
-    await dispatch(registry, 'identify_screen', { screenId: a.seed.screen }, caller(a, 'editor'));
+    await dispatch(registry, 'screen_command', { screenId: a.seed.screen, command: 'identify' }, caller(a, 'editor'));
     expect(await sa.received(1)).toEqual([{ type: 'command', command: { type: 'identify', name: expect.any(String), seconds: 10 } }]);
     sa.ws.close(1000);
     sb.ws.close(1000);
@@ -317,7 +313,7 @@ describe('revoking a credential whose socket is open', () => {
     expect((await revoke(c, unreachable(c))).ok).toBe(true);
     await stillOpen(s);
 
-    expect((await dispatch(registry, 'identify_screen', { screenId: c.seed.screen }, caller(c, 'editor'))).ok).toBe(true);
+    expect((await dispatch(registry, 'screen_command', { screenId: c.seed.screen, command: 'identify' }, caller(c, 'editor'))).ok).toBe(true);
     await s.closed;
     expect(s.messages).toEqual(['pong', { type: 'revoked' }]);
   });
@@ -446,6 +442,220 @@ describe('the order of reports (gh-44)', () => {
     vi.setSystemTime(NOW + 1000);
     await syncObserved(c, M1, NOW + 1000);
     expect(await reported(c)).toBe(M1);
+    s.ws.close(1000);
+  });
+
+  /**
+   * Hold the next read of the screen's live credentials until `release`, at the D1 binding, which the
+   * object shares with the tests' isolate. `log` has a `read` for each credentials read the object
+   * starts; `finished` settles once the held read has run, after `release`.
+   */
+  function holdCredentialRead() {
+    const log: string[] = [];
+    const held = Promise.withResolvers<void>();
+    const finished = Promise.withResolvers<void>();
+    // Drizzle prepares, binds and runs a select in one go, so the statement run after the credentials
+    // query is prepared is that read.
+    let armed = false;
+    let holding = true;
+    const d1 = Object.getPrototypeOf(env.DB) as D1Database;
+    const prepare = d1.prepare;
+    const prepared = vi.spyOn(d1, 'prepare').mockImplementation(function (this: D1Database, query) {
+      if (query.includes('"screen_credentials"')) {
+        log.push('read');
+        armed = holding;
+        holding = false;
+      }
+      return prepare.call(this, query);
+    });
+    const statement = Object.getPrototypeOf(prepare.call(env.DB, 'select 1')) as D1PreparedStatement;
+    const raw = statement.raw;
+    const ran = vi.spyOn(statement, 'raw').mockImplementation(async function (this: D1PreparedStatement, ...args) {
+      if (!armed) return raw.apply(this, args);
+      armed = false;
+      await held.promise;
+      try {
+        return await raw.apply(this, args);
+      } finally {
+        finished.resolve();
+      }
+    });
+    onTestFinished(() => {
+      prepared.mockRestore();
+      ran.mockRestore();
+    });
+    return { log, release: () => held.resolve(), finished: finished.promise };
+  }
+
+  /** The handling of the next `n` messages the screen's object takes from a socket, once it has taken them all. */
+  function nextTaken(n: number) {
+    const from = taken.length;
+    return async () => {
+      while (taken.length < from + n) await new Promise<void>((r) => takenWake.push(r));
+      return taken.slice(from, from + n);
+    };
+  }
+
+  it("takes a socket's messages one at a time, so reports without a time land in the order sent (gh-177)", async () => {
+    const c = await setUp('ws-l');
+    const s = await connect(await ticketFor(c));
+    // The first message's read is held until the object has taken the second message.
+    const hold = holdCredentialRead();
+    const calls = nextTaken(2);
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      const done = (await calls()).map((t) => t.done.then(() => void hold.log.push('done')));
+      hold.release();
+      await Promise.all(done);
+    });
+    expect(hold.log).toEqual(['read', 'done', 'read', 'done']);
+    expect(await reported(c)).toBe(M2);
+    s.ws.close(1000);
+  });
+
+  it('drops a message that is not a valid applied report at once, without waiting behind one that awaits D1 (#338)', async () => {
+    const c = await setUp('ws-m');
+    const s = await connect(await ticketFor(c));
+    const hold = holdCredentialRead();
+    const calls = nextTaken(5);
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    s.ws.send('not json');
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: 'not-a-manifest-id' }));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M2, observedAt: 'yesterday' }));
+    s.ws.send(new Uint8Array([1, 2, 3]));
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      const [report, ...refused] = await calls();
+      // Each is done while the report before it is still held: before #338 they waited behind it.
+      await Promise.all(refused.map((t) => t.done));
+      hold.release();
+      await report!.done;
+    });
+    expect(hold.log).toEqual(['read']);
+    expect(await reported(c)).toBe(M1);
+    s.ws.close(1000);
+  });
+
+  it('lets the next report through once one has waited on D1 for D1_LIMIT_MS, and never writes the late one (#338)', async () => {
+    const c = await setUp('ws-n');
+    const s = await connect(await ticketFor(c));
+    const hold = holdCredentialRead();
+    // Only the object's limit runs on these: D1 and the sockets keep real time.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const calls = nextTaken(2);
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      const [hung, next] = await calls();
+      // The first report's read never answers until released below.
+      vi.advanceTimersByTime(D1_LIMIT_MS);
+      await expect(hung!.done).rejects.toThrow(`waited on D1 for ${D1_LIMIT_MS} ms`);
+      await next!.done;
+    });
+    expect(await reported(c)).toBe(M2);
+    // The hung read answers at last: the report it was for is given up on, so it writes nothing.
+    vi.useRealTimers();
+    hold.release();
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      await hold.finished;
+      // What the read's answer runs is microtasks; a task after them sees whatever it wrote.
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+    expect(await reported(c)).toBe(M2);
+    s.ws.close(1000);
+  });
+
+  it('holds one report behind the one being written, the latest, however many arrive (#519)', async () => {
+    const c = await setUp('ws-o');
+    const s = await connect(await ticketFor(c));
+    const hold = holdCredentialRead();
+    const calls = nextTaken(4);
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      const done = (await calls()).map((t) => t.done);
+      hold.release();
+      await Promise.all(done);
+    });
+    // The first, then only the last of the three that waited behind it: two reads, not four.
+    expect(hold.log).toEqual(['read', 'read']);
+    expect(await reported(c)).toBe(M2);
+    s.ws.close(1000);
+  });
+
+  /** Inside the screen's object: until the held credentials read has started. */
+  const readStarted = async (hold: { log: string[] }) => {
+    while (!hold.log.length) await new Promise<void>((r) => setTimeout(r, 0));
+  };
+
+  it('orders a socket report by when it reached the object, so an untimed sync started after it wins (review of #533)', async () => {
+    const c = await setUp('ws-q');
+    const s = await connect(await ticketFor(c));
+    const hold = holdCredentialRead();
+    const calls = nextTaken(1);
+    s.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      await calls();
+      await readStarted(hold);
+    });
+    // A second after the report arrived, while its credentials read waits, an untimed sync says M2.
+    vi.setSystemTime(NOW + 1000);
+    await sync(c.credential, { ...syncBody(), manifest: { active: M2, filesMissing: 0 }, clock: { offsetMs: 0, trusted: false } });
+    expect(await reported(c)).toBe(M2);
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      const [report] = await calls();
+      hold.release();
+      await report!.done;
+    });
+    expect(await reported(c)).toBe(M2);
+    s.ws.close(1000);
+  });
+
+  it("keeps a live socket's waiting report when a revoked socket of the same screen reports after it (review of #533)", async () => {
+    const c = await setUp('ws-r');
+    const { credential: other, secretHash } = await mintCredential(c.seed.screen);
+    const otherRow = await c.seed.scope.screens.credentials.insert({ screenId: c.seed.screen, secretHash });
+    const live = await connect(await ticketFor(c));
+    const revoked = await connect(await ticketFor({ ...c, credential: other, credentialId: otherRow.id }));
+    // Revoked in D1, its notice lost: the object learns it only at that socket's write.
+    await env.DB.prepare('UPDATE screen_credentials SET revoked_at = ? WHERE id = ?').bind(NOW, otherRow.id).run();
+    const hold = holdCredentialRead();
+    const calls = nextTaken(3);
+    live.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
+    live.ws.send(JSON.stringify({ type: 'applied', manifest: M1 }));
+    await runInDurableObject(screenObject(env, c.seed.screen), () => readStarted(hold));
+    revoked.ws.send(JSON.stringify({ type: 'applied', manifest: M2 }));
+    await runInDurableObject(screenObject(env, c.seed.screen), async () => {
+      const done = (await calls()).map((t) => t.done);
+      hold.release();
+      await Promise.all(done);
+    });
+    // The live socket's latest is written; the revoked one's is dropped and its socket closed.
+    expect(await reported(c)).toBe(M1);
+    expect(await revoked.closed).toBe(4001);
+    live.ws.close(1000);
+  });
+
+  it('gives up on a send whose credentials read waits D1_LIMIT_MS, and sends nothing for it (#519)', async () => {
+    const c = await setUp('ws-p');
+    const s = await connect(await ticketFor(c));
+    const hold = holdCredentialRead();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    await runInDurableObject(screenObject(env, c.seed.screen), async (object: ScreenObject) => {
+      const sent = object.manifest(M1);
+      vi.advanceTimersByTime(D1_LIMIT_MS);
+      await expect(sent).rejects.toThrow(`send waited on D1 for ${D1_LIMIT_MS} ms`);
+    });
+    vi.useRealTimers();
+    hold.release();
+    await runInDurableObject(screenObject(env, c.seed.screen), async (object: ScreenObject) => {
+      await hold.finished;
+      // A send after it arrives after anything the given-up one could still send.
+      await object.manifest(M2);
+    });
+    expect(await s.received(1)).toEqual([{ type: 'manifest', id: M2 }]);
     s.ws.close(1000);
   });
 });

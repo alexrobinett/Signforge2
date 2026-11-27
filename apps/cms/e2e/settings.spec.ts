@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
-import { axe, createOrg, createOrgFromAccountMenu, disabledOnServer, holdFirst, hydrated, orgSwitcher, shots, signInAs, tool } from './helpers';
-import { API_LOG } from './servers';
+import { axe, createOrg, createOrgFromAccountMenu, disabledOnServer, holdFirst, hydrated, orgSwitcher, shots, signInAs, tool, toolResponse } from './helpers';
+import { ANTHROPIC_STUB_KEY, ANTHROPIC_STUB_MODELS, API_LOG, ENDPOINT_STUB_KEY, ENDPOINT_STUB_MODELS } from './servers';
 
 /** This spec's own client addresses, so its sign-ins have their own rate limits. */
 const OWNER_ADDRESS = '192.0.2.31';
@@ -53,25 +53,28 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   const editorEmail = `e2e-settings-editor-${stamp}@example.com`;
 
   await signInAs(page, ownerEmail, OWNER_ADDRESS);
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Library', OWNER_ADDRESS);
 
   // General: from the sidebar, /settings opens General.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Settings' }).click();
   await expect(page).toHaveURL(/\/settings\/general$/);
   await hydrated(page);
-  await expect(settingsNav(page).getByText('Brand kits')).toBeVisible();
-  await page.getByLabel('Name', { exact: true }).fill('Northside Market Co');
+  // Brand kits are a section of their own, not a page of Settings (#381).
+  await expect(settingsNav(page).getByText('General')).toBeVisible();
+  await expect(settingsNav(page).getByText('Brand kits')).toHaveCount(0);
+  await page.getByLabel('Name', { exact: true }).fill('Northside Library Co');
   await page.getByLabel('Time zone').selectOption('Europe/London');
   await page.getByLabel('Locale').selectOption('en-GB');
   await page.getByText('Set hours').click();
   await expect(page.getByLabel('Keep entries for')).toHaveValue('365');
   await page.getByLabel('Keep entries for').fill('90');
+  // Each change saves itself (#366): the choices at once, a typed field once it is left.
+  await page.getByLabel('Keep entries for').blur();
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
   await axe(page);
   await shots(page, '40-settings-general');
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Northside Market Co');
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Northside Library Co');
   await expect(page.getByLabel('Time zone')).toHaveValue('Europe/London');
   await expect(page.getByLabel('Locale')).toHaveValue('en-GB');
   await expect(page.getByLabel('Keep entries for')).toHaveValue('90');
@@ -84,10 +87,10 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(page).toHaveURL(/\/settings\/screens$/);
   await page.getByLabel('Alert after').fill('30');
   await page.getByLabel('From').fill('03:00');
+  await page.getByLabel('From').blur();
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
   await axe(page);
   await shots(page, '41-settings-screens');
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('Alert after')).toHaveValue('30');
   await expect(page.getByLabel('From')).toHaveValue('03:00');
@@ -95,16 +98,22 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   // An agent changes the threshold while the page is open; the person's save is refused, not
   // written over it, and a reload shows the agent's value. The page's own session stands in for it.
   await hydrated(page);
-  const agent = await page.request.post('/api/tools/update_org_settings', { data: { unreachableAfterMinutes: 45 } });
+  const agent = await toolResponse(page, 'update_org_settings', { unreachableAfterMinutes: 45 });
   expect(agent.status(), await agent.text()).toBe(200);
   await page.getByLabel('Alert after').fill('20');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  await page.getByLabel('Alert after').blur();
   await expect(page.getByText('This changed since you opened it.')).toBeVisible();
   await page.getByRole('button', { name: 'Reload' }).click();
   await expect(page.getByLabel('Alert after')).toHaveValue('45');
+  // A value it would refuse, left: marked there, and not sent (#366).
+  await page.getByLabel('Alert after').fill('2');
+  await page.getByLabel('Alert after').blur();
+  await expect(page.getByLabel('Alert after')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByLabel('Alert after')).toHaveAccessibleDescription(/A whole number of minutes, 5 to 1,440\./);
+  await expect(page.getByText('Not saved: fix the marked field')).toBeVisible();
   await page.getByLabel('Alert after').fill('30');
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await page.getByLabel('Alert after').blur();
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
 
   // Notifications: everyone hears when a screen goes offline.
   await settingsNav(page).getByRole('link', { name: 'Notifications' }).click();
@@ -114,8 +123,8 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(page.getByLabel('Slack for: A screen goes offline, and when it is back')).toBeDisabled();
   await page.getByLabel('Who hears: A screen goes offline, and when it is back').selectOption('everyone');
   await page.getByLabel('Email for: An agent is refused').uncheck();
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  // Each choice saved itself (#366); the form says so once the last is written, so a reload reads them.
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('Who hears: A screen goes offline, and when it is back')).toHaveValue('everyone');
   await expect(page.getByLabel('Email for: An agent is refused')).not.toBeChecked();
@@ -156,8 +165,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await hydrated(page);
   await page.getByLabel('Slack for: A screen goes offline, and when it is back').check();
   await page.getByLabel('Webhook for: A screen goes offline, and when it is back').check();
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
   await page.getByRole('button', { name: 'Email me a test' }).click();
   await expect(page.getByText('Test sent.')).toBeVisible();
   await expect(async () => {
@@ -199,7 +207,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   const invitee = await (await browser.newContext()).newPage();
   await signInAs(invitee, editorEmail, INVITEE_ADDRESS);
   await invitee.goto(await invitePathFor(editorEmail));
-  await expect(invitee.getByRole('heading', { name: 'Join Northside Market Co' })).toBeVisible();
+  await expect(invitee.getByRole('heading', { name: 'Join Northside Library Co' })).toBeVisible();
   await hydrated(invitee);
   await axe(invitee);
   await shots(invitee, '44-accept-invitation');
@@ -212,7 +220,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(invitee.getByLabel('Keep entries for')).toBeDisabled();
   await expect(invitee.getByLabel('Keep entries for')).toHaveValue('90');
   await expect(invitee.getByText('Only owners can change these.')).toBeVisible();
-  await expect(invitee.getByRole('button', { name: 'Save changes' })).toHaveCount(0);
+  await expect(invitee.getByText(/^Saved|Changes save as you make them/)).toHaveCount(0);
   await invitee.goto('/settings/members');
   await expect(invitee.getByRole('heading', { name: 'Members & roles' })).toBeVisible();
   await expect(invitee.getByRole('region', { name: 'People' })).toContainText(editorEmail);
@@ -220,6 +228,12 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await expect(invitee.getByRole('combobox')).toHaveCount(0);
   await expect(invitee.getByRole('button', { name: 'Remove' })).toHaveCount(0);
   await expect(invitee.getByLabel('Editors can publish')).toBeDisabled();
+  // AI model (#261): read, with no key form, while the org uses the demo model.
+  await invitee.goto('/settings/ai');
+  await expect(invitee.getByRole('heading', { name: 'AI model' })).toBeVisible();
+  await expect(invitee.getByText('Only an owner can add a key.')).toBeVisible();
+  await expect(invitee.getByLabel('API key', { exact: true })).toHaveCount(0);
+  await invitee.goto('/settings/members');
   await toTop(invitee.getByRole('region', { name: 'Who publishes' }));
   await axe(invitee);
   await shots(invitee, '49-settings-who-publishes-editor');
@@ -230,16 +244,18 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
     await hydrated(invitee);
     await invitee.keyboard.press('ControlOrMeta+k');
     const menu = invitee.getByRole('dialog', { name: 'Command menu' });
-    await expect(menu.getByRole('option', { name: /rename_screen/ })).toHaveCount(1);
-    await expect(menu.getByRole('option', { name: /publish_manifest_to_screen/ })).toHaveCount(count);
+    await expect(menu.getByRole('combobox', { name: 'Search pages, screens and actions' })).toBeFocused();
+    // A takeover is sent at once, so it is offered only to one who may publish (#253, #358); no raw tool is ever listed.
+    await invitee.keyboard.type('take over');
+    await expect(menu.getByRole('option', { name: 'Take over screens now…' })).toHaveCount(count);
+    await expect(menu.getByRole('option', { name: /update_screen|publish_manifest_to_screen/ })).toHaveCount(0);
     await invitee.keyboard.press('Escape');
   };
   await publishOption(1);
   await page.reload();
   await hydrated(page);
   await page.getByLabel('Editors can publish').uncheck();
-  await page.getByRole('region', { name: 'Who publishes' }).getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Who publishes' }).getByText(/^Saved \d/)).toBeVisible();
   await expect(
     page
       .getByRole('row', { name: /Publish to screens/ })
@@ -251,13 +267,13 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await axe(page);
   await shots(page, '48-settings-who-publishes');
   await publishOption(0);
-  const refused = await invitee.request.post('/api/tools/publish_manifest_to_screen', { data: { screenId: 'scr_none', manifestId: 'f'.repeat(64) } });
+  const refused = await toolResponse(invitee, 'publish_manifest_to_screen', { screenId: 'scr_none', manifestId: 'f'.repeat(64) });
   expect(refused.status()).toBe(403);
   expect(await refused.json()).toMatchObject({ error: 'forbidden', message: 'Only owners publish in this organization' });
   // Choosing what every screen plays goes with publishing (M3-18): no Publish and no Play on every screen.
-  const made = await invitee.request.post('/api/tools/create_playlist', { data: { name: 'Editor loop' } });
+  const made = await toolResponse(invitee, 'save_playlist', { name: 'Editor loop' });
   const { playlist } = await made.json();
-  expect((await invitee.request.post('/api/tools/set_default_playlist', { data: { playlistId: playlist.id } })).status()).toBe(403);
+  expect((await toolResponse(invitee, 'set_default_playlist', { playlistId: playlist.id })).status()).toBe(403);
   await invitee.goto(`/playlists/${playlist.id}`);
   await hydrated(invitee);
   await expect(invitee.getByRole('heading', { name: 'Editor loop', level: 1 })).toBeVisible();
@@ -266,8 +282,7 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.reload();
   await hydrated(page);
   await page.getByLabel('Editors can publish').check();
-  await page.getByRole('region', { name: 'Who publishes' }).getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Who publishes' }).getByText(/^Saved \d/)).toBeVisible();
   await publishOption(1);
 
   // The owner makes them a viewer, then removes them.
@@ -286,8 +301,10 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await page.getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Your account' }).click();
   await hydrated(page);
   await page.getByLabel('Name', { exact: true }).fill('Maria Okafor');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  // Saved once the field is left (#366).
+  const named = page.waitForResponse((r) => r.url().includes('/api/auth/update-user'));
+  await page.getByLabel('Name', { exact: true }).blur();
+  expect((await named).status()).toBe(200);
   await expect(page.getByText('This browser')).toBeVisible();
   await page.getByText('Dark', { exact: true }).click();
   await expect(page.locator('html')).toHaveClass(/dark/);
@@ -300,8 +317,8 @@ test('an owner sets defaults, alerts and members; an invited editor joins and ca
   await hydrated(page);
   await axe(page);
   await shots(page, '46-settings-members-phone');
+  // Scrolled, not changed: the axe run above covered it.
   await toTop(page.getByRole('region', { name: 'Who publishes' }));
-  await axe(page);
   await shots(page, '50-settings-who-publishes-phone');
   await page.goto('/settings/notifications');
   await axe(page);
@@ -318,12 +335,11 @@ test('a role select or an invitation button keeps keyboard focus while its chang
 }) => {
   // A control disabled while its own action ran lost focus to the page (Chromium moves it to body),
   // so the next Tab started from the top. Each answer is held until the test lets it go.
-  test.setTimeout(120_000);
   const stamp = Date.now();
   const editorEmail = `e2e-settings-focus-editor-${stamp}@example.com`;
   const waitingEmail = `e2e-settings-focus-waiting-${stamp}@example.com`;
   await signInAs(page, `e2e-settings-focus-owner-${stamp}@example.com`, '192.0.2.37');
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Library', '192.0.2.37');
   await page.goto('/settings/members');
   await hydrated(page);
   await page.getByLabel('Emails, separated by commas').fill(`${editorEmail}, ${waitingEmail}`);
@@ -431,12 +447,28 @@ test('a role select or an invitation button keeps keyboard focus while its chang
   await expect(row).toHaveCount(0);
 });
 
+test('the last owner cannot step down: the members page says why, and they stay owner (#292)', async ({ page }) => {
+  const ownerEmail = `e2e-settings-last-owner-${Date.now()}@example.com`;
+  await signInAs(page, ownerEmail, '192.0.2.182');
+  await createOrg(page, 'Northside Library', '192.0.2.182');
+  await page.goto('/settings/members');
+  await hydrated(page);
+  const role = page.getByRole('region', { name: 'People' }).getByLabel(new RegExp(`Role for ${ownerEmail.split('@')[0]}`));
+  await expect(role).toBeEnabled();
+  await role.selectOption('editor');
+  await expect(page.getByRole('alert').filter({ hasText: /without an owner/ })).toBeVisible();
+  await expect(role).toHaveValue('owner');
+  await page.reload();
+  await hydrated(page);
+  await expect(role).toHaveValue('owner');
+});
+
 test("an edit typed while its save runs is kept: the next addresses to invite, and General's retention (review of #143, 4)", async ({ page }) => {
   // The invite form cleared itself once sent, and General remounted on the version its save made:
   // either wiped what was typed while the save ran.
   const stamp = Date.now();
   await signInAs(page, `e2e-settings-kept-${stamp}@example.com`, '192.0.2.39');
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Library', '192.0.2.39');
   await page.goto('/settings/members');
   await hydrated(page);
   const emails = page.getByLabel('Emails, separated by commas');
@@ -465,7 +497,7 @@ test("an edit typed while its save runs is kept: the next addresses to invite, a
   await expect(retention).toBeEnabled();
   await retention.fill('100');
   const saving = await holdFirst(page, '/api/tools/update_org_settings');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  await retention.blur();
   const saveAnswer = await saving.arrived;
   await retention.fill('120');
   // Someone else sets the time zone once this save is written, before the page reads again.
@@ -478,12 +510,11 @@ test("an edit typed while its save runs is kept: the next addresses to invite, a
   // (re-check of #143, 6); the retention typed meanwhile is kept.
   await expect(timezone).toHaveValue('Europe/London');
   await expect(retention).toHaveValue('120');
-  await expect(page.getByRole('button', { name: 'Save changes' })).not.toHaveAttribute('aria-disabled');
 
   // Saved again, it sends only the retention, on the version this page saved: the time zone set
   // since makes it a conflict, shown, never an overwrite of it (re-check of #143, 1).
   const sent = page.waitForRequest('**/api/tools/update_org_settings');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  await retention.blur();
   expect(Object.keys((await sent).postDataJSON()).sort()).toEqual(['auditRetentionDays', 'ifVersion']);
   await expect(page.getByRole('alert').filter({ hasText: 'This changed since you opened it.' })).toBeVisible();
   await page.getByRole('button', { name: 'Reload' }).click();
@@ -500,9 +531,8 @@ test('edits belong to the org they were made in: after a switch, a late answer f
 }) => {
   // Display hours edited while a General save ran in one org followed a switch, and the next org
   // saved them as its own.
-  test.setTimeout(90_000);
   await signInAs(page, `e2e-settings-orgs-${Date.now()}@example.com`, '192.0.2.47');
-  await createOrg(page, 'Alpha Market');
+  await createOrg(page, 'Alpha Market', '192.0.2.47');
   await createOrgFromAccountMenu(page, 'Beta Market');
   const switcher = orgSwitcher(page);
   await expect(switcher).toContainText('Beta Market');
@@ -520,7 +550,7 @@ test('edits belong to the org they were made in: after a switch, a late answer f
   await retention.fill('100');
   // Alpha's save is written; its answer is held on its way back.
   const saving = await holdFirst(page, '/api/tools/update_org_settings');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  await retention.blur();
   const saveAnswer = await saving.arrived;
   const written = await saveAnswer.fetch();
   await page.getByText('Set hours', { exact: true }).click();
@@ -532,9 +562,9 @@ test('edits belong to the org they were made in: after a switch, a late answer f
   await expect(retention).toHaveValue('365');
   await retention.fill('200');
   const sent = page.waitForRequest('**/api/tools/update_org_settings');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  await retention.blur();
   expect(Object.keys((await sent).postDataJSON()).sort()).toEqual(['auditRetentionDays', 'ifVersion']);
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
 
   await page.reload();
   await hydrated(page);
@@ -545,13 +575,13 @@ test('edits belong to the org they were made in: after a switch, a late answer f
   await expect(page.getByRole('radio', { name: 'Always on' })).toBeChecked();
 });
 
-test("an edit left on one settings page still saves after another page saved, and Reload on one keeps the other's (third re-check of #143)", async ({
+test("each settings page saves on the version the last save made, and a conflict's Reload drops only its own page's edit (third re-check of #143, #366)", async ({
   page,
 }) => {
   // The pages share one settings version. A save moved only its own edits to the version it made,
-  // so an edit left on General was refused as changed since, and Reload dropped every page's.
+  // so the next page's save was refused as changed since.
   await signInAs(page, `e2e-settings-pages-${Date.now()}@example.com`, '192.0.2.48');
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Library', '192.0.2.48');
   await page.goto('/settings/general');
   await hydrated(page);
   const retention = page.getByLabel('Keep entries for');
@@ -559,51 +589,38 @@ test("an edit left on one settings page still saves after another page saved, an
   await retention.fill('111');
   await expect(page.getByText('Unsaved changes')).toBeVisible();
 
-  // Screens & groups saves, its answer held, then From is edited and left.
+  // Leaving the field for Screens & groups saves it; that page's change then saves on the version it made.
+  const general = page.waitForRequest('**/api/tools/update_org_settings');
   await settingsNav(page).getByRole('link', { name: 'Screens & groups' }).click();
+  expect((await general).postDataJSON()).toMatchObject({ auditRetentionDays: 111 });
   const minutes = page.getByLabel('Alert after');
   await expect(minutes).toBeEnabled();
   await minutes.fill('17');
-  const saving = await holdFirst(page, '/api/tools/update_org_settings');
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  const saveAnswer = await saving.arrived;
-  expect(Object.keys(saveAnswer.request().postDataJSON()).sort()).toEqual(['ifVersion', 'unreachableAfterMinutes']);
-  await saveAnswer.continue();
-  await expect(page.getByRole('button', { name: 'Save changes' })).not.toHaveAttribute('aria-disabled');
-  await expect(page.getByText('Unsaved changes')).toBeHidden();
-  await page.getByLabel('From').fill('03:15');
-
-  // Back on General, the edit left there saves.
-  await settingsNav(page).getByRole('link', { name: 'General' }).click();
-  await expect(retention).toHaveValue('111');
-  await expect(page.getByText('Unsaved changes')).toBeVisible();
-  const sent = page.waitForRequest('**/api/tools/update_org_settings');
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  const request = await sent;
-  expect(request.postDataJSON()).toMatchObject({ auditRetentionDays: 111 });
-  expect((await request.response())?.status()).toBe(200);
-  await expect(page.getByText('Unsaved changes')).toBeHidden();
+  const screens = page.waitForRequest('**/api/tools/update_org_settings');
+  await minutes.blur();
+  expect(Object.keys((await screens).postDataJSON()).sort()).toEqual(['ifVersion', 'unreachableAfterMinutes']);
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
   await expect(page.getByRole('alert').filter({ hasText: 'This changed since you opened it.' })).toHaveCount(0);
 
-  // Someone else sets the time zone: General's next save is refused, and its Reload drops only
-  // General's edit. Screens & groups' From is kept.
+  // Someone else sets the time zone while General is open: its next save is refused, and its Reload drops only
+  // General's edit.
+  await settingsNav(page).getByRole('link', { name: 'General' }).click();
+  await expect(retention).toHaveValue('111');
   await tool(page, 'update_org_settings', { timezone: 'Europe/London' });
   await retention.fill('222');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  await retention.blur();
   await expect(page.getByRole('alert').filter({ hasText: 'This changed since you opened it.' })).toBeVisible();
   await page.getByRole('button', { name: 'Reload' }).click();
   await expect(retention).toHaveValue('111');
   await expect(page.getByLabel('Time zone')).toHaveValue('Europe/London');
   await settingsNav(page).getByRole('link', { name: 'Screens & groups' }).click();
-  await expect(page.getByLabel('From')).toHaveValue('03:15');
   await expect(minutes).toHaveValue('17');
-  await expect(page.getByText('Unsaved changes')).toBeVisible();
 });
 
 test('Keep it waits for a webhook removal that has been sent, and says so (review of #143, 5)', async ({ page }) => {
   // Keep it closed the confirmation while the removal it could no longer stop went on.
   await signInAs(page, `e2e-settings-keep-${Date.now()}@example.com`, '192.0.2.40');
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Library', '192.0.2.40');
   await page.goto('/settings/notifications');
   await hydrated(page);
   await expect(page.getByLabel('Webhook URL', { exact: true })).toBeEnabled();
@@ -634,9 +651,9 @@ test('Keep it waits for a webhook removal that has been sent, and says so (revie
   await expect(retention).toBeEnabled();
   await retention.fill('95');
   const sent = page.waitForRequest('**/api/tools/update_org_settings');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  await retention.blur();
   await sent;
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
   await removeAnswer.continue();
   await expect(page.getByText('Webhook removed')).toBeVisible();
   await settingsNav(page).getByRole('link', { name: 'Notifications' }).click();
@@ -646,7 +663,7 @@ test('Keep it waits for a webhook removal that has been sent, and says so (revie
 test("a refused sign-out of another session says why, on that session's row (review of #143, 6)", async ({ page, browser }) => {
   const email = `e2e-settings-sessions-${Date.now()}@example.com`;
   await signInAs(page, email, '192.0.2.45');
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Library', '192.0.2.45');
   const elsewhere = await browser.newContext();
   await signInAs(await elsewhere.newPage(), email, '192.0.2.46');
   await page.goto('/account');
@@ -677,16 +694,16 @@ test("settings fields that save or show at once, or hold a URL or an email, are 
   // in between was the browser's own submit.
   const email = `e2e-settings-server-${Date.now()}@example.com`;
   await signInAs(page, email, '192.0.2.35');
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Library', '192.0.2.35');
   const pages: [path: string, names: string[]][] = [
-    ['/settings/general', ['Name', 'Always on', 'Set hours', 'Save changes']],
-    ['/settings/screens', ['From', 'Alert after', 'Save changes']],
-    ['/settings/members', ['Emails, separated by commas', 'Send invites', `Role for ${email}`, 'Save']],
+    ['/settings/general', ['Name', 'Always on', 'Set hours']],
+    ['/settings/screens', ['From', 'Alert after']],
+    ['/settings/members', ['Emails, separated by commas', 'Send invites', `Role for ${email}`]],
     [
       '/settings/notifications',
       ['Slack incoming-webhook URL', 'Connect Slack', 'Webhook URL', 'Add webhook', 'Email for: A screen goes offline, and when it is back'],
     ],
-    ['/account', ['Name', 'Save', 'Light', 'Dark', 'System']],
+    ['/account', ['Name', 'Light', 'Dark', 'System']],
   ];
   for (const [path, names] of pages) {
     expect(await disabledOnServer(page, path, names), path).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
@@ -714,13 +731,13 @@ test('a form that holds a URL or an email, submitted before the page has hydrate
   // As a GET, the browser's own submit put a Slack or webhook URL, or invitees' emails, in the
   // page's URL: the address bar, history, a Referer and the Worker's request logs (#139's review).
   await signInAs(page, `e2e-settings-post-${Date.now()}@example.com`, '192.0.2.36');
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Library', '192.0.2.36');
   // Without script the page stays as the server sent it, as before hydration. Its fieldsets' gate
   // is taken off, so the form submits as one would that the gate did not hold.
   const context = await browser.newContext({ javaScriptEnabled: false });
   await context.addCookies(await page.context().cookies());
   const early = await context.newPage();
-  await early.route(/\/settings\/(notifications|members)$/, async (route) => {
+  await early.route(/\/settings\/(notifications|members|ai)$/, async (route) => {
     if (route.request().method() !== 'GET') return route.continue();
     const response = await route.fetch();
     await route.fulfill({ response, body: (await response.text()).replaceAll('<fieldset disabled=""', '<fieldset') });
@@ -728,6 +745,7 @@ test('a form that holds a URL or an email, submitted before the page has hydrate
   const forms = [
     { path: '/settings/notifications', field: 'Webhook URL', button: 'Add webhook', value: 'https://example.com/hooks/tok_SECRET136' },
     { path: '/settings/members', field: 'Emails, separated by commas', button: 'Send invites', value: 'sam-secret136@example.com' },
+    { path: '/settings/ai', field: 'API key', button: 'Save key', value: 'sk-ant-SECRET136-0000000000000000' },
   ];
   for (const { path, field, button, value } of forms) {
     await early.goto(path);
@@ -752,4 +770,153 @@ test('a form that holds a URL or an email, submitted before the page has hydrate
     expect(res.headers().location, path).toBe(path);
     expect(await res.text(), path).toBe('');
   }
+});
+
+test('an owner saves an Anthropic key, tests it against the stub, chooses models and a ceiling; the key never comes back (#261)', async ({ page }) => {
+  await signInAs(page, `e2e-settings-ai-${Date.now()}@example.com`, '192.0.2.151');
+  await createOrg(page, 'Quay Street Bakery', '192.0.2.151');
+  await page.goto('/settings/ai');
+  await hydrated(page);
+  await expect(page.getByText('the agent uses SignForge’s demo model', { exact: false })).toBeVisible();
+  await axe(page);
+  await shots(page, '96-settings-ai-demo');
+
+  // A key the provider refuses is saved, and its test says why.
+  const key = page.getByLabel('API key', { exact: true });
+  await key.fill('sk-ant-e2e-not-the-stub-key-0000000000-Zz99');
+  await page.getByRole('button', { name: 'Save key' }).click();
+  await expect(page.getByText('••••••••Zz99')).toBeVisible();
+  await expect(page.getByText('Not tested yet')).toBeVisible();
+  await page.getByRole('button', { name: 'Test connection' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Anthropic refused the key' })).toBeVisible();
+
+  // The right key: the test lists the models, which become the choices.
+  const replace = page.getByLabel('Replace the API key');
+  await replace.fill(ANTHROPIC_STUB_KEY);
+  await page.getByRole('button', { name: 'Save provider' }).click();
+  await expect(page.getByText(`••••••••${ANTHROPIC_STUB_KEY.slice(-4)}`)).toBeVisible();
+  await expect(replace).toHaveValue('');
+  await page.getByRole('button', { name: 'Test connection' }).click();
+  await expect(page.getByText(/^Connected, checked/)).toBeVisible();
+  await page.getByLabel('Fast model').selectOption(ANTHROPIC_STUB_MODELS[0]!);
+  await page.getByLabel('Capable model').selectOption(ANTHROPIC_STUB_MODELS[1]!);
+  await page.getByLabel('Daily ceiling for the whole organization').fill('300');
+  // Each choice saved as it was made; the ceiling once it is left (#366).
+  const ceiling = page.waitForRequest((r) => r.url().endsWith('/api/tools/save_ai_provider') && r.postDataJSON().dailyTurnCeiling === 300);
+  await page.getByLabel('Daily ceiling for the whole organization').blur();
+  expect((await (await ceiling).response())?.status()).toBe(200);
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
+  // A choice that gets no answer is said with Try again, which saves it (#479).
+  await page.route('**/api/tools/save_ai_provider', (route) => route.abort('internetdisconnected'));
+  await page.getByLabel('Capable model').selectOption(ANTHROPIC_STUB_MODELS[0]!);
+  const failed = page.getByRole('alert').filter({ hasText: 'Could not reach SignForge' });
+  await expect(failed.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await page.unroute('**/api/tools/save_ai_provider');
+  await failed.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
+  await expect(failed).toHaveCount(0);
+  await page.getByLabel('Capable model').selectOption(ANTHROPIC_STUB_MODELS[1]!);
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
+
+  // Kept, and the key is in no page, read or audit row.
+  await page.reload();
+  await hydrated(page);
+  await expect(page.getByLabel('Fast model')).toHaveValue(ANTHROPIC_STUB_MODELS[0]!);
+  await expect(page.getByLabel('Daily ceiling for the whole organization')).toHaveValue('300');
+  expect(await page.content()).not.toContain(ANTHROPIC_STUB_KEY);
+  expect(JSON.stringify(await tool(page, 'get_ai_provider', {}))).not.toContain(ANTHROPIC_STUB_KEY);
+  expect(JSON.stringify(await tool(page, 'list_audit_log', {}))).not.toContain(ANTHROPIC_STUB_KEY);
+  await axe(page);
+  await shots(page, '97-settings-ai-key');
+
+  // Remove asks first, then the org is back on the demo model.
+  await page.getByRole('button', { name: 'Remove key' }).click();
+  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(page.getByText('the agent uses SignForge’s demo model', { exact: false })).toBeVisible();
+  expect(await tool(page, 'get_ai_provider', {})).toEqual({ provider: null });
+});
+
+test('an owner saves an OpenAI-compatible endpoint, its address checked, tests it against the stub and sees what it supports (#262)', async ({ page }) => {
+  await signInAs(page, `e2e-settings-endpoint-${Date.now()}@example.com`, '192.0.2.152');
+  await createOrg(page, 'Lantern Lane Grocers', '192.0.2.152');
+  await page.goto('/settings/ai');
+  await hydrated(page);
+  await page.getByRole('radio', { name: 'OpenAI-compatible endpoint' }).check();
+  const address = page.getByLabel('Endpoint address');
+  await expect(address).toBeVisible();
+
+  // An address that is not public https is refused where it enters, and nothing is saved.
+  await address.fill('http://models.example.com/v1');
+  await page.getByLabel('API key', { exact: true }).fill(ENDPOINT_STUB_KEY);
+  await page.getByRole('button', { name: 'Save key' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'the endpoint must be https' })).toBeVisible();
+  expect(await tool(page, 'get_ai_provider', {})).toEqual({ provider: null });
+
+  // A public https base: saved with what its owner says it supports. Images only, so Fill says it cannot run.
+  await address.fill('https://models.example.com/v1/');
+  await page.getByLabel('Its models take images').check();
+  await page.getByRole('button', { name: 'Save key' }).click();
+  await expect(page.getByText('https://models.example.com/v1', { exact: true })).toBeVisible();
+  await expect(page.getByText('Images: yes · JSON-schema output: no')).toBeVisible();
+  await expect(page.getByText('Fill from a flyer, photo or link needs both')).toBeVisible();
+
+  // The stub's /v1/models takes the key, and its models become the choices.
+  await page.getByRole('button', { name: 'Test connection' }).click();
+  await expect(page.getByText(/^Connected, checked/)).toBeVisible();
+  await expect(page.getByLabel('Fast model').locator('option')).toHaveText(['Not chosen', ...ENDPOINT_STUB_MODELS]);
+
+  // Both features: Fill's note goes. The saved key is kept, as the address did not change.
+  await page.getByLabel('It returns output to a JSON schema (response_format json_schema)').check();
+  await page.getByRole('button', { name: 'Save provider' }).click();
+  await expect(page.getByText('Images: yes · JSON-schema output: yes')).toBeVisible();
+  await expect(page.getByText('Fill from a flyer, photo or link needs both')).toHaveCount(0);
+
+  // A new address needs the key again.
+  await page.getByLabel('Endpoint address').fill('https://elsewhere.example.net/v1');
+  await page.getByRole('button', { name: 'Save provider' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'a new baseUrl needs the apiKey again' })).toBeVisible();
+  expect(await tool(page, 'get_ai_provider', {})).toMatchObject({ provider: { baseUrl: 'https://models.example.com/v1' } });
+
+  // A key the endpoint refuses, at a new address, says so in the endpoint's words.
+  await page.getByLabel('Replace the API key').fill('sk-e2e-not-the-endpoint-key-0000000000-Zz99');
+  await page.getByRole('button', { name: 'Save provider' }).click();
+  await expect(page.getByText('https://elsewhere.example.net/v1', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Test connection' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'The endpoint refused the key' })).toBeVisible();
+
+  expect(await page.content()).not.toContain(ENDPOINT_STUB_KEY);
+  expect(JSON.stringify(await tool(page, 'list_audit_log', {}))).not.toContain(ENDPOINT_STUB_KEY);
+  await axe(page);
+  await shots(page, '98-settings-ai-endpoint');
+});
+
+test("after someone else's change and Reload, the model choices show what is there now, and the next change keeps it (review of #466)", async ({ page }) => {
+  const [M0, M1] = ANTHROPIC_STUB_MODELS as [string, string];
+  await signInAs(page, `e2e-settings-ai-reload-${Date.now()}@example.com`, '192.0.2.199');
+  await createOrg(page, 'Linden Lane Bakery', '192.0.2.199');
+  await page.goto('/settings/ai');
+  await hydrated(page);
+  await page.getByLabel('API key', { exact: true }).fill(ANTHROPIC_STUB_KEY);
+  await page.getByRole('button', { name: 'Save key' }).click();
+  await expect(page.getByText(`••••••••${ANTHROPIC_STUB_KEY.slice(-4)}`)).toBeVisible();
+  await page.getByRole('button', { name: 'Test connection' }).click();
+  await expect(page.getByText(/^Connected, checked/)).toBeVisible();
+  await page.getByLabel('Fast model').selectOption(M0);
+  // It says so quietly, where the choices are.
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
+
+  // Someone else chooses the other fast model; this tab, on the version it read, chooses a capable model: refused.
+  await tool(page, 'save_ai_provider', { provider: 'anthropic', fastModel: M1 });
+  await page.getByLabel('Capable model').selectOption(M1);
+  const conflict = page.getByRole('alert').filter({ hasText: 'This changed since you opened it.' });
+  await expect(conflict).toBeVisible();
+  await conflict.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByLabel('Fast model')).toHaveValue(M1);
+
+  // The next change builds on theirs.
+  const next = page.waitForResponse((r) => r.url().endsWith('/api/tools/save_ai_provider'));
+  await page.getByLabel('Daily ceiling for the whole organization').fill('50');
+  await page.getByLabel('Daily ceiling for the whole organization').blur();
+  expect((await next).status()).toBe(200);
+  expect((await tool(page, 'get_ai_provider', {})).provider).toMatchObject({ fastModel: M1, dailyTurnCeiling: 50 });
 });

@@ -56,7 +56,7 @@ async function rotatingSource(sourceId: string) {
   const { authorizeUrl } = await json(await who.tool('start_connection', { provider: 'fake' }));
   const back = rotating.consent(authorizeUrl);
   const conn = new URL((await who.get(`${back.pathname}${back.search}`)).headers.get('location') ?? '', 'https://x').searchParams.get('connected') ?? '';
-  await json(await who.tool('create_data_source', { id: sourceId, name: sourceId, format: 'provider', connectionId: conn, resource: 'rooms' }));
+  await json(await who.tool('save_data_source', { id: sourceId, name: sourceId, format: 'provider', connectionId: conn, resource: 'rooms' }));
   return { rotating, id, o, conn, expiry: (await o.connections.get(conn))?.expiresAt ?? 0 };
 }
 
@@ -272,7 +272,7 @@ describe('a provider data source', () => {
     connectionId = await connectionIdOf(owner);
     expiresAt = (await org().connections.get(connectionId))?.expiresAt ?? 0;
     for (const id of ['rooms-a', 'rooms-b'])
-      await json(await owner.tool('create_data_source', { id, name: id, format: 'provider', connectionId, resource: 'rooms' }));
+      await json(await owner.tool('save_data_source', { id, name: id, format: 'provider', connectionId, resource: 'rooms' }));
   });
 
   it('polls through its adapter into a snapshot', async () => {

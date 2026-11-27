@@ -28,7 +28,8 @@ import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { extname, join, normalize } from 'node:path';
-import type { DeviceCommand, DisplayOverride, PlayCount, SyncRequest } from '@signforge/contract';
+import { MAX_SYNC_RESPONSE_BLOBS, type DeviceCommand, type DisplayOverride, type PlayCount, type SyncRequest } from '@signforge/contract';
+import { boundImageHashes, hasBoundListImage, manifestBoundFields } from '@signforge/player-core';
 import type { Content } from './content';
 
 export type Action =
@@ -41,6 +42,8 @@ export type Action =
 
 export interface RequestRecord {
   path: string;
+  /** The request's method: a CORS preflight (`OPTIONS`) is recorded as a request to its path too. */
+  method: string;
   status: number;
   ifNoneMatch?: string;
   /** When the request arrived, `Date.now()`. */
@@ -73,6 +76,7 @@ export class FixtureServer {
   /** Content whose files are served beside the published content's: a screen's last good manifest. */
   private lastGood?: Content;
   private data = new Map<string, unknown>();
+  private feedBlobs = new Map<string, { body: Buffer; type: string }>();
   private rules: { match: RegExp; action: Action }[] = [];
   private server = createServer((req, res) => this.handle(req, res));
   private sockets = new Set<Socket>();
@@ -99,6 +103,12 @@ export class FixtureServer {
   displayOverride: DisplayOverride | null | undefined;
   /** Syncs carrying play counts to process and then drop without an answer, as a lost response would be. */
   loseCountReplies = 0;
+  /** What the supervisor answers GET /display with, as device/pi/supervisor.py does; a test may give it an `output` (#511). */
+  supervisorDisplay: Record<string, unknown> = { on: true, signal: 'ok', cec: 'not acknowledged' };
+  /** What `/alive` answers, as device/pi/supervisor.py does: a release it rolled back, or nothing (#628). */
+  supervisorAlive: Record<string, unknown> = {};
+  /** The version each beat said, oldest first. */
+  readonly beatVersions: unknown[] = [];
   /** What the supervisor holds; undefined is a freshly flashed screen. */
   supervisorCredential: string | undefined = FIXTURE_CREDENTIAL;
   /** The device API base the supervisor's credential is bound to: `deviceApi` once started. */
@@ -168,6 +178,16 @@ export class FixtureServer {
     this.data.set(id, snapshot);
   }
 
+  /** Serve a feed-image blob at `/content/blobs/<sha>` (as R2's feed prefix does). */
+  setFeedBlob(sha: string, body: Buffer, type = 'image/png'): void {
+    this.feedBlobs.set(sha, { body, type });
+  }
+
+  /** Remove a feed-image blob from `/content/blobs/<sha>`. */
+  deleteFeedBlob(sha: string): void {
+    this.feedBlobs.delete(sha);
+  }
+
   /** Answer requests whose path matches with `action` instead. Returns a function that removes the rule. */
   intercept(match: RegExp, action: Action): () => void {
     const rule = { match, action };
@@ -224,7 +244,14 @@ export class FixtureServer {
     const path = normalize(decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname)).replace(/^(\.\.[/\\])+/, '');
     const inm = req.headers['if-none-match'];
     const bearer = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
-    const rec: RequestRecord = { path, status: 0, at: Date.now(), ...(inm ? { ifNoneMatch: String(inm) } : {}), ...(bearer ? { bearer } : {}) };
+    const rec: RequestRecord = {
+      path,
+      method: req.method ?? 'GET',
+      status: 0,
+      at: Date.now(),
+      ...(inm ? { ifNoneMatch: String(inm) } : {}),
+      ...(bearer ? { bearer } : {}),
+    };
     this.requests.push(rec);
     res.on('close', () => {
       if (!res.writableFinished) rec.abortedAt = Date.now();
@@ -312,12 +339,27 @@ export class FixtureServer {
             this.acked.set(sync.epoch, sync.seq);
           }
           const held = sync.snapshots ?? {};
-          const all = [...this.data.values()] as { id: string; version: number; checkedAt: string }[];
+          // As the API does: only the sources of the manifest the server wants this screen on.
+          const all = ([...this.data.values()] as { id: string; version: number; checkedAt: string; data?: unknown }[]).filter(
+            (snap) => !c || Object.hasOwn(c.manifest.dataSources, snap.id),
+          );
           const snapshots = all.filter((snap) => snap.version > (held[snap.id] ?? -1));
           // As the API does: when each snapshot the screen holds at its version was last checked.
           const checked = Object.fromEntries(
             all.filter((snap) => snap.version === held[snap.id]).map((snap) => [snap.id, { version: snap.version, checkedAt: snap.checkedAt }]),
           );
+          const haveBlobs = new Set(sync.blobs ?? []);
+          // As the API does: one missing photo from each source in turn.
+          const missingBlobs = new Set<string>();
+          if (c) {
+            const bySource = manifestBoundFields(c.manifest);
+            const lists = all.flatMap((snap) => {
+              const bound = bySource.get(snap.id) ?? [];
+              return hasBoundListImage(bound) ? [boundImageHashes(bound, snap.data).filter((sha) => !haveBlobs.has(sha))] : [];
+            });
+            for (let i = 0; missingBlobs.size < MAX_SYNC_RESPONSE_BLOBS && lists.some((l) => i < l.length); i++)
+              for (const l of lists) if (i < l.length && missingBlobs.size < MAX_SYNC_RESPONSE_BLOBS) missingBlobs.add(l[i]!);
+          }
           const reply = {
             serverTime: new Date(Date.now() + this.serverOffsetMs).toISOString(),
             nextSyncS: this.nextSyncS,
@@ -326,6 +368,7 @@ export class FixtureServer {
             ...(c ? { desiredManifest: c.manifest.id } : {}),
             snapshots,
             checked,
+            ...(missingBlobs.size ? { blobs: [...missingBlobs] } : {}),
             socketTicket: `ticket-${this.syncs.length}`,
             commands: [...this.commands.splice(0), ...this.overrideCommand(sync.display.override)],
           };
@@ -346,7 +389,9 @@ export class FixtureServer {
       const blob = /^blobs\/([0-9a-f]{64})$/.exec(rest);
       if (blob) {
         const body = c?.blobs.get(blob[1]!) ?? this.lastGood?.blobs.get(blob[1]!);
-        return body ? send(200, body) : send(404, '');
+        if (body) return send(200, body);
+        const feed = this.feedBlobs.get(blob[1]!);
+        return feed ? send(200, feed.body, feed.type) : send(404, '');
       }
       const data = /^data\/([^/]+)\.json$/.exec(rest);
       if (data && this.data.has(data[1]!)) return send(200, JSON.stringify(this.data.get(data[1]!)), 'application/json');
@@ -360,17 +405,24 @@ export class FixtureServer {
     }
   }
 
-  /** The supervisor's credential, token, liveness and display power routes; everything else it has nothing for. */
+  /** The supervisor's credential, token, liveness and display routes; everything else it has nothing for. */
   private supervisor(req: IncomingMessage, rest: string, send: (status: number, body?: string, type?: string) => void): void {
     const json = (status: number, body: unknown) => send(status, JSON.stringify(body), 'application/json');
     if (rest === 'token' && req.method === 'GET') return json(200, { token: SUPERVISOR_TOKEN });
     if (rest === 'alive' && req.method === 'POST') {
-      return req.headers['x-sf-token'] === SUPERVISOR_TOKEN ? json(200, {}) : json(403, { error: 'forbidden' });
+      if (req.headers['x-sf-token'] !== SUPERVISOR_TOKEN) return json(403, { error: 'forbidden' });
+      return void readBody(req).then((body) => {
+        this.beatVersions.push((JSON.parse(body || '{}') as { version?: unknown }).version);
+        json(200, this.supervisorAlive);
+      });
     }
     // As device/pi/supervisor.py answers a switch: its state, and how each method went.
     if ((rest === 'display/on' || rest === 'display/off') && req.method === 'POST') {
       if (req.headers['x-sf-token'] !== SUPERVISOR_TOKEN) return json(403, { error: 'forbidden' });
       return json(200, { on: rest === 'display/on', signal: 'ok', cec: 'not acknowledged' });
+    }
+    if (rest === 'display' && req.method === 'GET') {
+      return req.headers['x-sf-token'] === SUPERVISOR_TOKEN ? json(200, this.supervisorDisplay) : json(403, { error: 'forbidden' });
     }
     if (rest !== 'credential') return send(404, '');
     if (req.method === 'GET') {
@@ -396,7 +448,7 @@ export class FixtureServer {
   /** A minimal WebSocket server: text frames, close, and `ping` answered with `pong`. */
   private upgrade(req: IncomingMessage, socket: Socket): void {
     const path = new URL(req.url ?? '/', 'http://x').pathname;
-    const rec: RequestRecord = { path, status: 101, at: Date.now() };
+    const rec: RequestRecord = { path, method: req.method ?? 'GET', status: 101, at: Date.now() };
     this.requests.push(rec);
     const rule = this.rules.find((r) => r.match.test(path));
     const key = req.headers['sec-websocket-key'];

@@ -17,7 +17,7 @@ export function LiveCard({ fresh, instead, className, children }: { fresh: boole
   return (
     <div
       className={cn(
-        'flex flex-col rounded-[10px] border p-3',
+        'flex flex-col rounded-lg border p-3',
         fresh ? 'border-primary/25 bg-accent' : 'border-status-updating/50 bg-status-updating-muted',
         className,
       )}

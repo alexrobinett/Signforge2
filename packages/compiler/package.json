@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./fonts": "./src/fonts.ts",
     "./draft": "./src/draft.ts",
-    "./selector": "./src/selector.ts"
+    "./selector": "./src/selector.ts",
+    "./schedule": "./src/schedule.ts"
   },
   "scripts": {
     "typecheck": "tsc -p .",

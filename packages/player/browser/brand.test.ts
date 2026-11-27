@@ -7,9 +7,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
-import { BRAND_CSS_VARS, PROTOCOL_VERSION, type BrandColors } from '@signforge/contract';
+import { BRAND_CSS_VARS, PROTOCOL_VERSION, type BrandColors, type InitPayload } from '@signforge/contract';
+import { containedFrames } from '@signforge/player-core';
+import type { FrameHost, openFrameHost } from '@signforge/player-core/frame-host';
 import type { Frame } from 'playwright';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, inject, it } from 'vitest';
 import { buildContent, type FixtureBrand } from './content';
 import { BRAND_FALLBACKS } from './global-setup';
 import { useHarness, type Player } from './harness';
@@ -193,47 +195,52 @@ describe('brand in the SDK', () => {
       fonts: { display: { family: 'Oswald', files: brand.fonts.display!.files.map((f) => ({ weight: f.weight, style: 'normal', data: [...f.data] })) } },
       logo: { onDark: [...png(4, 1)] },
     };
+    await page.addScriptTag({ content: inject('frameHostJs') });
     await page.evaluate(
-      ({ html, sf, theme }) => {
-        const w = window as unknown as { msgs: string[]; inits: number };
+      async ({ frames, sf, theme }) => {
+        const w = window as unknown as { SFFrameHost: { openFrameHost: typeof openFrameHost }; sfHost: FrameHost; msgs: string[] };
         w.msgs = [];
-        w.inits = 0;
-        const frame = document.createElement('iframe');
-        frame.setAttribute('sandbox', 'allow-scripts');
         const t = {
           ...theme,
           fonts: { display: { ...theme.fonts.display, files: theme.fonts.display.files.map((f) => ({ ...f, data: new Blob([new Uint8Array(f.data)]) })) } },
           logo: { onDark: new Blob([new Uint8Array(theme.logo.onDark)], { type: 'image/png' }) },
         };
-        addEventListener('message', (e) => {
-          if (e.source !== frame.contentWindow || e.data?.sf !== sf) return;
-          w.msgs.push(e.data.type);
-          if (e.data.type === 'loaded') {
-            const base = {
-              sf,
-              type: 'init',
-              data: { label: 'x' },
-              assets: {},
-              durationMs: 5000,
-              orientation: 'landscape',
-              viewport: { width: 960, height: 540 },
-              timezone: 'UTC',
-              locale: 'en-US',
-              clock: { now: Date.now(), offsetMs: 0 },
-            };
-            // The first init carries the theme; the one after the reset does not.
-            frame.contentWindow!.postMessage(w.inits++ === 0 ? { ...base, theme: t } : base, '*');
-          }
+        const base = {
+          data: { label: 'x' },
+          assets: {},
+          durationMs: 5000,
+          orientation: 'landscape',
+          viewport: { width: 960, height: 540 },
+          timezone: 'UTC',
+          locale: 'en-US',
+          clock: { now: Date.now(), offsetMs: 0 },
+        };
+        let inits = 0;
+        w.sfHost = await w.SFFrameHost.openFrameHost({
+          container: document.body,
+          frames,
+          protocol: sf,
+          title: 'Brand',
+          size: { width: 960, height: 540 },
+          // The first init carries the theme; the one after the reset does not.
+          init: () => (inits++ === 0 ? { ...base, theme: t } : base) as InitPayload,
+          label: 'brand',
+          signal: new AbortController().signal,
+          onNavigatedAway: () => {},
         });
-        frame.srcdoc = html;
-        document.body.appendChild(frame);
+        // What the template says, in order: its `parent` is the wrapper the host wrote, so it arrives there.
+        const wrapper = document.querySelector('iframe')!.contentWindow!;
+        wrapper.addEventListener('message', (e) => {
+          if (e.source === wrapper.document.querySelector('iframe')?.contentWindow && e.data?.sf === sf) w.msgs.push(e.data.type);
+        });
+        await w.sfHost.start();
       },
-      { html: h.brandTemplateHtml, sf: PROTOCOL_VERSION, theme },
+      { frames: containedFrames(h.brandTemplateHtml), sf: PROTOCOL_VERSION, theme },
     );
-    await expect.poll(() => page.frames().length).toBe(2);
-    const frame = page.frames()[1]!;
+    // The template's frame, inside the wrapper the host wrote.
+    const frame = page.frames().find((f) => f.parentFrame()?.parentFrame() === page.mainFrame())!;
     const msgs = () => page.evaluate(() => (window as unknown as { msgs: string[] }).msgs);
-    await expect.poll(msgs).toEqual(['loaded', 'ready']);
+    expect(await msgs()).toEqual(['loaded', 'ready']);
     const themed = await drawn(frame);
     expect(themed.tokens.primary).toBe(rgb(colors.primary));
     expect(themed.radius).toBe('12px');
@@ -242,8 +249,8 @@ describe('brand in the SDK', () => {
     const rootStyle = await frame.evaluate((vars) => vars.map((v) => document.documentElement.style.getPropertyValue(v)), Object.values(BRAND_CSS_VARS));
     expect(rootStyle.filter(Boolean)).toHaveLength(10); // all but the body font, which the theme left out
 
-    await page.evaluate((sf) => document.querySelector('iframe')!.contentWindow!.postMessage({ sf, type: 'reset' }, '*'), PROTOCOL_VERSION);
-    await expect.poll(msgs).toEqual(['loaded', 'ready', 'loaded', 'ready']);
+    await page.evaluate(() => (window as unknown as { sfHost: FrameHost }).sfHost.reset());
+    expect(await msgs()).toEqual(['loaded', 'ready', 'loaded', 'ready']);
     const plain = await drawn(frame);
     expect(plain.tokens).toEqual(BRAND_FALLBACKS);
     expect(plain.radius).toBe('3px');

@@ -23,6 +23,7 @@ const asleep: ScreenView = {
   reportedManifestId: 'm1',
   lastSeenAt: AT - 60_000,
   playerVersion: '1.0.0',
+  playerChannel: 'stable',
   displayOverride: null,
   state: { ...STATE, kind: 'asleep', wakesAt: '2026-11-18T12:00:00.000Z' },
   heartbeat: null,

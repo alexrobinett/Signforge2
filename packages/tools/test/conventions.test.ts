@@ -1,5 +1,5 @@
-// The conventions every tool keeps: it declares what it returns, and a list pages.
-import { testScope } from '@signforge/db/testing';
+// The conventions every tool keeps: it declares what it takes and returns, and a list pages.
+import { seedTeam, testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -16,14 +16,17 @@ import {
   type AnyTool,
   type Caller,
 } from '../src';
+import { inputs } from '../src/inputs';
 import { outputs, type ToolName } from '../src/outputs';
 import { seededMembers } from './member';
 
 const { o, as } = seededMembers('conv-org');
 let owner: Caller;
 
-beforeAll(() => {
+beforeAll(async () => {
   owner = as('owner');
+  // Better Auth's rows for list_members and list_invitations to list.
+  await seedTeam(env.DB, o.orgId);
 });
 
 const shapeOf = (schema: z.ZodType) => (schema instanceof z.ZodObject ? schema.shape : undefined);
@@ -43,6 +46,11 @@ describe('every registered tool', () => {
     expect(Object.keys(outputs).sort()).toEqual(TOOLS.map((t) => t.name).sort());
   });
 
+  it('takes the input its name has in inputs.ts, the schema the CMS types its calls by', () => {
+    for (const t of all) expect(t.input === inputs[t.name as ToolName], `${t.name}'s input is not inputs.${t.name}`).toBe(true);
+    expect(Object.keys(inputs).sort()).toEqual(TOOLS.map((t) => t.name).sort());
+  });
+
   it('pages if it lists: limit and cursor in, next out', () => {
     const lists = all.filter((t) => t.name.startsWith('list_'));
     expect(lists.length).toBeGreaterThan(0);
@@ -55,10 +63,11 @@ describe('every registered tool', () => {
   });
 
   it('accepts ifVersion if it updates a row, and returns the version to pass', () => {
-    // An update tool is named for the change (update_*, rename_*) or replaces a list (set_*_members).
-    // update_screen_labels merges, as add_group_members does, so it drops nothing it did not read and needs no version.
-    const updates = all.filter((t) => /^(update|rename)_|^set_\w+_members$/.test(t.name) && t.name !== 'update_screen_labels');
-    expect(updates.map((t) => t.name)).toEqual(expect.arrayContaining(['rename_screen', 'update_screen_settings', 'set_group_members']));
+    // An update tool is named for the change (update_*, rename_*, save_*, which creates or changes) or replaces a list (set_*_members).
+    // update_screen_labels merges, as save_group's add does, so it drops nothing it did not read and needs no version.
+    const unversioned = new Set(['update_screen_labels']);
+    const updates = all.filter((t) => /^(update|rename|save)_|^set_\w+_members$/.test(t.name) && !unversioned.has(t.name));
+    expect(updates.map((t) => t.name)).toEqual(expect.arrayContaining(['update_screen', 'save_group']));
     for (const t of updates) {
       expect(t.mutates, t.name).toBe(true);
       expect(shapeOf(t.input)?.ifVersion, `${t.name} input needs ifVersion (fields.ts)`).toBeDefined();

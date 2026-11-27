@@ -7,17 +7,30 @@
 </head>
 <body>
 <div class="stage">
-  <header><span class="badge" data-sf="title">Latest news</span><span class="clock" id="clock"></span></header>
-  <main>
-    <p class="age" id="age"></p>
-    <h1 class="lead" id="lead">No headlines yet</h1>
-    <ul class="more" id="more"></ul>
-  </main>
-  <footer>
-    <span class="label" id="credit"></span>
-    <div class="track"><div class="crawl" id="crawl"></div></div>
+  <header class="top">
+    <p class="title" data-sf="title">Latest news</p>
+    <p class="clock" id="clock"></p>
+  </header>
+  <section class="leads" id="leads"></section>
+  <footer class="strip" data-show="list">
+    <ol class="rows" id="rows"></ol>
+    <div class="bar" aria-hidden="true"></div>
   </footer>
+  <div class="progress" aria-hidden="true"></div>
 </div>
+<template id="story">
+  <article class="story">
+    <div class="text">
+      <p class="meta" data-show="meta"><span class="src"></span><span class="age"></span></p>
+      <h1 class="headline" data-sf="title">Headline</h1>
+      <p class="summary" data-show="summary" data-sf="summary"></p>
+    </div>
+    <div class="area" data-show="images"><img class="photo" data-sf-src="image" alt=""></div>
+  </article>
+</template>
+<template id="row">
+  <li class="row"><span class="number"></span><span class="rtitle" data-sf="title"></span></li>
+</template>
 <script type="module" src="main.ts"></script>
 </body>
 </html>

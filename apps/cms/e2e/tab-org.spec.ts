@@ -9,12 +9,12 @@ import { CMS_URL } from './servers';
  * org, is refused what it tries and told to reload, rather than acting on the org it does not show.
  */
 
-const refusal = 'This tab is on Northside Market; you switched to Southside Deli in another tab. Reload.';
+const refusal = 'This tab is on Northside Florist; you switched to Southside Deli in another tab. Reload.';
 
-/** A member in Northside Market (active) and Southside Deli, with `stale` open on `path` in Northside. */
+/** A member in Northside Florist (active) and Southside Deli, with `stale` open on `path` in Northside. */
 async function twoOrgs(page: Page, address: string, path: string) {
   await signInAs(page, `e2e-tab-org-${address}-${Date.now()}@example.com`, address);
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Florist', address);
   const south = await page.request.post('/api/auth/organization/create', {
     data: { name: 'Southside Deli', slug: `southside-${Date.now()}`, keepCurrentActiveOrganization: true },
     headers: { origin: CMS_URL },
@@ -22,7 +22,7 @@ async function twoOrgs(page: Page, address: string, path: string) {
   expect(south.status(), await south.text()).toBe(200);
   await page.goto(path);
   await hydrated(page);
-  await expect(orgSwitcher(page)).toContainText('Northside Market');
+  await expect(orgSwitcher(page)).toContainText('Northside Florist');
 }
 
 /** In a second tab, switch to Southside Deli from the switcher: that tab's own switch goes through. */
@@ -44,7 +44,6 @@ test('a save from a tab left on the old org is refused, and the new org is not c
   await switchInAnotherTab(page);
 
   await zone.selectOption('Europe/London');
-  await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.getByText(refusal)).toBeVisible();
 
   // Reloaded, the tab shows Southside Deli, untouched by the refused save.

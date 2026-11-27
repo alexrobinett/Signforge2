@@ -36,9 +36,10 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { basename, extname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import {
+  MIN_REFRESH_S,
   SCREEN_BOX,
   coverSize,
-  validateBrandKit,
+  parseBrandKit,
   templateKey,
   type ScreenBox,
   type Binding,
@@ -56,10 +57,21 @@ import {
   type Transition,
 } from '@signforge/contract';
 import { FeedError, normaliseFeed } from '@signforge/feeds';
-import { compileScreen, fontById, fontFilePath, onColor, spotProblems, type CompileInput, type TargetedEntry } from '@signforge/compiler';
+import {
+  compileScreen,
+  entryProblems,
+  fontById,
+  fontFilePath,
+  onColor,
+  reaches,
+  spotProblems,
+  type CompileInput,
+  type TargetedEntry,
+} from '@signforge/compiler';
 import { imageSample } from '@signforge/media/sample';
+import { staleAge } from '@signforge/player-core';
 import { push, PushError } from './push';
-import { buildTemplate, type BuiltTemplate } from './template';
+import { buildTemplate, type BuiltTemplate } from '@signforge/template-build';
 import { checkVideoFile } from './video';
 import { pushFonts, pushTemplate, TemplatePushError } from './template-push';
 
@@ -249,14 +261,17 @@ async function buildProject(projectDir: string, outDir: string, templatesDir: st
   const sourceDefs = existsSync(sourcesPath) ? readJson<Record<string, { url: string; refreshS: number; format?: 'json' | 'ical' | 'rss' }>>(sourcesPath) : {};
   const dataSources: DataSource[] = Object.entries(sourceDefs).map(([id, d]) => ({ id, refreshS: d.refreshS }));
 
-  const sched = readJson<{ defaultPlaylist: string; entries?: TargetedEntry[] }>(join(projectDir, 'schedule.json'));
-  const schedule = (sched.entries ?? []).map((e) => ({
+  const sched = readJson<{ defaultPlaylist: string; entries?: Omit<TargetedEntry, 'order'>[] }>(join(projectDir, 'schedule.json'));
+  // In the file's order: of two otherwise tied entries a screen plays the later.
+  const schedule: TargetedEntry[] = (sched.entries ?? []).map((e, order) => ({
     ...e,
     targetId: e.targetId ?? (e.target === 'screen' ? screen.id : e.target === 'group' ? groups[0] : undefined),
+    order,
   }));
   for (const e of schedule) {
-    const elsewhere = (e.target === 'group' && !groups.includes(e.targetId ?? '')) || (e.target === 'screen' && e.targetId !== screen.id);
-    if (elsewhere) console.warn(`  note: schedule entry ${e.id} targets ${e.target} "${e.targetId}", which is not this screen; it is left out`);
+    // One the compiler reports as unplaceable is not noted as left out too (review of #591).
+    if (!entryProblems(e).length && !reaches(e, { id: screen.id, groups }))
+      console.warn(`  note: schedule entry ${e.id} targets ${e.target} "${e.targetId}", which is not this screen; it is left out`);
   }
 
   const brand = await readBrand(projectDir, problems, addBlob, addMedia);
@@ -350,24 +365,31 @@ async function readBrand(
     const onLight = b.logo.onLight ? await addMedia(b.logo.onLight, 'brand') : undefined;
     kit.logo = { onDark, ...(onLight ? { onLight } : {}) };
   }
-  problems.add('brand', validateBrandKit(kit));
-  return kit;
+  // As the server parses it, a key the contract does not declare (an extra colour) left out, as for a template's manifest.
+  const read = parseBrandKit(kit);
+  if (!read.ok) problems.add('brand', read.problems);
+  return read.ok ? read.value : kit;
 }
 
 /**
  * Fetch every data source a project lists, convert it the way the server will, and write the
  * snapshots the player reads (`<out>/<id>.json`), for static content and for testing templates
  * against live data without the API's poller (apps/api/src/data). A screen falls back to static
- * values a day after `checkedAt`, so static content needs this rerun. Failures are reported per
+ * values a day after `checkedAt`, a calendar after its minutes (`staleAge`, #624), so static content needs this rerun at the
+ * source's `refreshS`. Failures are reported per
  * source; the others still write.
  */
 async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
-  const sources = readJson<Record<string, { url: string; format?: 'json' | 'ical' | 'rss'; horizonDays?: number }>>(join(projectDir, 'data-sources.json'));
+  const sources = readJson<Record<string, { url: string; refreshS: number; format?: 'json' | 'ical' | 'rss'; horizonDays?: number }>>(
+    join(projectDir, 'data-sources.json'),
+  );
   mkdirSync(outDir, { recursive: true });
   const now = new Date();
   let failed = 0;
   for (const [id, src] of Object.entries(sources)) {
     try {
+      // The project's own file: a refreshS that is not whole seconds would make a stale age no screen accepts.
+      if (!Number.isSafeInteger(src.refreshS) || src.refreshS < MIN_REFRESH_S) throw new Error(`refreshS must be whole seconds, at least ${MIN_REFRESH_S}`);
       const res = await fetch(src.url, { headers: { 'user-agent': 'signforge-dev' }, signal: AbortSignal.timeout(20_000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = await res.text();
@@ -377,7 +399,8 @@ async function fetchFeeds(projectDir: string, outDir: string): Promise<void> {
           : src.format === 'rss'
             ? normaliseFeed('rss', body)
             : JSON.parse(body);
-      const snapshot: DataSnapshot = { id, version: now.getTime(), fetchedAt: now.toISOString(), checkedAt: now.toISOString(), data };
+      const age = staleAge({ format: src.format ?? 'json', refreshS: src.refreshS });
+      const snapshot: DataSnapshot = { id, version: now.getTime(), fetchedAt: now.toISOString(), checkedAt: now.toISOString(), ...age, data };
       writeFileSync(join(outDir, `${id}.json`), JSON.stringify(snapshot));
       const count =
         src.format === 'ical' ? `${(data as CalendarFeed).events.length} events` : src.format === 'rss' ? `${(data as NewsFeed).items.length} items` : 'json';

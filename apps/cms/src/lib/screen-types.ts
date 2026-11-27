@@ -2,6 +2,7 @@
  * The screen tools' outputs as the CMS reads them (`list_screens`, `list_screen_status`,
  * `get_screen`, `list_groups`), typed by the tools' own output schemas.
  */
+import { displayHoursProblems } from '@signforge/contract';
 import type { ToolOutput } from '@signforge/tools/outputs';
 
 export type ScreenView = ToolOutput<'list_screens'>['screens'][number];
@@ -22,3 +23,14 @@ export type DisplayHours = NonNullable<ScreenView['displayHours']>;
 export type ScreenStatus = ToolOutput<'list_screen_status'>['screens'][number];
 
 export type GroupView = ToolOutput<'list_groups'>['groups'][number];
+
+/** The groups a screen is put in or taken out of by hand: a smart group's screens are the ones its rule matches (#186). */
+export const listedGroups = (groups: readonly GroupView[]) => groups.filter((g) => g.selector === null);
+
+/** Why display hours would be refused, as the player checks them (the contract's `displayHoursProblems`), and a window with no day. */
+export function hoursProblems(hours: DisplayHours | null): string[] {
+  if (!hours) return [];
+  const problems = displayHoursProblems(hours);
+  if (hours.weekly.some((w) => w.days.length === 0)) problems.push('every window needs at least one day');
+  return problems;
+}

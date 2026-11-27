@@ -4,7 +4,7 @@
 // so nothing depends on the hour the test runs at. What the screen's page says it plays is what
 // was published, not the draft; a takeover's publish offers no Undo, and a removal waits for Publish.
 import { expect, test, type Page } from '@playwright/test';
-import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, tool } from './helpers';
+import { axe, createOrg, disabledOnServer, hydrated, shots, signInAs, testScreenToPair, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit and leaves the other specs theirs. */
 const ADDRESS = '192.0.2.137';
@@ -31,26 +31,25 @@ const toastSays = (title: string | RegExp) => page.locator('[data-sonner-toast]'
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
   await signInAs(page, `e2e-schedule-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside School', ADDRESS);
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
   // A publish shows at the end of the spot on screen; a takeover cuts in. So the default's spot is
   // short, and the others a minute long: a takeover that waited for the spot's end would miss the waits.
   const lengths: Record<string, number> = { 'All day': 10_000, Breakfast: 60_000, 'Flash sale': 60_000 };
   for (const name of Object.keys(lengths)) {
-    const { spot } = await tool(page, 'create_spot', { name, kind: 'template', templateVersionId: clock, durationMs: lengths[name], data: { greeting: name } });
+    const { spot } = await tool(page, 'save_spot', { name, kind: 'template', templateVersionId: clock, durationMs: lengths[name], data: { greeting: name } });
     ({
       playlist: { id: playlist[name] },
-    } = await tool(page, 'create_playlist', { name, transition: { type: 'cut' }, spotIds: [spot.id] }));
+    } = await tool(page, 'save_playlist', { name, transition: { type: 'cut' }, spotIds: [spot.id] }));
   }
   await tool(page, 'set_default_playlist', { playlistId: playlist['All day'] });
 
   // A test screen, paired by its code as the Screens page pairs one, put in a new group, Front, from its settings.
-  screen = await (await browser.newContext()).newPage();
-  await screen.goto('/test-screen/?kind=browser&content=/v1/device');
-  await expect.poll(async () => (await playing(screen))?.pairing ?? '', { timeout: 20_000 }).not.toBe('');
+  const pairing = await testScreenToPair(browser);
+  screen = pairing.screen;
   const { screen: paired } = await tool(page, 'claim_screen', {
-    code: (await playing(screen))!.pairing,
+    code: pairing.code,
     name: 'Front window',
     timezone: 'UTC',
     orientation: 'landscape',
@@ -76,7 +75,6 @@ test.afterAll(async () => {
 });
 
 test('schedule a playlist for a group, see its week, and publish it to the screen', async () => {
-  test.setTimeout(120_000);
   // The page hydrates after the app (body[data-hydrated]): until then its controls are disabled (#136).
   const names = ['Take over screens', 'Schedule a playlist', 'Publish', 'Screen'];
   expect(await disabledOnServer(page, '/schedule', names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
@@ -141,7 +139,6 @@ test('schedule a playlist for a group, see its week, and publish it to the scree
 });
 
 test('take the screens over: the screen cuts in at once, and goes back when it ends', async () => {
-  test.setTimeout(120_000);
   await page.getByRole('button', { name: 'Take over screens' }).click();
   const dialog = page.getByRole('dialog', { name: 'Take over screens' });
   await dialog.getByLabel('Playlist').selectOption({ label: 'Flash sale' });
@@ -187,7 +184,6 @@ test('remove the entry and publish: the screen goes back to the default; the pag
 });
 
 test('a create whose answer was lost, saved again, makes one entry, and a takeover started again makes one takeover (#149)', async () => {
-  test.setTimeout(120_000);
   await page.goto('/schedule');
   await hydrated(page);
   /** Lets the first call to `tool` reach SignForge, which makes the row, and loses its answer on the way back. */
@@ -206,7 +202,7 @@ test('a create whose answer was lost, saved again, makes one entry, and a takeov
     ).length;
   const entriesBefore = await count('entries');
 
-  await loseFirstAnswer('create_schedule_entry');
+  await loseFirstAnswer('save_schedule_entry');
   await page.getByRole('button', { name: 'Schedule a playlist' }).click();
   const dialog = page.getByRole('dialog', { name: 'Schedule a playlist' });
   await dialog.getByLabel('Playlist').selectOption({ label: 'Breakfast' });
@@ -277,6 +273,17 @@ test('pick one screen by typing part of its name, keyboard only; the picker fill
   await page.keyboard.press('Enter');
   await expect(picker).toBeHidden();
   await expect(plays).toHaveText('Front window');
+  // The dialog is taller than a phone: its actions stay in view as its fields scroll (#253).
+  for (const name of ['Cancel', 'Save draft']) await expect(dialog.getByRole('button', { name })).toBeInViewport({ ratio: 1 });
+  // And a field focused under them scrolls clear of them, not behind (WCAG 2.4.11).
+  const priority = dialog.getByLabel('Priority');
+  await priority.focus();
+  await expect(priority).toBeFocused();
+  const footerTop = async () => await dialog.getByRole('button', { name: 'Cancel' }).evaluate((b) => b.parentElement!.getBoundingClientRect().top);
+  await expect
+    .poll(async () => ((await priority.boundingBox())?.y ?? Infinity) + ((await priority.boundingBox())?.height ?? 0) <= (await footerTop()))
+    .toBe(true);
+  await shots(page, '57-schedule-dialog-phone');
   await page.setViewportSize({ width: 1280, height: 720 });
 
   await dialog.getByRole('button', { name: 'Save draft' }).click();
@@ -288,11 +295,11 @@ test('play a new playlist on this screen from its page, see what it will play, r
   test.setTimeout(150_000);
   // The tests before leave drafts: an entry never published is gone once deleted.
   for (const e of (await tool(page, 'list_schedule_entries', {})).entries as { id: string; published: boolean; takeover: boolean }[])
-    if (!e.published && !e.takeover) await tool(page, 'delete_schedule_entry', { scheduleEntryId: e.id });
+    if (!e.published && !e.takeover) await tool(page, 'delete', { type: 'schedule_entry', id: e.id });
   const { templates } = await tool(page, 'list_templates', { status: 'approved' });
   const clock = templates.find((t: { key: string }) => t.key === 'clock' || t.key.endsWith('/clock')).versions.at(-1).id;
   // A playlist and spot never published: Save and publish takes them along with the entry.
-  const { spot } = await tool(page, 'create_spot', {
+  const { spot } = await tool(page, 'save_spot', {
     name: 'Holiday',
     kind: 'template',
     templateVersionId: clock,
@@ -301,11 +308,11 @@ test('play a new playlist on this screen from its page, see what it will play, r
   });
   const {
     playlist: { id: holiday },
-  } = await tool(page, 'create_playlist', { name: 'Holiday promo', transition: { type: 'cut' }, spotIds: [spot.id] });
+  } = await tool(page, 'save_playlist', { name: 'Holiday promo', transition: { type: 'cut' }, spotIds: [spot.id] });
   // On screens: the screen's group plays Breakfast every morning at priority 10, which outranks a new entry.
   const { groups } = await tool(page, 'list_groups', {});
   const front = groups.find((g: { name: string }) => g.name === 'Front').id;
-  const { entry: breakfast } = await tool(page, 'create_schedule_entry', {
+  const { entry: breakfast } = await tool(page, 'save_schedule_entry', {
     playlistId: playlist.Breakfast,
     target: 'group',
     groupId: front,
@@ -316,7 +323,7 @@ test('play a new playlist on this screen from its page, see what it will play, r
   await tool(page, 'publish', { drafts: [{ kind: 'schedule_entry', id: breakfast.id, version: breakfast.version }] });
   // Someone else's draft, never published, for the screen at noon at priority 20: as drafted it outranks the new entry too,
   // though Save and publish leaves it off screens, a draft.
-  const { entry: flash } = await tool(page, 'create_schedule_entry', {
+  const { entry: flash } = await tool(page, 'save_schedule_entry', {
     playlistId: playlist['Flash sale'],
     target: 'screen',
     screenId,

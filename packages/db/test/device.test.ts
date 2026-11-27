@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { findDeviceScreen, scoped } from '../src/index';
-import { seedOrg, type SeededOrg } from '../src/testing';
+import { findDeviceScreen, platform, scoped } from '../src/index';
+import { seedOrg, signedRelease, type SeededOrg } from '../src/testing';
 
 let o: SeededOrg;
 beforeAll(async () => {
@@ -16,7 +16,12 @@ describe('findDeviceScreen', () => {
       desiredManifestId: null,
       previousManifestId: null,
       lastGoodManifestId: null,
+      lastPhotos: null,
       displayOverrideJson: null,
+      // Every screen follows the stable player releases until it is made a canary (#628).
+      playerChannel: 'stable',
+      kind: 'device',
+      release: { running: null, since: null, failed: [] },
       credentials: [{ id: o.credential, secretHash: '0'.repeat(64), used: false }],
     });
   });
@@ -30,6 +35,23 @@ describe('findDeviceScreen', () => {
     await o.scope.screens.update(o.screen, { status: 'revoked' });
     expect(await hashes()).toEqual([]);
     await o.scope.screens.update(o.screen, { status: 'active' });
+  });
+
+  it("reads the last sync's photos, and a #514 heartbeat's one fingerprint of what it sent as no keys (#531)", async () => {
+    const photos = { held: 3, missing: 21, retried: true, ask: ['a'.repeat(16)] };
+    const lastPhotos = async (heartbeat: unknown) => {
+      await o.scope.screens.update(o.screen, { heartbeatJson: JSON.stringify({ photos: heartbeat }) });
+      return (await findDeviceScreen(env.DB, o.screen))?.lastPhotos;
+    };
+    expect(await lastPhotos({ ...photos, sent: ['b'.repeat(16)], repeat: [] })).toEqual({
+      missing: 21,
+      retried: true,
+      ask: ['a'.repeat(16)],
+      sent: ['b'.repeat(16)],
+      repeat: [],
+    });
+    expect(await lastPhotos({ ...photos, sent: 'c'.repeat(16) })).toEqual({ missing: 21, retried: true, ask: ['a'.repeat(16)] });
+    await o.scope.screens.update(o.screen, { heartbeatJson: null });
   });
 
   it('returns nothing for an unknown or malformed id', async () => {
@@ -53,13 +75,32 @@ describe('screens.setDesiredManifest', () => {
 });
 
 describe('screens.reportManifest', () => {
-  it('lets a report without a time replace one observed later, and counts it at its arrival', async () => {
+  const [m1, m2] = ['1'.repeat(64), '2'.repeat(64)];
+
+  it('lets a report without a time replace one stored at or before its arrival, and counts it at its arrival', async () => {
     const r = await seedOrg(env.DB, 'org-report');
-    const [m1, m2] = ['1'.repeat(64), '2'.repeat(64)];
     await r.scope.screens.reportManifest(r.screen, m2, { observedAt: 200, arrivedAt: 300 });
-    // A player before gh-44 (or an untrusted clock): ordered by arrival, so it always replaces.
+    // A player before gh-44 (or an untrusted clock): ordered by arrival.
+    await r.scope.screens.reportManifest(r.screen, m1, { arrivedAt: 250 });
+    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m1, reportedManifestAt: 250 });
+    // Two at one arrival time: the later write replaces.
+    await r.scope.screens.reportManifest(r.screen, m2, { arrivedAt: 250 });
+    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m2, reportedManifestAt: 250 });
+  });
+
+  it('does not let a report without a time land over one that arrived after it (#519)', async () => {
+    const r = await seedOrg(env.DB, 'org-report-late');
+    // Arrived at 100, but its write hung: one that arrived at 200 was written first.
+    await r.scope.screens.reportManifest(r.screen, m2, { arrivedAt: 200 });
     await r.scope.screens.reportManifest(r.screen, m1, { arrivedAt: 100 });
-    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m1, reportedManifestAt: 100 });
+    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m2, reportedManifestAt: 200 });
+    // The same over sync, which shares the rule: an untrusted clock's sync is ordered by arrival too.
+    const untimed = (at: number, active: string) =>
+      r.scope.screens.sync(r.screen, { at, active, playerVersion: '1', heartbeatJson: '{}', fallbackFrom: null, epoch: 'e', seq: 0, counts: [] });
+    await untimed(150, m1);
+    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m2, reportedManifestAt: 200 });
+    await untimed(300, m1);
+    expect(await r.scope.screens.get(r.screen)).toMatchObject({ reportedManifestId: m1, reportedManifestAt: 300 });
   });
 });
 
@@ -69,6 +110,7 @@ describe('screens.sync', () => {
     at: HOUR + 60_000,
     playerVersion: '1.0.0',
     heartbeatJson: '{"display":{"on":true}}',
+    fallbackFrom: null as string | null,
     epoch: 'ep1',
     seq: 1,
     counts: [
@@ -76,6 +118,41 @@ describe('screens.sync', () => {
       { hour: HOUR, spotId: 'news', plays: 2, ms: 20_000 },
     ],
     ...over,
+  });
+
+  it('keeps when a screen first said it fell back from a manifest, while it says the same (#367)', async () => {
+    const seeded = await seedOrg(env.DB, 'org-fallback-since');
+    const r = seeded.scope;
+    const said = (at: number, fallbackFrom: string | null) =>
+      r.screens.sync(seeded.screen, beat({ at, seq: 0, counts: [], fallbackFrom, heartbeatJson: JSON.stringify({ manifest: { fallbackFrom } }) }));
+    const since = async () => (await r.screens.get(seeded.screen))!.fallbackSince;
+    await said(HOUR, null);
+    expect(await since()).toBeNull();
+    await said(HOUR + 1000, 'm7');
+    expect(await since()).toBe(HOUR + 1000);
+    // Said again, later: kept from the first time.
+    await said(HOUR + 5000, 'm7');
+    expect(await since()).toBe(HOUR + 1000);
+    // Another manifest: from then.
+    await said(HOUR + 9000, 'm8');
+    expect(await since()).toBe(HOUR + 9000);
+    await said(HOUR + 12_000, null);
+    expect(await since()).toBeNull();
+  });
+
+  it('dates a fallback from before migration 0046 from the stored heartbeat, not the next one (#474)', async () => {
+    const seeded = await seedOrg(env.DB, 'org-fallback-0046');
+    const r = seeded.scope;
+    const said = (at: number) =>
+      r.screens.sync(
+        seeded.screen,
+        beat({ at, seq: 0, counts: [], fallbackFrom: 'm7', heartbeatJson: JSON.stringify({ at, manifest: { fallbackFrom: 'm7' } }) }),
+      );
+    await said(HOUR + 1000);
+    // What 0046 left: the column added, null, beside a heartbeat that already fell back.
+    await env.DB.prepare('UPDATE screens SET fallback_since = NULL WHERE id = ?').bind(seeded.screen).run();
+    await said(HOUR + 5000);
+    expect((await r.screens.get(seeded.screen))!.fallbackSince).toBe(HOUR + 1000);
   });
 
   it('stores a batch once, records the heartbeat, and keeps the highest seq per epoch', async () => {
@@ -158,5 +235,61 @@ describe('screens.sync', () => {
 
   it('returns nothing for a screen the org does not have', async () => {
     expect(await scoped(env.DB, 'org-device').screens.sync('scr_nope', beat())).toBeUndefined();
+  });
+});
+
+// #628: CI registers a release through `platform(db)`, and the row's version, hash and size come from the signed text.
+describe('platform(db).playerReleases.register', () => {
+  it('takes the version, hash and size from the text CI signed, and keeps the text and signature as they came', async () => {
+    const { manifest, signature } = await signedRelease({ version: 300, sha256: 'e'.repeat(64), size: 2048 });
+    const row = await platform(env.DB).playerReleases.register(manifest, signature);
+    expect(row).toMatchObject({ version: 300, sha256: 'e'.repeat(64), size: 2048, manifest, signature, channel: 'canary', promotedAt: null });
+  });
+
+  it('refuses text that is not a release manifest, and a signature not in Ed25519 form, writing nothing', async () => {
+    const good = await signedRelease({ version: 301, sha256: 'f'.repeat(64) });
+    const register = (manifest: string, signature = good.signature) => platform(env.DB).playerReleases.register(manifest, signature);
+    await expect(register('not json')).rejects.toThrow('not a player release: the manifest text is not JSON');
+    await expect(register(JSON.stringify({ ...JSON.parse(good.manifest), version: 0 }))).rejects.toThrow(/version must be a whole number from 1/);
+    await expect(register(good.manifest, 'c2ln')).rejects.toThrow('the signature is not an Ed25519 signature in base64');
+    await expect(register(`${good.manifest}${' '.repeat(1_048_576)}`)).rejects.toThrow('the manifest text is too long');
+    expect(await platform(env.DB).playerReleases.offered('canary')).not.toMatchObject({ version: 301 });
+  });
+});
+
+describe('platform(db).playerReleases: promoting, and the canaries (#628)', () => {
+  it('registers a version or a tarball once, writing nothing the second time', async () => {
+    const first = await signedRelease({ version: 310, sha256: '1'.repeat(64) });
+    expect(await platform(env.DB).playerReleases.register(first.manifest, first.signature)).toMatchObject({ version: 310 });
+    expect(await platform(env.DB).playerReleases.register(first.manifest, first.signature)).toBeUndefined();
+    const sameTarball = await signedRelease({ version: 311, sha256: '1'.repeat(64) });
+    expect(await platform(env.DB).playerReleases.register(sameTarball.manifest, sameTarball.signature)).toBeUndefined();
+    expect(await platform(env.DB).playerReleases.offers('canary', 311)).toBe(false);
+  });
+
+  it('promotes only a canary release, once', async () => {
+    const { manifest, signature } = await signedRelease({ version: 312, sha256: '2'.repeat(64) });
+    await platform(env.DB).playerReleases.register(manifest, signature, 'canary', 1_000);
+    expect(await platform(env.DB).playerReleases.promote(312, 2_000)).toMatchObject({ version: 312, channel: 'stable', promotedAt: 2_000 });
+    expect(await platform(env.DB).playerReleases.promote(312, 3_000)).toBeUndefined();
+    expect(await platform(env.DB).playerReleases.promote(9_999, 3_000)).toBeUndefined();
+    expect(await platform(env.DB).playerReleases.offers('stable', 312)).toBe(true);
+  });
+
+  it("lists every canary in every org with its heartbeat's release and last sight, and no other screen", async () => {
+    const heartbeat = { player: { release: 312 }, releaseSince: 5_000, failedReleases: [{ version: 311, reason: 'not-alive' }] };
+    await o.scope.screens.update(o.screen, { playerChannel: 'canary', heartbeatJson: JSON.stringify(heartbeat), lastSeenAt: 6_000 });
+    const other = await seedOrg(env.DB, 'org-device-canary');
+    await other.scope.screens.update(other.screen, { playerChannel: 'canary' });
+    await seedOrg(env.DB, 'org-device-stable');
+    const canaries = await platform(env.DB).playerReleases.canaries();
+    expect(canaries).toHaveLength(2);
+    expect(canaries).toEqual(
+      expect.arrayContaining([
+        { screenId: o.screen, lastSeenAt: 6_000, release: { running: 312, since: 5_000, failed: heartbeat.failedReleases } },
+        { screenId: other.screen, lastSeenAt: null, release: { running: null, since: null, failed: [] } },
+      ]),
+    );
+    await o.scope.screens.update(o.screen, { playerChannel: 'stable', heartbeatJson: null, lastSeenAt: null });
   });
 });

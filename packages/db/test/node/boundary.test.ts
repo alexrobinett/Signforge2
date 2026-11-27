@@ -1,7 +1,7 @@
 // The tenancy guard's other half: nothing outside packages/db may reach the table objects.
 // Code elsewhere imports `@signforge/db` (repositories and row types), and nothing else from this
-// package, except that tests in a package's own test/ or e2e/ directory (and the local dev-screen
-// script) may import `@signforge/db/testing`, whose direct writes production code must never reach.
+// package, except that tests in a package's own test/ or e2e/ directory (a spike's too) and the local
+// dev-screen script may import `@signforge/db/testing`, whose direct writes production code must never reach.
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +15,7 @@ const CODE = /\.(?:[cm]?[jt]sx?)$/;
 const TESTING = '@signforge/db/testing';
 
 /** A workspace package's own `test` or `e2e` directory (pnpm-workspace.yaml), not such a folder deeper in its source. */
-const TEST_DIR = /^(?:apps|packages|templates)\/[^/]+\/(?:test|e2e)\//;
+const TEST_DIR = /^(?:apps|packages|templates|spike)\/[^/]+\/(?:test|e2e)\//;
 
 /** Whether `file` may import `@signforge/db/testing`: a test, a test's harness or an e2e spec, or the local dev-screen script. */
 function mayUseTesting(file: string): boolean {
@@ -71,6 +71,8 @@ describe('import boundary', () => {
       'apps/api/src/test/x.ts',
       'packages/tools/src/e2e/x.ts',
       'test/x.ts',
+      // A spike's Worker is not a test.
+      'spike/tanstack-ai/src/worker.ts',
     ])
       expect(forbiddenImports(join(ROOT, prod), testing), prod).toEqual([TESTING]);
     expect(forbiddenImports(join(ROOT, 'apps/api/src/x.ts'), "const t = await import('@signforge/db/testing');")).toEqual([TESTING]);
@@ -79,6 +81,7 @@ describe('import boundary', () => {
       'packages/tools/test/harness-worker.ts',
       'packages/db/test/node/x.test.ts',
       'apps/cms/e2e/helpers.ts',
+      'spike/tanstack-ai/test/turn.test.ts',
       'apps/api/scripts/dev-screen.ts',
     ])
       expect(forbiddenImports(join(ROOT, allowed), testing), allowed).toEqual([]);
@@ -104,6 +107,30 @@ describe('import boundary', () => {
       const mod = (await import(path)) as Record<string, unknown>;
       for (const [name, value] of Object.entries(mod)) expect(is(value, Table), `${path}: ${name}`).toBe(false);
     }
+  });
+});
+
+describe('raw D1 in the API', () => {
+  // The API reaches D1 through packages/db's repositories. Two files wrap the binding in a Proxy for
+  // others to call through (Better Auth's adapter, the agent's statement budget) and may name its methods.
+  const WRAPPERS = new Set(['apps/api/src/auth/index.ts', 'apps/api/src/agent/chat.ts']);
+  const RAW_D1 = /\.\s*(?:prepare|batch)\s*\(/g;
+  const rawD1 = (source: string) => [...source.matchAll(RAW_D1)].map((m) => m[0]);
+
+  it('catches the ways in', () => {
+    expect(rawD1("await env.DB.prepare('SELECT 1').all();")).toHaveLength(1);
+    expect(rawD1('await c.env.DB.batch([a, b]);')).toHaveLength(1);
+    expect(rawD1('const db = env.DB;\nawait db\n  .prepare(sql)\n  .run();')).toHaveLength(1);
+    expect(rawD1('await scoped(env.DB, orgId).screens.get(id);')).toEqual([]);
+  });
+
+  it('holds across apps/api/src', () => {
+    const offenders: string[] = [];
+    for (const file of codeFiles(join(ROOT, 'apps/api/src'))) {
+      const path = relative(ROOT, file).split(sep).join('/');
+      if (!WRAPPERS.has(path)) for (const call of rawD1(readFileSync(file, 'utf8'))) offenders.push(`${path}: ${call}`);
+    }
+    expect(offenders).toEqual([]);
   });
 });
 

@@ -230,7 +230,7 @@ describe('rollout history in the publish batch (review 5)', () => {
           ...org.publishes.stage.advance(revision).writes,
           ...publish.writes,
           ...rollout.writes,
-          ...org.screens.stage.setDesiredManifest(p.screen, manifestId).writes,
+          ...org.screens.stage.setDesiredManifest(p.screen, manifestId, null).writes,
         ],
       };
     };
@@ -277,7 +277,11 @@ describe('publish history', () => {
   const publishAt = async (org: ReturnType<typeof scoped>, revision: number, rows: { screenId: string; manifestId: string }[], restoresId?: string) => {
     const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-1', revision, restoresId });
     const rollout = org.publishes.stage.addScreens(publish.row.id, rows);
-    await org.commit([...publish.writes, ...rollout.writes, ...rows.flatMap((r) => org.screens.stage.setDesiredManifest(r.screenId, r.manifestId).writes)]);
+    await org.commit([
+      ...publish.writes,
+      ...rollout.writes,
+      ...rows.flatMap((r) => org.screens.stage.setDesiredManifest(r.screenId, r.manifestId, null).writes),
+    ]);
     return publish.row;
   };
   const m = (c: string) => c.repeat(64);
@@ -314,6 +318,20 @@ describe('publish history', () => {
     ]);
     expect((await org.publishes.history({ beforeRevision: 3, limit: 10 })).map((h) => h.id)).toEqual([v2.id, p.publish]);
     expect(await testScope(env.DB, 'drafts-org').publishes.history({ limit: 10 })).not.toContainEqual(expect.objectContaining({ id: v2.id }));
+  });
+
+  it('names a member with no name by their address before the @, never the whole address (#253)', async () => {
+    const p = await seedOrg(env.DB, 'history-unnamed');
+    const org = testScope(env.DB, p.orgId);
+    const at = new Date().toISOString();
+    await env.DB.prepare(
+      "INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('user-unnamed', '', 'sam.ortiz@example.com', 1, ?, ?)",
+    )
+      .bind(at, at)
+      .run();
+    const publish = org.publishes.stage.insert({ status: 'published', actorKind: 'user', actorId: 'user-unnamed', revision: 2 });
+    await org.commit(publish.writes);
+    expect(await org.publishes.history({ limit: 1 })).toEqual([expect.objectContaining({ id: publish.row.id, actorName: 'sam.ortiz' })]);
   });
 
   it("reads a publish's rollout with each screen's state, and what each screen had as of a revision", async () => {

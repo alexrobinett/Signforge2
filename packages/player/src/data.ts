@@ -11,7 +11,7 @@
  * so a value that does not fit leaves the spot's fallback on screen. Every refusal is counted
  * against its source in `dataRejections`.
  */
-import { MIN_REFRESH_S, parseDataSnapshot, type DataSnapshot, type ScreenManifest, type SyncResponse } from '@signforge/contract';
+import { isNewsImage, MIN_REFRESH_S, parseDataSnapshot, type DataSnapshot, type ScreenManifest, type SyncResponse } from '@signforge/contract';
 import { manifestBoundFields, snapshotFit, type Rejected } from '@signforge/player-core';
 
 const STATE = 'sf-state-v1';
@@ -114,34 +114,57 @@ async function refresh(base: string, id: string, manifest: ScreenManifest): Prom
  * Snapshots from a sync's response, each checked against the manifest `playing` gives as it comes
  * to it: a new manifest the answer names is adopted later, by the content worker, which then marks
  * that manifest's sources loaded too, and one it adopts while these are written is the one the rest
- * are checked against. Then every source of the manifest playing counts as loaded: a spot waiting
- * for its feed starts with what there is.
+ * are checked against.
  */
 export async function offerSnapshots(list: readonly DataSnapshot[], playing: () => ScreenManifest | undefined, desired: string | undefined): Promise<void> {
   for (const snap of list) await offer(snap.id, snap, playing(), desired).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
-  settleSources(playing());
 }
 
 /** Offer `manifest`, just adopted, the snapshots refused for the one before it while the sync named another. */
 export async function offerPending(manifest: ScreenManifest): Promise<void> {
-  const waiting = [...pending];
-  pending.clear();
-  for (const [id, p] of waiting) await offer(id, p.snapshot, manifest, p.desired).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
+  // Each stays waiting until its own offer is done: a sync between offers prunes photos by `namedImages`, which reads
+  // the waiting ones too.
+  for (const [id, p] of [...pending]) {
+    await offer(id, p.snapshot, manifest, p.desired).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
+    if (pending.get(id) === p) pending.delete(id);
+  }
 }
 
 /**
  * A sync's `checked`: the server confirmed a snapshot again without sending its data. Moves on the
  * held copy's `checkedAt` (which staleness counts from) only for the version it names, so a
- * refused newer version never freshens the older copy still held.
+ * refused newer version never freshens the older copy still held, and takes the stale age the server gives its
+ * source now (#624).
  */
 export async function offerChecked(checked: NonNullable<SyncResponse['checked']>): Promise<void> {
   for (const [id, c] of Object.entries(checked)) {
     const held = snapshots.get(id);
-    if (!held || held.version !== c.version || Date.parse(c.checkedAt) <= Date.parse(held.checkedAt)) continue;
-    const next = { ...held, checkedAt: c.checkedAt };
+    if (!held || held.version !== c.version) continue;
+    const newer = Date.parse(c.checkedAt) > Date.parse(held.checkedAt);
+    if (!newer && c.staleS === held.staleS) continue;
+    const { staleS: _, ...rest } = held;
+    const next = { ...rest, checkedAt: newer ? c.checkedAt : held.checkedAt, ...(c.staleS === undefined ? {} : { staleS: c.staleS }) };
     snapshots.set(id, next);
     await store(id, next).catch((err: unknown) => console.warn('[sf] could not keep a snapshot', err));
   }
+}
+
+/**
+ * Every feed photo a snapshot the screen holds or keeps waiting names (any `{ file, thumb }` in its data): what a
+ * manifest still on its way can need. A photo only a superseded snapshot named is in none of them.
+ */
+export function namedImages(): Set<string> {
+  const out = new Set<string>();
+  const visit = (v: unknown): void => {
+    if (isNewsImage(v)) {
+      out.add(v.file);
+      out.add(v.thumb);
+    } else if (Array.isArray(v)) v.forEach(visit);
+    else if (typeof v === 'object' && v !== null) Object.values(v).forEach(visit);
+  };
+  for (const snap of snapshots.values()) visit(snap.data);
+  for (const { snapshot } of pending.values()) visit(snapshot.data);
+  return out;
 }
 
 /** Load the stored snapshots of `manifest`'s sources, for a screen whose data comes on sync. */
@@ -167,7 +190,7 @@ export function heldVersions(): Record<string, number> {
  * cold boot the first pass runs before any manifest has loaded and finds no sources). Fetch
  * failures are silent: the last good value stays.
  */
-export function startDataLoop(base: string, manifest: () => ScreenManifest | undefined): () => void {
+export function startDataLoop(base: string, manifest: () => ScreenManifest | undefined, onSnapshot?: (m: ScreenManifest) => Promise<void>): () => void {
   // Every source at once: one slow feed must not hold back the others.
   const one = async (m: ScreenManifest, s: ScreenManifest['dataSources'][string]) => {
     await restore(s.id).catch(() => undefined);
@@ -177,6 +200,7 @@ export function startDataLoop(base: string, manifest: () => ScreenManifest | und
       fetchedAt.set(s.id, Date.now());
       await refresh(base, s.id, m).catch(() => undefined);
     }
+    if (onSnapshot) await onSnapshot(m).catch(() => undefined);
     if (!settled.has(s.id)) markSettled(s.id);
   };
   let running: Promise<void> | undefined;

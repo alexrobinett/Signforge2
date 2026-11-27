@@ -3,7 +3,7 @@
  * otherwise, which is how `sf template seed`'s templates are checked), and each way the hostile
  * fixture misbehaves is refused with its problem.
  */
-import { buildTemplate } from '@signforge/cli/template';
+import { buildTemplate } from '@signforge/template-build';
 import type { TemplateManifest } from '@signforge/contract';
 import { existsSync, readdirSync } from 'node:fs';
 import type { Browser } from 'playwright-core';
@@ -96,6 +96,15 @@ describe('a template that misbehaves', () => {
     const [long] = (await checkTemplate(browser, inMode('long-error'), hostile.html)).problems;
     expect(long).toBe(`failed to prepare: ${'x'.repeat(178)}...`);
     expect(long).toHaveLength(200);
+  });
+
+  it('is refused: ready before init', async () => {
+    // A bundle that says ready as it loads, before it is told anything: the SDK never does.
+    const manifest = inMode('ok');
+    const early = `<!doctype html><body><script>"use strict";parent.postMessage({ sf: ${manifest.protocol}, type: "ready" }, "*");</script></body>`;
+    const result = await checkTemplate(browser, manifest, early);
+    expect(result.problems).toEqual(['reported ready before init']);
+    expect(result.renders.map((r) => r.readyMs)).toEqual([null, null]);
   });
 
   it('reports no ready time when it never got ready, and no frames when it never played', async () => {

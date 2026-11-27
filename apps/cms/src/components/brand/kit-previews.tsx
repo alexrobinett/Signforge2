@@ -7,6 +7,7 @@ import { SCREEN_BOX } from '@signforge/contract';
 import { Link } from '@tanstack/react-router';
 import { useCallback } from 'react';
 import { useHydrated } from '~/lib/hydrated';
+import { useWidthRef } from '~/lib/measured';
 import { PLAYER_URL } from '~/lib/preview';
 import type { SpotView } from '~/lib/spots';
 import { useAppStore } from '~/state/provider';
@@ -32,19 +33,11 @@ function KitPreview({ orgId, kitId, spot, what }: { orgId: string; kitId: string
     },
     [attach, orgId, kitId, spotId, templateVersionId],
   );
-  const boxRef = useCallback(
-    (el: HTMLDivElement | null) => {
-      if (!el) return;
-      const seen = new ResizeObserver(([entry]) => entry && measure(Math.round(entry.contentRect.width)));
-      seen.observe(el);
-      return () => seen.disconnect();
-    },
-    [measure],
-  );
+  const boxRef = useWidthRef(measure);
 
   return (
     <figure className="m-0 flex min-w-0 flex-col gap-1.5">
-      <div ref={boxRef} className="relative aspect-video overflow-hidden rounded-lg bg-black ring-1 ring-border">
+      <div ref={boxRef} className="relative aspect-video overflow-hidden rounded-lg bg-letterbox ring-1 ring-border">
         {hydrated && (
           <iframe
             ref={frameRef}
@@ -57,7 +50,7 @@ function KitPreview({ orgId, kitId, spot, what }: { orgId: string; kitId: string
           />
         )}
       </div>
-      <figcaption className="flex flex-wrap justify-between gap-x-2 text-[13px]">
+      <figcaption className="flex flex-wrap justify-between gap-x-2 text-meta">
         <Link to="/spots/$spotId" params={{ spotId: spot.id }} className="font-semibold underline-offset-4 hover:underline">
           {spot.name}
         </Link>
@@ -90,7 +83,7 @@ export function KitPreviews({
           Your spots, with this kit
         </h2>
         {spots.length > 0 && (
-          <span className="text-[13px] text-muted-foreground">
+          <span className="text-meta text-muted-foreground">
             {spots.length} of {total} · each one is the player your screens run, re-theming as you edit
           </span>
         )}

@@ -107,26 +107,33 @@ body {
   font-size: calc(var(--lk-size-body) * var(--lk-scale) * var(--fit-body));
   line-height: 1.4;
   color: var(--lk-muted);
-  text-wrap: pretty;
+  text-wrap: balance;
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   overflow: hidden;
 }
+/* Facts as ruled rows, the label beside the value, so a value wraps rather than being cut ("9 am" stays whole). */
 .facts {
   grid-area: facts;
   display: flex;
+  flex-direction: column;
   min-width: 0;
+  border-top: var(--lk-rule) solid var(--lk-rule-color);
 }
 .fact {
-  flex: 1 1 0;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 0.4em;
+  align-items: baseline;
+  gap: 2.6vmin;
+  padding: calc(1vmin * var(--fit-body)) 0;
+  border-bottom: var(--lk-rule) solid var(--lk-rule-color);
 }
 .fact dt {
+  flex: none;
+  width: 5em;
+  max-width: 35%;
   font-family: var(--lk-font-label);
   font-weight: var(--lk-label-weight);
   font-size: var(--lk-size-label);
@@ -138,19 +145,24 @@ body {
   text-overflow: ellipsis;
 }
 .fact dd {
+  flex: 1;
+  min-width: 0;
   font-size: calc(var(--lk-size-title) * var(--fit-body));
   line-height: 1.15;
+  text-wrap: balance;
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
+/* The code on the ground, its label under it. */
 .qr {
   grid-area: qr;
   display: flex;
-  align-items: center;
-  gap: var(--lk-gap);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1.4vmin;
   min-width: 0;
 }
 /* The code is always dark on white with its quiet zone, whatever the look or the kit: readers need it. */
@@ -168,11 +180,12 @@ body {
 }
 .qr-label {
   min-width: 0;
-  max-width: 13em;
+  max-width: var(--qr);
+  text-wrap: balance;
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   overflow: hidden;
 }
 .meta {
@@ -183,6 +196,7 @@ body {
   font-size: var(--lk-size-label);
   line-height: 1.45;
   color: var(--lk-muted);
+  text-wrap: balance;
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -208,14 +222,16 @@ body {
   object-fit: cover;
 }
 
-/* Pop: the copy and the photo on a tilted tomato card inside a padded page; the eyebrow a wobbling
-   sticker, the QR code on a cobalt card. The canvas tilts the photo too: a drifting photo clipped
-   by a rotated rounded frame dropped 0.77% of frames while playing on the Pi, so it stands straight. */
+/* Pop: the copy and the photo on a tomato block, the look's one accent, inside a padded page; the label plain text,
+   the QR code on the ground. A drifting photo clipped by a rotated rounded frame dropped 0.77% of frames while playing
+   on the Pi, so the photo and its block stand straight. */
 [data-look='pop'] .stage {
   padding: 6.7vmin 8.9vmin;
   gap: 8.9vmin;
 }
+/* The code holds its size to scan, so at max-length copy the space between blocks, and the code's label, step down with the body. */
 [data-look='pop'] .copy {
+  --pop-gap: calc(var(--lk-gap) * var(--fit-body));
   grid-template-rows: min-content min-content min-content min-content minmax(0, 1fr) min-content;
   grid-template-areas:
     'eyebrow eyebrow logo'
@@ -226,14 +242,10 @@ body {
     'meta meta qr';
 }
 [data-look='pop'] .eyebrow {
-  margin-bottom: var(--lk-gap);
+  margin-bottom: var(--pop-gap);
 }
 [data-look='pop'] .pill {
-  padding: 0.4em 0.9em;
-  border-radius: var(--lk-radius-pill);
-  background: var(--lk-primary);
-  color: var(--lk-on-primary);
-  transform: rotate(-3deg);
+  font-size: 3.1vmin;
 }
 [data-look='pop'] .rule,
 [data-look='pop'] .foot-rule {
@@ -241,66 +253,52 @@ body {
 }
 [data-look='pop'] .body,
 [data-look='pop'] .facts {
-  margin-top: var(--lk-gap);
+  margin-top: var(--pop-gap);
+}
+[data-look='pop'] .body {
+  max-width: 24em;
 }
 [data-look='pop'] .facts {
-  gap: 1.6vmin;
+  border-top-color: var(--lk-text);
 }
 [data-look='pop'] .fact {
-  padding: 1.2vmin 2vmin;
-  border: var(--lk-rule) solid var(--lk-rule-color);
-  border-radius: var(--lk-radius-small);
+  border-bottom-color: var(--lk-text);
 }
 [data-look='pop'] .fact dt {
-  font-size: 2.2vmin;
+  font-size: 3.1vmin;
 }
 [data-look='pop'] .fact dd {
   font-family: var(--lk-font-display);
   font-weight: 800;
-  font-size: calc(3.3vmin * var(--fit-body));
+  font-size: calc(3.7vmin * var(--fit-body));
 }
 [data-look='pop'] .qr,
 [data-look='pop'] .meta {
-  margin-top: var(--lk-gap);
+  margin-top: var(--pop-gap);
   align-self: end;
 }
 [data-look='pop'] .qr {
-  --lk-motion: var(--lk-badge-motion);
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1.5vmin;
   margin-left: 3.7vmin;
-  padding: 1.7vmin;
-  border-radius: 3.3vmin;
-  background: var(--lk-accent);
-  color: var(--lk-on-accent);
   font-family: var(--lk-font-display);
-  font-weight: 800;
-  font-size: 3.7vmin;
-  line-height: 1.05;
-}
-[data-look='pop'] .tile {
-  border-radius: 1.4vmin;
-  overflow: hidden;
+  font-weight: 700;
+  font-size: max(2.6vmin, 3.1vmin * var(--fit-body));
+  line-height: 1.25;
 }
 [data-look='pop'] .qr-label {
-  max-width: var(--qr);
-  padding-inline: 0.4em;
   -webkit-line-clamp: 2;
 }
 [data-look='pop'] .meta-in {
   -webkit-line-clamp: 3;
 }
 [data-look='pop'] .photo {
-  flex-basis: 36.5vw;
+  flex-basis: 31vw;
 }
 [data-look='pop'] .photo::before {
   content: '';
   position: absolute;
-  inset: 3.3vmin -2.6vmin -2.2vmin 3.3vmin;
-  border-radius: 6.7vmin;
+  inset: 2.6vmin -2.6vmin -2.6vmin 2.6vmin;
+  border-radius: min(var(--lk-radius), 6.7vmin);
   background: var(--lk-primary);
-  transform: rotate(-4deg);
 }
 [data-look='pop'] .frame {
   border-radius: var(--lk-radius);
@@ -315,7 +313,7 @@ body {
     'qr meta meta';
 }
 :where([data-orientation='portrait'])[data-look='pop'] .qr {
-  margin: var(--lk-gap) 3.7vmin 0 0;
+  margin: var(--pop-gap) 3.7vmin 0 0;
 }
 :where([data-orientation='portrait'])[data-look='pop'] .photo {
   flex-basis: 30vh;
@@ -326,9 +324,8 @@ body {
   grid-column: 1 / -1;
 }
 
-/* Poster: a printed bill. A ruled header, a serif headline that slides out of its mask, a ruled
-   footer with the signature in italic and the code in a ruled frame; the photo full bleed behind a
-   rule, uncovered by the ink wipe. */
+/* Poster: a printed bill. A ruled header, a serif headline, a ruled footer with the signature in
+   italic and the code in a ruled frame; the photo full bleed behind a rule. */
 [data-look='poster'] .copy {
   padding: 6.7vmin 8.1vmin 6.7vmin 8.9vmin;
   grid-template-rows: min-content min-content min-content min-content min-content minmax(0, 1fr) min-content min-content;
@@ -370,18 +367,13 @@ body {
 }
 [data-look='poster'] .facts {
   margin-top: 3.3vmin;
-  gap: 2.2vmin;
-}
-[data-look='poster'] .fact:where(.fact + *) {
-  padding-left: 2.2vmin;
-  border-left: max(1px, 0.1vmin) solid var(--lk-rule-color);
 }
 [data-look='poster'] .fact dt {
   color: var(--lk-text);
 }
 [data-look='poster'] .fact dd {
   font-family: var(--lk-font-display);
-  font-size: calc(4.6vmin * var(--fit-body));
+  font-size: calc(3.7vmin * var(--fit-body));
   line-height: 1;
 }
 [data-look='poster'] .foot-rule {
@@ -430,7 +422,7 @@ body {
 }
 
 /* Night: a dark console. A mono header over a rule, the photo in a rounded panel across the
-   screen, then the headline in lime with the code beside it in a lime frame. */
+   screen, then the headline in amber with the code beside it in an amber frame. */
 [data-look='night'] .stage {
   display: grid;
   align-items: start;
@@ -474,8 +466,8 @@ body {
 [data-look='night'] .meta-in {
   --lk-motion: var(--lk-text-motion);
 }
-[data-look='night'] .pill,
-[data-look='night'] .meta-in {
+/* The label is Night's one accent. */
+[data-look='night'] .pill {
   color: var(--lk-accent-ink-large);
 }
 /* The eyebrow and the meta line share the header, one at each end. */
@@ -525,10 +517,6 @@ body {
 }
 [data-look='night'] .facts {
   margin-top: 3vmin;
-  gap: 3.7vmin;
-}
-[data-look='night'] .fact dt {
-  color: var(--lk-accent-ink);
 }
 [data-look='night'] .fact dd {
   font-family: var(--lk-font-display);
@@ -543,13 +531,8 @@ body {
   width: calc(var(--qr) + 3vmin);
   font-family: var(--lk-font-label);
   font-size: 2.1vmin;
-  color: var(--lk-accent-ink);
+  color: var(--lk-muted);
   text-align: center;
-}
-[data-look='night'] .tile {
-  padding: 1.5vmin;
-  border-radius: 2.6vmin;
-  background: var(--lk-primary);
 }
 :where([data-orientation='portrait'])[data-look='night'] .stage {
   grid-template-rows: min-content min-content minmax(34%, 1fr) min-content min-content min-content;
@@ -579,7 +562,7 @@ body {
     'headline headline headline'
     'body body body'
     'frule frule frule'
-    'facts facts facts'
+    'facts facts qr'
     'meta meta qr';
 }
 [data-look='corporate'] .logo {
@@ -620,13 +603,6 @@ body {
 [data-look='corporate'] .foot-rule {
   margin: 3vmin 0 2.2vmin;
 }
-[data-look='corporate'] .facts {
-  gap: 2.2vmin;
-}
-[data-look='corporate'] .fact:where(.fact + *) {
-  padding-left: 2.2vmin;
-  border-left: var(--lk-rule) solid var(--lk-rule-color);
-}
 [data-look='corporate'] .fact dd {
   font-weight: 500;
 }
@@ -640,7 +616,6 @@ body {
   line-height: 1.5;
 }
 [data-look='corporate'] .qr {
-  flex-direction: row-reverse;
   margin-left: 3.7vmin;
   font-family: var(--lk-font-label);
   font-weight: var(--lk-label-weight);
@@ -652,10 +627,6 @@ body {
 }
 [data-look='corporate'] .tile {
   border: var(--lk-rule) solid var(--lk-rule-color);
-}
-[data-look='corporate'] .qr-label {
-  text-align: right;
-  max-width: 12em;
 }
 [data-look='corporate'] .photo {
   flex-basis: 39.6vw;

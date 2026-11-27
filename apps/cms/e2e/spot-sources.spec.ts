@@ -1,20 +1,20 @@
 // Spots whose data comes from a source (issue #79): people pick where it comes from, never the
 // values. The geocoder is a stub (global-setup.ts); the poller does not run under `wrangler dev`, so
 // a test writes the snapshot it would have fetched into the run's local D1.
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request } from '@playwright/test';
 import { canonicalJson } from '@signforge/contract';
 import { normaliseFeed } from '@signforge/feeds';
-import { axe, d1, fillUntilEnabled, hydrated, newSpot, orgOf, shots, signInAs, spotIdOf, stageShows, tool } from './helpers';
+import { axe, createOrg, d1, hydrated, newSpot, orgOf, shots, signInAs, spotIdOf, stageShows, tool } from './helpers';
 
 /** This spec's own client address, so its sign-in has its own rate limit. */
 const ADDRESS = '192.0.2.33';
 
 /** As if the poller had just fetched `data` for the source. */
-function pollFound(spotId: string, sourceId: string, data: unknown) {
+async function pollFound(spotId: string, sourceId: string, data: unknown) {
   const now = Date.now();
   // As the poller stores it: keys sorted at every level.
   const json = canonicalJson(data).replaceAll("'", "''");
-  d1(
+  await d1(
     `INSERT INTO data_snapshots (org_id, data_source_id, version, fetched_at, checked_at, data_json) VALUES (${orgOf(spotId)}, '${sourceId}', 'e2e-${now}', ${now}, ${now}, '${json}') ` +
       'ON CONFLICT (org_id, data_source_id) DO UPDATE SET version = excluded.version, fetched_at = excluded.fetched_at, checked_at = excluded.checked_at, data_json = excluded.data_json',
   );
@@ -37,16 +37,12 @@ let page: Page;
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext({ viewport: { width: 1920, height: 1200 } })).newPage();
   await signInAs(page, `e2e-sources-${Date.now()}@example.com`, ADDRESS);
-  await page.goto('/');
-  await fillUntilEnabled(page, 'Organization name', 'Northside Market', 'Create organization');
-  await page.getByRole('button', { name: 'Create organization' }).click();
-  await expect(page.getByRole('heading', { name: 'Northside Market', level: 1 })).toBeVisible();
+  await createOrg(page, 'Northside Garden', ADDRESS);
 });
 
 test.afterAll(() => page.context().close());
 
 test('a weather spot: pick a place and units, see live weather on the stage, and type no temperature', async () => {
-  test.setTimeout(120_000);
   const spotId = await newSpot(page, 'Weather Now', 'Lobby weather');
   const form = page.getByRole('form', { name: 'Spot fields' });
   const stage = page.getByRole('region', { name: 'Live preview' });
@@ -80,12 +76,12 @@ test('a weather spot: pick a place and units, see live weather on the stage, and
   });
 
   // The first poll lands: live values in the form, read-only, and on the stage.
-  pollFound(spotId, atlanta, ATLANTA);
+  await pollFound(spotId, atlanta, ATLANTA);
   await page.reload();
   await hydrated(page);
   await expect(form.getByText('88°F, overcast')).toBeVisible();
   await expect(form.getByText(/Checked (just now|.* ago)\./)).toBeVisible();
-  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(stage.getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   await expect.poll(() => stageShows(page, '91°'), { timeout: 10_000 }).toBe(true);
   await axe(page);
   await shots(page, '35-spot-source-weather');
@@ -114,7 +110,6 @@ test('a weather spot: pick a place and units, see live weather on the stage, and
 });
 
 test('a second spot for the same place and units shares the source; moving it leaves the first where it was', async () => {
-  test.setTimeout(120_000);
   const first = spotIdOf(page);
   const spotId = await newSpot(page, 'Weather Now', 'Front door weather');
   const form = page.getByRole('form', { name: 'Spot fields' });
@@ -141,11 +136,11 @@ test('a second spot for the same place and units shares the source; moving it le
   expect((await tool(page, 'get_spot', { spotId: first })).spot.bindings.temp.dataSourceId).toMatch(/^weather-4180439-f-mph-/);
 
   // A failing source: the editor says so, and the stage shows the fallback, as a screen would.
-  pollFailed(spotId, reykjavik);
+  await pollFailed(spotId, reykjavik);
   await page.reload();
   await hydrated(page);
   await expect(form.getByText('The first check failed: the feed took too long to answer.', { exact: false })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Live preview' }).getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('region', { name: 'Live preview' }).getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   await expect.poll(() => stageShows(page, '78°'), { timeout: 10_000 }).toBe(true);
   await axe(page);
   await shots(page, '36-spot-source-failing');
@@ -162,7 +157,6 @@ test('a second spot for the same place and units shares the source; moving it le
 });
 
 test('a news spot: add a feed by its address, see the headlines live, and edit none of them', async () => {
-  test.setTimeout(120_000);
   const spotId = await newSpot(page, 'News', 'World news');
   const form = page.getByRole('form', { name: 'Spot fields' });
   await expect(form.getByRole('button', { name: 'Add a row' })).toBeHidden();
@@ -189,7 +183,7 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
     <item><title>City library extends its weekend hours</title><enclosure url="https://cdn.feeds.example.com/library.jpg" type="image/jpeg"/>
       <content:encoded><![CDATA[<img src="/reading-room.jpg">]]></content:encoded></item>
   </channel></rss>`;
-  pollFound(spotId, feed.id, normaliseFeed('rss', rss, { url: 'https://feeds.example.com/world.rss' }));
+  await pollFound(spotId, feed.id, normaliseFeed('rss', rss, { url: 'https://feeds.example.com/world.rss' }));
   expect((await tool(page, 'get_data_source', { dataSourceId: feed.id })).snapshot.data).toEqual({
     title: 'World desk',
     language: 'en',
@@ -224,13 +218,17 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
   await form.getByRole('button', { name: 'Add feed' }).click();
   await expect(form.getByText('Local desk')).toBeVisible();
   await expect(page.getByText(/Saved \d/)).toBeVisible();
+  // A save sends its cleanup's deletes before it says Saved (`dropUnbound`, src/state/spot-editor.ts).
+  const deletes: string[] = [];
+  const sent = (r: Request) => void (r.url().endsWith('/api/tools/delete') && deletes.push(r.url()));
+  page.on('request', sent);
   await form.getByRole('button', { name: 'Change source' }).click();
   await form.getByLabel('News feed').selectOption({ label: 'World desk' });
   await form.getByRole('button', { name: 'Use this feed' }).click();
   await expect(form.getByRole('listitem').filter({ hasText: 'Harbour bridge reopens after repairs' })).toBeVisible();
   await expect(page.getByText(/Saved \d/)).toBeVisible();
-  // Long enough for a cleanup after the save to have run.
-  await page.waitForTimeout(2_000);
+  page.off('request', sent);
+  expect(deletes).toEqual([]);
   const names = async () => ((await tool(page, 'list_data_sources', {})).dataSources as { name: string }[]).map((d) => d.name);
   expect(await names()).toContain('Local desk');
 
@@ -240,7 +238,6 @@ test('a news spot: add a feed by its address, see the headlines live, and edit n
 });
 
 test('a template with two sources: a place for the weather and a feed for the news, each bound, fresh or stale, on its own', async () => {
-  test.setTimeout(120_000);
   await page.setViewportSize({ width: 1920, height: 1200 });
   const first = (await tool(page, 'list_spots', {})).spots.find((s: { name: string }) => s.name === 'Lobby weather').id;
   const spotId = await newSpot(page, 'Weather and headlines (test)', 'Lobby frame');
@@ -263,30 +260,30 @@ test('a template with two sources: a place for the weather and a feed for the ne
   await expect(page.getByText(/Saved \d/)).toBeVisible();
   const feed = (await tool(page, 'list_data_sources', {})).dataSources.find((d: { name: string }) => d.name === 'Frame desk');
   const { spot } = await tool(page, 'get_spot', { spotId });
-  // The forecast reads only the temperature, so it is a source of its own, not the weather spots' one.
+  // The forecast reads only the temperature, which every weather source asks for: the weather spots' own source (#345).
   const weatherId: string = spot.bindings.temp.dataSourceId;
   expect(weatherId).toMatch(/^weather-4180439-f-mph-/);
-  expect(weatherId).not.toBe((await tool(page, 'get_spot', { spotId: first })).spot.bindings.temp.dataSourceId);
+  expect(weatherId).toBe((await tool(page, 'get_spot', { spotId: first })).spot.bindings.temp.dataSourceId);
   expect(spot.bindings).toEqual({ temp: { dataSourceId: weatherId, path: 'current.temperature_2m' }, items: { dataSourceId: feed.id, path: 'items' } });
 
   // Both polls land: each block shows its own source's values, and the stage plays both.
-  pollFound(spotId, weatherId, ATLANTA);
+  await pollFound(spotId, weatherId, ATLANTA);
   const rss = `<?xml version="1.0"?><rss version="2.0"><channel><title>Frame desk</title><language>en</language>
     <item><title>Night market opens on the square</title></item>
   </channel></rss>`;
-  pollFound(spotId, feed.id, normaliseFeed('rss', rss, { url: 'https://feeds.example.com/frame.rss' }));
+  await pollFound(spotId, feed.id, normaliseFeed('rss', rss, { url: 'https://feeds.example.com/frame.rss' }));
   await page.reload();
   await hydrated(page);
   await expect(weather.getByText('88°F, overcast')).toBeVisible();
   await expect(news.getByRole('listitem').filter({ hasText: 'Night market opens on the square' })).toBeVisible();
-  await expect(stage.getByText('Drawn by the player your screens run.')).toBeVisible({ timeout: 30_000 });
+  await expect(stage.getByRole('status')).toHaveText('Preview ready', { timeout: 30_000 });
   await expect.poll(() => stageShows(page, 'Atlanta 88°F'), { timeout: 10_000 }).toBe(true);
   await expect.poll(() => stageShows(page, 'Night market opens on the square'), { timeout: 10_000 }).toBe(true);
   await axe(page);
   await shots(page, '94-spot-source-two');
 
   // The forecast goes unconfirmed for a day: the weather falls back, the news stays live.
-  d1(`UPDATE data_snapshots SET checked_at = ${Date.now() - 25 * 3_600_000} WHERE org_id = ${orgOf(spotId)} AND data_source_id = '${weatherId}'`);
+  await d1(`UPDATE data_snapshots SET checked_at = ${Date.now() - 25 * 3_600_000} WHERE org_id = ${orgOf(spotId)} AND data_source_id = '${weatherId}'`);
   await page.reload();
   await hydrated(page);
   await expect(weather.getByText(/Not confirmed for .*: screens show the fallback values\./)).toBeVisible();
@@ -294,8 +291,20 @@ test('a template with two sources: a place for the weather and a feed for the ne
   await expect.poll(() => stageShows(page, 'Atlanta 72°F'), { timeout: 30_000 }).toBe(true);
   await expect.poll(() => stageShows(page, 'Night market opens on the square'), { timeout: 10_000 }).toBe(true);
 
-  // With neither, the stage plays both fallbacks.
+  // With neither, the stage plays both fallbacks: the spot's own values, never the template's sample (#253), so no headline.
   await stage.getByRole('button', { name: 'Fallback' }).click();
-  await expect.poll(() => stageShows(page, 'Fallback headline'), { timeout: 10_000 }).toBe(true);
+  // The headlines in the stage's frame (stageShows would also find the one the form lists).
+  const stageHeadlines = async () => {
+    for (const frame of page.frames())
+      if (
+        await frame
+          .locator('#weather')
+          .count()
+          .catch(() => 0)
+      )
+        return frame.locator('#headlines li').count();
+    return -1;
+  };
+  await expect.poll(stageHeadlines, { timeout: 10_000 }).toBe(0);
   await expect.poll(() => stageShows(page, 'Atlanta 72°F'), { timeout: 10_000 }).toBe(true);
 });

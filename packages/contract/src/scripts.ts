@@ -2,18 +2,26 @@
  * The scripts of a template bundle, read with an HTML parser: parse5 follows the HTML standard's
  * tokenizer and tree builder, so HTML and SVG script elements are found (those in a `<template>` too)
  * with their attributes decoded, and text that only looks like a script (in a textarea, a comment, an
- * attribute) is not one. A `script` in MathML never runs, and is skipped. Inside a `<select>` parse5
- * and Chromium disagree (Chromium parses it as a customizable select), so a `<select>` that holds any
- * script markup is refused and nothing in it is armed. The bundle check and the player
+ * attribute) is not one. A `script` in MathML never runs, and is skipped. A `<select>` is refused: a
+ * screen takes no input, and inside one parse5 and Chromium disagree (Chromium parses it as a
+ * customizable select), so nothing in it is armed either. Up to the first `<select>` the two parse
+ * alike, so parse5 finds that one where Chromium does. The bundle check and the player
  * (`containedFrames` in packages/player-core) both read scripts through this, so they agree on which
  * ones a template frame runs and where their text is. See Template containment in docs/architecture.md.
+ *
+ * The same walk gives the bundle check its styles (#326): each `<style>` element's text and each `style` attribute's
+ * value as the parser reads them (in an SVG's `<style>`, character references read, CDATA unwrapped and comments left
+ * out; in an HTML one, the text as written), linear in the bundle. What a refused `<select>` holds is not read again.
  */
 import { type DefaultTreeAdapterTypes as Tree, parse } from 'parse5';
 import { TEMPLATE_SCRIPT_START } from './shapes.ts';
 
-/** A script element, or a `<select>` that holds script markup. */
+// Here too, so the player's bundle worker imports this module alone (`@signforge/contract/scripts`) and not the validators.
+export { TEMPLATE_SCRIPT_START };
+
+/** A script element, or a `<select>`, which a template may not hold. */
 export interface BundleScript {
-  /** Where the script's text (or the `<select>`) is in the returned `html`, from `start` to `end`. */
+  /** Where the script's text (or the whole `<select>`) is in the returned `html`, from `start` to `end`. */
   start: number;
   end: number;
   /** Whether a template frame runs it: inline, classic JavaScript, plain text, starting with exactly TEMPLATE_SCRIPT_START. */
@@ -24,7 +32,7 @@ export interface BundleScript {
 
 const HTML = 'http://www.w3.org/1999/xhtml';
 const SVG = 'http://www.w3.org/2000/svg';
-const IN_SELECT = 'a <select> may not hold a script: browsers parse <select> differently, and none runs in a template';
+const NO_SELECT = 'a template may not hold a <select>: a screen takes no input; use text or an image';
 // The HTML standard's JavaScript MIME type essences, and the other types it runs as a script.
 const JAVASCRIPT = new Set([
   'application/ecmascript',
@@ -46,13 +54,23 @@ const JAVASCRIPT = new Set([
 ]);
 const OTHER_SCRIPTS = new Set(['module', 'importmap', 'speculationrules']);
 
+const asciiSpace = (c: string | undefined) => c === '\t' || c === '\n' || c === '\f' || c === '\r' || c === ' ';
+/** ASCII whitespace off both ends, as the HTML standard strips it: by index, linear however long the run (review of #438). */
+function asciiTrim(text: string): string {
+  let start = 0;
+  let end = text.length;
+  while (start < end && asciiSpace(text[start])) start += 1;
+  while (end > start && asciiSpace(text[end - 1])) end -= 1;
+  return text.slice(start, end);
+}
+
 /** A script element's type string, as the HTML standard's "prepare the script element" computes it, lowercased. */
 function typeOf(el: Tree.Element): string {
   const attr = (name: string) => el.attrs.find((a) => a.name === name && !a.prefix)?.value;
   const type = attr('type');
   const language = attr('language');
   if (type === '' || (type === undefined && !language)) return 'text/javascript';
-  return (type ?? `text/${language}`).replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, '').toLowerCase();
+  return asciiTrim(type ?? `text/${language}`).toLowerCase();
 }
 
 function classify(el: Tree.Element, html: string): BundleScript {
@@ -75,30 +93,72 @@ function classify(el: Tree.Element, html: string): BundleScript {
   return { ...at, runs: true };
 }
 
-/** A bundle as the browser reads it (CR LF and CR as LF), and its script elements in source order. */
-export function bundleScripts(bundle: string): { html: string; scripts: BundleScript[] } {
-  const html = bundle.replace(/\r\n?/g, '\n');
-  const scripts: BundleScript[] = [];
-  const walk = (node: Tree.ParentNode, inSelect: boolean) => {
-    for (const child of node.childNodes) {
-      if (!('tagName' in child)) continue;
-      const select = !inSelect && child.tagName === 'select' && child.namespaceURI === HTML;
-      if (select) {
-        // Text up to the next </select>, not parse5's element: where parse5 closes a <select> early
-        // (at a <textarea>, say), Chromium may go on and find a script that parse5 never sees.
-        const start = child.sourceCodeLocation!.startOffset;
-        const close = html.slice(start).search(/<\/select/i);
-        const end = close < 0 ? html.length : start + close;
-        if (/<script/i.test(html.slice(start, end))) scripts.push({ start, end, runs: false, problem: IN_SELECT });
-      }
-      if (child.tagName === 'script' && (child.namespaceURI === HTML || child.namespaceURI === SVG)) {
-        const found = classify(child, html);
-        // In a <select> the <select> is the problem: its scripts are neither armed nor reported again.
-        scripts.push(inSelect ? { start: found.start, end: found.end, runs: false } : found);
-      }
-      walk('content' in child ? child.content : child, inSelect || select);
+/**
+ * A `<style>` element: its text as the parser reads it, and as it is written in the bundle. `written` is empty for one
+ * inside another (an SVG's `<style>`s nest): the outer one's holds it, so the written text adds up to the bundle at most.
+ */
+export interface BundleStyle {
+  text: string;
+  written: string;
+}
+
+/**
+ * Each element under `root` (a `<template>`'s content too), with what `visit` passes down to its children: by a stack of
+ * our own, not recursion, as a tree can be deeper than the call stack (an SVG's `<style>`s nest, review of #438).
+ */
+function eachElement<F>(root: Tree.ParentNode, flag: F, visit: (element: Tree.Element, flag: F) => F) {
+  // Each element visited as it is taken off the stack, its children pushed last first: in source order, as recursion went.
+  const stack: [Extract<Tree.ChildNode, { tagName: string }>, F][] = [];
+  const push = (node: Tree.ParentNode, f: F) => {
+    for (let i = node.childNodes.length - 1; i >= 0; i -= 1) {
+      const child = node.childNodes[i]!;
+      if ('tagName' in child) stack.push([child, f]);
     }
   };
-  walk(parse(html, { sourceCodeLocationInfo: true, scriptingEnabled: true }), false);
-  return { html, scripts: scripts.sort((a, b) => a.start - b.start) };
+  push(root, flag);
+  for (let top = stack.pop(); top; top = stack.pop()) {
+    const [element, f] = top;
+    push('content' in element ? element.content : element, visit(element, f));
+  }
+}
+
+/**
+ * A bundle as the browser reads it (CR LF and CR as LF), its script elements in source order, and its styles: each
+ * `<style>` element, and each `style` attribute's value.
+ */
+export function bundleScripts(bundle: string): { html: string; scripts: BundleScript[]; styles: BundleStyle[]; styleAttributes: string[] } {
+  const html = bundle.replace(/\r\n?/g, '\n');
+  const scripts: BundleScript[] = [];
+  const styles: BundleStyle[] = [];
+  const styleAttributes: string[] = [];
+  const visit = (child: Tree.Element, inSelect: boolean) => {
+    const select = !inSelect && child.tagName === 'select' && child.namespaceURI === HTML;
+    if (select) {
+      // Refused whatever it holds (review of #438, final check): reading what Chromium's customizable select finds
+      // in it, which parse5 drops, took a second parse that a tag scan out of step with parse5 made quadratic.
+      const loc = child.sourceCodeLocation!;
+      scripts.push({ start: loc.startOffset, end: loc.endOffset, runs: false, problem: NO_SELECT });
+    }
+    if (child.tagName === 'script' && (child.namespaceURI === HTML || child.namespaceURI === SVG)) {
+      const found = classify(child, html);
+      // In a <select> the <select> is the problem: its scripts are neither armed nor reported again.
+      scripts.push(inSelect ? { start: found.start, end: found.end, runs: false } : found);
+    }
+    return inSelect || select;
+  };
+  const document = parse(html, { sourceCodeLocationInfo: true, scriptingEnabled: true });
+  eachElement(document, false, (child, inStyle) => {
+    for (const a of child.attrs) if (a.name === 'style' && !a.prefix) styleAttributes.push(a.value);
+    const style = child.tagName === 'style';
+    if (style) {
+      const loc = child.sourceCodeLocation!;
+      const start = loc.startTag!.endOffset;
+      const end = loc.endTag?.startOffset ?? child.childNodes.at(-1)?.sourceCodeLocation?.endOffset ?? start;
+      const text = child.childNodes.flatMap((n) => (n.nodeName === '#text' && 'value' in n ? [n.value] : [])).join('');
+      styles.push({ text, written: inStyle ? '' : html.slice(start, end) });
+    }
+    return inStyle || style;
+  });
+  eachElement(document, false, visit);
+  return { html, scripts: scripts.sort((a, b) => a.start - b.start), styles, styleAttributes };
 }

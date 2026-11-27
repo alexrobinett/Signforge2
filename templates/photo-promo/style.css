@@ -1,3 +1,100 @@
+/*! Inter (latin subset, from @fontsource 5.3.0) is licensed under the SIL Open Font License, Version 1.1,
+   which asks that every copy carry its copyright notice and the licence:
+
+   Inter: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
+
+   This Font Software is licensed under the SIL Open Font License, Version 1.1.
+   This license is copied below, and is also available with a FAQ at:
+   http://scripts.sil.org/OFL
+
+
+   -----------------------------------------------------------
+   SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+   -----------------------------------------------------------
+
+   PREAMBLE
+   The goals of the Open Font License (OFL) are to stimulate worldwide
+   development of collaborative font projects, to support the font creation
+   efforts of academic and linguistic communities, and to provide a free and
+   open framework in which fonts may be shared and improved in partnership
+   with others.
+
+   The OFL allows the licensed fonts to be used, studied, modified and
+   redistributed freely as long as they are not sold by themselves. The
+   fonts, including any derivative works, can be bundled, embedded,
+   redistributed and/or sold with any software provided that any reserved
+   names are not used by derivative works. The fonts and derivatives,
+   however, cannot be released under any other type of license. The
+   requirement for fonts to remain under this license does not apply
+   to any document created using the fonts or their derivatives.
+
+   DEFINITIONS
+   "Font Software" refers to the set of files released by the Copyright
+   Holder(s) under this license and clearly marked as such. This may
+   include source files, build scripts and documentation.
+
+   "Reserved Font Name" refers to any names specified as such after the
+   copyright statement(s).
+
+   "Original Version" refers to the collection of Font Software components as
+   distributed by the Copyright Holder(s).
+
+   "Modified Version" refers to any derivative made by adding to, deleting,
+   or substituting -- in part or in whole -- any of the components of the
+   Original Version, by changing formats or by porting the Font Software to a
+   new environment.
+
+   "Author" refers to any designer, engineer, programmer, technical
+   writer or other person who contributed to the Font Software.
+
+   PERMISSION & CONDITIONS
+   Permission is hereby granted, free of charge, to any person obtaining
+   a copy of the Font Software, to use, study, copy, merge, embed, modify,
+   redistribute, and sell modified and unmodified copies of the Font
+   Software, subject to the following conditions:
+
+   1) Neither the Font Software nor any of its individual components,
+   in Original or Modified Versions, may be sold by itself.
+
+   2) Original or Modified Versions of the Font Software may be bundled,
+   redistributed and/or sold with any software, provided that each copy
+   contains the above copyright notice and this license. These can be
+   included either as stand-alone text files, human-readable headers or
+   in the appropriate machine-readable metadata fields within text or
+   binary files as long as those fields can be easily viewed by the user.
+
+   3) No Modified Version of the Font Software may use the Reserved Font
+   Name(s) unless explicit written permission is granted by the corresponding
+   Copyright Holder. This restriction only applies to the primary font name as
+   presented to the users.
+
+   4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+   Software shall not be used to promote, endorse or advertise any
+   Modified Version, except to acknowledge the contribution(s) of the
+   Copyright Holder(s) and the Author(s) or with their explicit written
+   permission.
+
+   5) The Font Software, modified or unmodified, in part or in whole,
+   must be distributed entirely under this license, and must not be
+   distributed under any other license. The requirement for fonts to
+   remain under this license does not apply to any document created
+   using the Font Software.
+
+   TERMINATION
+   This license becomes null and void if any of the above conditions are
+   not met.
+
+   DISCLAIMER
+   THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+   OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+   COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+   DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+   OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
 /* Photo Promo. The photo is one layer that scales slowly for the whole spot (--sf-duration),
    so the push-in always ends exactly when the spot does. */
 @font-face {
@@ -22,7 +119,6 @@ body {
 :root {
   --bg: var(--sf-bg, #000);
   --text: var(--sf-text, #fff);
-  --accent: var(--sf-accent, #ffd84a);
 }
 body {
   font-family: var(--sf-font-body, 'Inter'), sans-serif;
@@ -30,7 +126,9 @@ body {
 }
 .stage {
   --u: 1vmin;
-  --out: calc(var(--sf-duration, 8s) - 0.6s);
+  --d-in: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --d-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --out: calc(var(--sf-duration, 8s) - 0.3s);
   position: fixed;
   inset: 0;
   overflow: hidden;
@@ -74,15 +172,14 @@ body {
 .copy > * {
   will-change: transform, opacity;
   animation:
-    rise-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
 }
+/* The eyebrow in the text colour, not a second accent: the price tag is the one colour. */
 .eyebrow {
-  font-size: calc(var(--u) * 3.4);
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--accent-text, var(--accent));
+  font-size: calc(var(--u) * 3.6);
+  font-weight: 600;
+  color: var(--eyebrow-ink, var(--text));
   animation-delay: 0.3s, var(--out);
 }
 /* Where nothing reads over the photo under the eyebrow (main.ts), it gets a fill of the background.
@@ -100,34 +197,32 @@ body {
   font-weight: 900;
   line-height: 0.95;
   letter-spacing: -0.03em;
-  animation-delay: 0.45s, var(--out);
+  animation-delay: 0.41s, var(--out);
 }
 .body {
   font-size: calc(var(--u) * 3.6);
   font-weight: 500;
   margin-top: calc(var(--u) * 2);
-  animation-delay: 0.6s, var(--out);
+  animation-delay: 0.52s, var(--out);
 }
+/* The price, a flat tag in the primary colour beside the copy's foot: no disc, no shadow. */
 .tag {
   position: absolute;
   right: calc(var(--u) * 8);
   bottom: calc(var(--u) * 9);
-  width: calc(var(--u) * 30);
-  aspect-ratio: 1;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
+  padding: calc(var(--u) * 1.4) calc(var(--u) * 2.6);
+  border-radius: min(var(--sf-radius, calc(var(--u) * 1)), calc(var(--u) * 2));
   background: var(--sf-primary, #c8102e);
   color: var(--sf-on-primary, #fff);
-  font-size: calc(var(--u) * 8.4);
+  font-size: calc(var(--u) * 7.2);
   font-weight: 900;
+  line-height: 1;
   letter-spacing: -0.03em;
-  box-shadow: 0 2vmin 6vmin color-mix(in srgb, var(--bg) 50%, transparent);
   will-change: transform, opacity;
   animation:
-    tag-in 0.9s cubic-bezier(0.2, 1.5, 0.3, 1) both,
-    shrink-out 0.5s ease-in forwards;
-  animation-delay: 0.9s, var(--out);
+    tag-in 0.65s var(--d-in) both,
+    shrink-out 0.3s var(--d-out) forwards;
+  animation-delay: 0.63s, var(--out);
 }
 [data-orientation='portrait'] .shade {
   --shade-0: 85%;
@@ -149,24 +244,24 @@ body {
 }
 @keyframes rise-in {
   from {
-    transform: translateY(6vh);
     opacity: 0;
+    transform: translateY(1.5vmin);
   }
 }
 @keyframes tag-in {
   from {
-    transform: scale(0) rotate(-30deg);
     opacity: 0;
+    transform: scale(0.96);
   }
 }
 @keyframes fade-out {
   to {
     opacity: 0;
+    transform: translateY(-0.6vmin);
   }
 }
 @keyframes shrink-out {
   to {
-    transform: scale(0.85);
     opacity: 0;
   }
 }

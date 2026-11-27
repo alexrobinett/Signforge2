@@ -4,15 +4,18 @@
 // made on. Edits, running actions and errors belong to the org they were made in. Better Auth's
 // client, the tools and the router are stubs whose answers the test holds and lets go; nothing
 // waits on a clock.
+import { TAB_ORG_HEADER } from '@signforge/api/tab-org';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import type { Member, OrgSettings } from '../src/lib/settings';
-import { createSettingsSlice, editsIn, errorOf, hasEdits, runningIn, type SettingsSlice } from '../src/state/settings';
+import { initialOrgs, type OrgsState } from '../src/state/orgs';
+import { createSettingsSlice, editsIn, errorOf, hasEdits, runningIn, settingsProblems, type SettingsSlice } from '../src/state/settings';
 
 const auth = vi.hoisted(() => ({
   organization: { updateMemberRole: vi.fn(), inviteMember: vi.fn(), removeMember: vi.fn(), acceptInvitation: vi.fn(), update: vi.fn() },
   linkSocial: vi.fn(),
+  updateUser: vi.fn(),
 }));
 vi.mock('~/lib/auth-client', async (original) => ({ ...(await original<typeof import('../src/lib/auth-client')>()), authClient: auth }));
 // The tab's org comes from the page's router, which a store test has none of.
@@ -45,6 +48,7 @@ const settings: OrgSettings = {
     screen_offline: { who: 'owners', email: true, slack: false, webhook: false },
     publish_finished: { who: 'owners', email: false, slack: false, webhook: false },
     agent_refused: { who: 'owners', email: true, slack: false, webhook: false },
+    publish_requested: { who: 'editors', email: true, slack: false, webhook: false },
   },
   updatedAt: null,
   version: 1,
@@ -60,6 +64,8 @@ const refused = (message: string): Reply => ({ status: 400, body: { error: 'erro
 
 /** Each tool call, and the answers to give them in turn (held ones until the test settles them); `{}` when none is queued. */
 let calls: { name: string; input: unknown }[] = [];
+/** The org each call named, in the order sent (`TAB_ORG_HEADER`). */
+let named: (string | null)[] = [];
 let replies: (Reply | Promise<Reply>)[] = [];
 const lastCall = () => calls.at(-1);
 
@@ -70,15 +76,20 @@ const showOrg = (id: string) => {
 };
 
 function settingsStore() {
-  return createStore<SettingsSlice>()((set, get) => createSettingsSlice(set as never, get as never, { router, queryClient: {} } as never));
+  return createStore<SettingsSlice & { orgs: OrgsState }>()((set, get) => ({
+    orgs: initialOrgs,
+    ...createSettingsSlice(set as never, get as never, { router, queryClient: {} } as never),
+  }));
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   calls = [];
   replies = [];
-  vi.stubGlobal('fetch', async (url: string, init: { body: string }) => {
+  named = [];
+  vi.stubGlobal('fetch', async (url: string, init: { body: string; headers: HeadersInit }) => {
     calls.push({ name: url.split('/').at(-1) ?? '', input: JSON.parse(init.body) });
+    named.push(new Headers(init.headers).get(TAB_ORG_HEADER));
     const reply = await (replies.shift() ?? { status: 200, body: {} });
     return new Response(JSON.stringify(reply.body), { status: reply.status });
   });
@@ -214,11 +225,91 @@ describe('a settings save (re-check of #143, 1)', () => {
     expect(errorOf(store.getState().settings, 'general', A)).toBeUndefined();
   });
 
-  it('with nothing edited, sends nothing, and says so', async () => {
+  it('with nothing edited, as when a field is left unchanged, sends nothing and says nothing (#366)', async () => {
     const store = settingsStore();
     await store.getState().saveSettings(A, 'screens', settings);
     expect(calls).toEqual([]);
-    expect(toast).toHaveBeenCalledWith('Nothing to save');
+    expect(toast).not.toHaveBeenCalled();
+  });
+});
+
+describe('Settings save on change (#366)', () => {
+  it('a saved change says so quietly, in the form, with no toast', async () => {
+    replies.push(saved(2));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'screens', 1, { unreachableAfterMinutes: '15' });
+    await store.getState().saveSettings(A, 'screens', settings);
+    expect(lastCall()).toEqual({ name: 'update_org_settings', input: { unreachableAfterMinutes: 15, ifVersion: 1 } });
+    expect(store.getState().settings.drafts.screens).toMatchObject({ status: 'saved' });
+    expect(toast).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('a field left with a value the server would refuse is marked there and not sent; fixed, it saves', async () => {
+    replies.push(saved(2));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '12' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Northside' });
+    expect(calls).toEqual([]);
+    expect(store.getState().settings.drafts.general?.status).toBe('invalid');
+    expect(settingsProblems({ auditRetentionDays: '12' }, settings)).toEqual({ auditRetentionDays: 'A whole number of days, 30 to 3,650.' });
+    expect(settingsProblems({ name: ' ', updateTo: '02:00' }, settings)).toEqual({
+      name: 'Enter a name.',
+      updateTo: 'The window must end at another time than it starts.',
+    });
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '120' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Northside' });
+    expect(lastCall()).toEqual({ name: 'update_org_settings', input: { auditRetentionDays: 120, ifVersion: 1 } });
+  });
+
+  it('two choices made while the first saves: the second follows it with the latest, and nothing is left unsaved', async () => {
+    const first = held<Reply>();
+    replies.push(first.promise, saved(3));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'publishing', 1, { editorsPublish: false });
+    const one = store.getState().saveSettings(A, 'publishing', settings);
+    store.getState().editSettings(A, 'publishing', 1, { editorsPublish: true });
+    const two = store.getState().saveSettings(A, 'publishing', settings);
+    first.resolve(saved(2));
+    await Promise.all([one, two]);
+    expect(calls.map((c) => c.input)).toEqual([
+      { editorsPublish: false, ifVersion: 1 },
+      { editorsPublish: true, ifVersion: 2 },
+    ]);
+    expect(store.getState().settings.drafts.publishing).toMatchObject({ status: 'saved', version: 3 });
+  });
+
+  it('an AI choice made while the one before it saves follows it, on the version that save made: not dropped, not a conflict', async () => {
+    const first = held<Reply>();
+    const provider = (version: number): Reply => ({ status: 200, body: { provider: { version } } });
+    replies.push(first.promise, provider(3), provider(4));
+    const store = settingsStore();
+    const one = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: '', dailyTurnCeiling: '' }, 1);
+    // Chosen from the page as it was drawn, on version 1, while the first is on its way; and a third meanwhile: the
+    // two waiting go one after the other, neither dropped.
+    const two = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: 'big-1', dailyTurnCeiling: '' }, 1);
+    const three = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: 'big-1', dailyTurnCeiling: '300' }, 1);
+    first.resolve(provider(2));
+    await Promise.all([one, two, three]);
+    expect(calls.map((c) => c.input)).toMatchObject([
+      { capableModel: null, ifVersion: 1 },
+      { capableModel: 'big-1', ifVersion: 2 },
+      { dailyTurnCeiling: 300, ifVersion: 3 },
+    ]);
+  });
+
+  it('a choice made while an action runs on its page waits for that action, then saves: it is not dropped', async () => {
+    const removal = held<Reply>();
+    replies.push(removal.promise, saved(2));
+    const store = settingsStore();
+    void store.getState().removeAlertChannel(A, 'webhook');
+    store.getState().editSettings(A, 'notifications', 1, { alerts: { screen_offline: { slack: true } } });
+    const saving = store.getState().saveSettings(A, 'notifications', settings);
+    await new Promise((r) => setImmediate(r));
+    expect(calls.map((c) => c.name)).toEqual(['remove_alert_channel']);
+    removal.resolve({ status: 200, body: {} });
+    await saving;
+    expect(lastCall()).toEqual({ name: 'update_org_settings', input: { alerts: { screen_offline: { slack: true } }, ifVersion: 1 } });
   });
 });
 
@@ -387,5 +478,312 @@ describe("the org's name, which the settings' version does not cover (re-check o
     await store.getState().saveSettings(A, 'general', { ...settings, version: 2 }, { id: A, name: 'Theirs' });
     expect(auth.organization.update).toHaveBeenCalledTimes(1);
     expect(lastCall()).toMatchObject({ name: 'update_org_settings', input: { timezone: 'Europe/London', ifVersion: 2 } });
+  });
+});
+
+describe('AI model (#261)', () => {
+  const provider = {
+    provider: 'anthropic',
+    keyLast4: '7Q2c',
+    keySavedBy: 'u',
+    keySavedAt: 1,
+    verifiedAt: 2,
+    fastModel: null,
+    capableModel: null,
+    dailyTurnCeiling: null,
+    version: 2,
+  };
+
+  it('a test that reaches the provider makes its models the choices, in that org only', async () => {
+    const store = settingsStore();
+    replies.push({ status: 200, body: { ok: true, models: ['m-fast', 'm-capable'], problem: null, provider } });
+    await store.getState().testAiProvider(A);
+    expect(lastCall()).toEqual({ name: 'test_ai_provider', input: {} });
+    expect(store.getState().settings.aiModels).toEqual({ orgId: A, models: ['m-fast', 'm-capable'] });
+    store.getState().forgetOrgSettings();
+    expect(store.getState().settings.aiModels).toBeNull();
+  });
+
+  it('a test the provider refuses says why in words, and lists nothing', async () => {
+    const store = settingsStore();
+    replies.push({ status: 200, body: { ok: false, models: [], problem: 'refused', provider } });
+    await store.getState().testAiProvider(A);
+    expect(errorOf(store.getState().settings, 'test', A)?.text).toMatch(/^Anthropic refused the key/);
+    expect(store.getState().settings.aiModels).toBeNull();
+    // The key lost its verified mark: the page reads it again, so "Connected" does not stay beside the refusal (re-check of #280).
+    expect(router.invalidate).toHaveBeenCalledWith({ sync: true });
+  });
+
+  it('saves the choices as the tool takes them: empty is none, the ceiling a number, with the version read', async () => {
+    const store = settingsStore();
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'm-fast', capableModel: '', dailyTurnCeiling: ' 300 ' }, 2);
+    expect(lastCall()).toEqual({
+      name: 'save_ai_provider',
+      input: { provider: 'anthropic', fastModel: 'm-fast', capableModel: null, dailyTurnCeiling: 300, ifVersion: 2 },
+    });
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: '', capableModel: '', dailyTurnCeiling: '' }, 3);
+    expect(lastCall()?.input).toMatchObject({ fastModel: null, dailyTurnCeiling: null });
+  });
+
+  it('saves an OpenAI-compatible endpoint with its address and features, and keeps the saved key when none is typed (#262)', async () => {
+    const store = settingsStore();
+    const form = {
+      provider: 'openai-compatible' as const,
+      apiKey: ' sk-endpoint-key-0000000000000000 ',
+      baseUrl: ' https://api.openai.com/v1 ',
+      acceptsImages: true,
+      jsonSchemaOutput: false,
+    };
+    await store.getState().saveAiKey(A, form);
+    expect(lastCall()).toEqual({
+      name: 'save_ai_provider',
+      input: {
+        provider: 'openai-compatible',
+        apiKey: 'sk-endpoint-key-0000000000000000',
+        baseUrl: 'https://api.openai.com/v1',
+        acceptsImages: true,
+        jsonSchemaOutput: false,
+      },
+    });
+    await store.getState().saveAiKey(A, { ...form, apiKey: '', acceptsImages: false }, 4);
+    expect(lastCall()?.input).toEqual({
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.openai.com/v1',
+      acceptsImages: false,
+      jsonSchemaOutput: false,
+      ifVersion: 4,
+    });
+    // Anthropic sends no address or features, whatever the hidden fields hold.
+    await store.getState().saveAiKey(A, { ...form, provider: 'anthropic' }, 5);
+    expect(lastCall()?.input).toEqual({ provider: 'anthropic', apiKey: 'sk-endpoint-key-0000000000000000', ifVersion: 5 });
+  });
+
+  it("says an endpoint's refusals in its own words, a blocked address among them (#262)", async () => {
+    const store = settingsStore();
+    replies.push({ status: 200, body: { ok: false, models: [], problem: 'blocked', provider: { ...provider, provider: 'openai-compatible' } } });
+    await store.getState().testAiProvider(A);
+    expect(errorOf(store.getState().settings, 'test', A)?.text).toMatch(/^SignForge cannot reach that address: it must be public https/);
+    replies.push({ status: 200, body: { ok: false, models: [], problem: 'refused', provider: { ...provider, provider: 'openai-compatible' } } });
+    await store.getState().testAiProvider(A);
+    expect(errorOf(store.getState().settings, 'test', A)?.text).toMatch(/^The endpoint refused the key/);
+  });
+});
+
+describe('focus as Remove gives way to its confirmation, and back (#289)', () => {
+  /** An element as a ref callback gets it: only `focus` is used. */
+  const element = () => ({ focus: vi.fn() });
+  const mount = (store: ReturnType<typeof settingsStore>, key: string) => {
+    const el = element();
+    store.getState().focusWhenReplaced(key)(el as never);
+    return el.focus;
+  };
+
+  it('names what takes focus next: the question as it opens, Remove on Keep it, the form once removed; each once', async () => {
+    const store = settingsStore();
+    // One callback a key, so React calls it as its element mounts, not on every render.
+    expect(store.getState().focusWhenReplaced('remove:webhook')).toBe(store.getState().focusWhenReplaced('remove:webhook'));
+    expect(mount(store, 'remove:webhook')).not.toHaveBeenCalled();
+
+    store.getState().askToRemoveAlertChannel(A, 'webhook');
+    expect(mount(store, 'remove:webhook')).not.toHaveBeenCalled();
+    expect(mount(store, 'confirm:webhook')).toHaveBeenCalledTimes(1);
+    // Once: rendered again, it does not take focus again.
+    expect(mount(store, 'confirm:webhook')).not.toHaveBeenCalled();
+
+    store.getState().askToRemoveAlertChannel(A, null);
+    expect(mount(store, 'remove:webhook')).toHaveBeenCalledTimes(1);
+
+    // Removed: the card's form to set one.
+    store.getState().askToRemoveAlertChannel(A, 'webhook');
+    replies.push(Promise.resolve({ status: 200, body: {} }));
+    await store.getState().removeAlertChannel(A, 'webhook');
+    expect(mount(store, 'form:webhook')).toHaveBeenCalledTimes(1);
+  });
+
+  it('names nothing when the confirmation does not change, and nothing once a removal is refused: the confirmation stays', async () => {
+    const store = settingsStore();
+    store.getState().askToRemoveAiKey(A, true);
+    expect(mount(store, 'confirm:key')).toHaveBeenCalledTimes(1);
+    const removal = held<Reply>();
+    replies.push(removal.promise);
+    const removing = store.getState().removeAiKey(A);
+    // Keep it waits for a removal that has been sent: nothing changes, so focus stays where it is.
+    store.getState().askToRemoveAiKey(A, false);
+    expect(mount(store, 'remove:key')).not.toHaveBeenCalled();
+    removal.resolve({ status: 403, body: { error: 'forbidden', message: 'Not removed' } });
+    await removing;
+    expect(mount(store, 'form:key')).not.toHaveBeenCalled();
+    expect(store.getState().settings.removingAiKey).toBe(A);
+  });
+
+  it('keeps focus named for the removal under way when a second press is refused as it runs (review of #421)', async () => {
+    const store = settingsStore();
+    store.getState().askToRemoveAlertChannel(A, 'webhook');
+    mount(store, 'confirm:webhook');
+    const first = held<Reply>();
+    replies.push(first.promise);
+    const removing = store.getState().removeAlertChannel(A, 'webhook');
+    // Pressed again while the first runs: refused, and the first's target stays.
+    await store.getState().removeAlertChannel(A, 'webhook');
+    first.resolve({ status: 200, body: {} });
+    await removing;
+    expect(mount(store, 'form:webhook')).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives no focus to a page left while its removal ran, nor in another org (review of #421)', async () => {
+    const store = settingsStore();
+    router.state.location.href = '/settings/notifications';
+    store.getState().askToRemoveAlertChannel(A, 'webhook');
+    mount(store, 'confirm:webhook');
+    const away = held<Reply>();
+    replies.push(away.promise);
+    const removing = store.getState().removeAlertChannel(A, 'webhook');
+    // Left for the screens while it ran; back later, the form is not to take focus then.
+    router.state.location.href = '/screens';
+    away.resolve({ status: 200, body: {} });
+    await removing;
+    router.state.location.href = '/settings/notifications';
+    expect(mount(store, 'form:webhook')).not.toHaveBeenCalled();
+
+    // Named in one org, the other org's same control does not take it; and a switch forgets it.
+    store.getState().askToRemoveAiKey(A, true);
+    showOrg(B);
+    expect(mount(store, 'confirm:key')).not.toHaveBeenCalled();
+    showOrg(A);
+    store.getState().forgetOrgSettings();
+    expect(mount(store, 'confirm:key')).not.toHaveBeenCalled();
+  });
+});
+
+describe('a save made in one org never writes to another (review of #466)', () => {
+  it('an AI choice waiting behind another is not sent once the tab has left its org; the one sent named its org', async () => {
+    const first = held<Reply>();
+    replies.push(first.promise, { status: 200, body: { provider: { version: 5 } } });
+    const store = settingsStore();
+    const one = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: '', dailyTurnCeiling: '' }, 3);
+    const two = store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: 'big-1', dailyTurnCeiling: '' }, 3);
+    showOrg(B);
+    store.getState().forgetOrgSettings();
+    first.resolve({ status: 200, body: { provider: { version: 4 } } });
+    await Promise.all([one, two]);
+    expect(calls.map((c) => c.name)).toEqual(['save_ai_provider']);
+    expect(named).toEqual([A]);
+  });
+
+  it('a settings save names the org its edits were made in, whatever the tab names by then', async () => {
+    const first = held<Reply>();
+    replies.push(first.promise, saved(3));
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '100' });
+    const one = store.getState().saveSettings(A, 'general', settings);
+    store.getState().editSettings(A, 'general', 1, { auditRetentionDays: '120' });
+    const two = store.getState().saveSettings(A, 'general', settings);
+    first.resolve(saved(2));
+    await Promise.all([one, two]);
+    expect(named).toEqual([A, A]);
+  });
+
+  it("a choice waits for an action on its page that is not the page's own run, Connect GitHub, rather than spinning", async () => {
+    let linked: (v: unknown) => void = () => {};
+    auth.linkSocial.mockReturnValueOnce(new Promise((r) => (linked = r)));
+    auth.updateUser.mockResolvedValue(ok);
+    let reads = 0;
+    // A loop that never yields would read the state without end: stopped, so the test says so rather than hanging.
+    const store = createStore<SettingsSlice & { orgs: OrgsState }>()((set, get) => ({
+      orgs: initialOrgs,
+      ...createSettingsSlice(
+        set as never,
+        (() => {
+          if (++reads > 100_000) throw new Error('read the state with no end, without yielding');
+          return get();
+        }) as never,
+        { router, queryClient: {} } as never,
+      ),
+    }));
+    void store.getState().connectGithub();
+    const saving = store.getState().saveProfile('Maria Okafor');
+    await new Promise((r) => setImmediate(r));
+    expect(auth.updateUser).not.toHaveBeenCalled();
+    linked({ data: {}, error: null });
+    await saving;
+    expect(auth.updateUser).toHaveBeenCalledWith({ name: 'Maria Okafor' });
+  });
+});
+
+describe('the org name and the AI version, saved on change (review of #466)', () => {
+  it('a name put back while its rename is on its way is sent, not taken for the name the page read', async () => {
+    let renamed: (v: unknown) => void = () => {};
+    auth.organization.update.mockReturnValueOnce(new Promise((r) => (renamed = r))).mockResolvedValue(ok);
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { name: 'Northside Diner' });
+    const one = store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Northside' });
+    await new Promise((r) => setImmediate(r));
+    store.getState().editSettings(A, 'general', 1, { name: 'Northside' });
+    const two = store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Northside' });
+    renamed(ok);
+    await Promise.all([one, two]);
+    expect(auth.organization.update.mock.calls.map((c) => c[0].data.name)).toEqual(['Northside Diner', 'Northside']);
+  });
+
+  it("a name put back after another owner's rename is sent: the page's name is the one it reads (#479)", async () => {
+    auth.organization.update.mockResolvedValue(ok);
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { name: 'Mine' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'A' });
+    // Another owner renames it "Theirs", which the page reads; this tab puts "Mine" back.
+    store.getState().editSettings(A, 'general', 1, { name: 'Mine' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Theirs' });
+    expect(auth.organization.update.mock.calls.map((c) => c[0].data.name)).toEqual(['Mine', 'Mine']);
+  });
+
+  it('after the key is removed and saved again, a model choice builds on the provider as read, not a version from before', async () => {
+    replies.push(
+      { status: 200, body: { provider: { version: 5 } } },
+      { status: 200, body: {} },
+      { status: 200, body: { provider: { version: 1 } } },
+      {
+        status: 200,
+        body: { provider: { version: 2 } },
+      },
+    );
+    const store = settingsStore();
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: '', dailyTurnCeiling: '' }, 4);
+    await store.getState().removeAiKey(A);
+    await store.getState().saveAiKey(A, { provider: 'anthropic', apiKey: 'sk-new', baseUrl: '', acceptsImages: false, jsonSchemaOutput: false });
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-2', capableModel: '', dailyTurnCeiling: '' }, 1);
+    expect(calls.at(-1)).toMatchObject({ name: 'save_ai_provider', input: { fastModel: 'fast-2', ifVersion: 1 } });
+  });
+
+  it('a refused key save keeps the version this tab made: the next choice builds on it, with no false conflict (#479)', async () => {
+    replies.push(
+      { status: 200, body: { provider: { version: 5 } } },
+      { status: 400, body: { error: 'invalid_input', message: 'That key is not valid.' } },
+      { status: 200, body: { provider: { version: 6 } } },
+    );
+    const store = settingsStore();
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: '', dailyTurnCeiling: '' }, 4);
+    await store.getState().saveAiKey(A, { provider: 'anthropic', apiKey: 'sk-bad', baseUrl: '', acceptsImages: false, jsonSchemaOutput: false });
+    // The page still shows version 4, which this tab's own choice moved to 5: the next choice sends 5.
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-2', capableModel: '', dailyTurnCeiling: '' }, 4);
+    expect(calls.at(-1)).toMatchObject({ name: 'save_ai_provider', input: { fastModel: 'fast-2', ifVersion: 5 } });
+  });
+
+  it("forgets an org's quiet Saved times when the tab leaves it, and keeps the account's own (#479)", async () => {
+    replies.push({ status: 200, body: { provider: { version: 5 } } });
+    const store = settingsStore();
+    await store.getState().saveAiChoices(A, 'anthropic', { fastModel: 'fast-1', capableModel: '', dailyTurnCeiling: '' }, 4);
+    store.setState((s) => ({ settings: { ...s.settings, savedAt: { ...s.settings.savedAt, profile: 1 } } }));
+    expect(store.getState().settings.savedAt).toEqual({ choices: expect.any(Number), profile: 1 });
+    store.getState().forgetOrgSettings();
+    expect(store.getState().settings.savedAt).toEqual({ profile: 1 });
+  });
+
+  it('display hours the page marks are not sent with the next change', async () => {
+    const store = settingsStore();
+    store.getState().editSettings(A, 'general', 1, { displayHours: { weekly: [{ days: [], from: '09:00', to: '17:00' }] } });
+    store.getState().editSettings(A, 'general', 1, { timezone: 'Europe/London' });
+    await store.getState().saveSettings(A, 'general', settings, { id: A, name: 'Northside' });
+    expect(calls).toEqual([]);
+    expect(store.getState().settings.drafts.general?.status).toBe('invalid');
   });
 });

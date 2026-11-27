@@ -1,17 +1,19 @@
 // Alerts to Slack and signed outgoing webhooks (#88): a screen going offline is queued for each
 // channel its rule names, sent after the check through the fetch guards, retried with backoff
 // while the receiver fails, and shown in the delivery log. No network: fetch and DNS are stubbed.
-import { orgMembers } from '@signforge/db';
+import { orgMembers, scoped } from '@signforge/db';
 import { testScope } from '@signforge/db/testing';
+import { dispatch, registry } from '@signforge/tools';
 import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { checkScreenAlerts, finishRollouts } from '../src/alerts';
+import { alertAgentRefused, checkScreenAlerts, finishRollouts } from '../src/alerts';
 import type { FetchGuards } from '../src/data/fetch';
-import { deliverAlert, deliverAlerts } from '../src/deliveries';
+import { CONCURRENT_LANES, deliverAlert, deliverAlerts, DELIVERIES_PER_RUN } from '../src/deliveries';
 import { emailSenderFor, RecordingEmailSender } from '../src/email';
 import worker from '../src/index';
 import { Client, email, testApp } from './client';
+import { agentToken, check } from './oauth';
 
 /**
  * `real` as the Worker sees it, counting each query and batch (each is one query against the
@@ -67,8 +69,8 @@ async function orgWithChannels() {
   const org = { ...(await owner.createOrg(name)), name };
   const slackUrl = `https://hooks.slack.com/services/T0ORG${n}/B0ORG${n}/secretpart${n}`;
   const webhookUrl = `https://ops${n}.example.com/hooks/sf?key=k${n}`;
-  await owner.ok('/api/tools/set_slack_alert_channel', { webhookUrl: slackUrl });
-  await owner.ok('/api/tools/set_webhook_alert_channel', { webhookUrl, signingSecret: SECRET });
+  await owner.ok('/api/tools/set_alert_channel', { kind: 'slack', webhookUrl: slackUrl });
+  await owner.ok('/api/tools/set_alert_channel', { kind: 'webhook', webhookUrl, signingSecret: SECRET });
   await owner.ok('/api/tools/update_org_settings', { alerts: { screen_offline: { slack: true, webhook: true } } });
   return { owner, org, slackUrl, webhookUrl, outbox: t.outbox };
 }
@@ -180,7 +182,7 @@ describe('alerts to Slack and webhooks', () => {
     await o.commit([
       ...made.writes,
       ...o.publishes.stage.addScreens(made.row.id, rows).writes,
-      ...rows.flatMap((r) => o.screens.stage.setDesiredManifest(r.screenId, r.manifestId).writes),
+      ...rows.flatMap((r) => o.screens.stage.setDesiredManifest(r.screenId, r.manifestId, null).writes),
     ]);
     const { guards, to } = receivers({ [slackUrl]: [200], [webhookUrl]: [200] });
     const cms = { ...env, CMS_ORIGIN: 'https://cms.test' };
@@ -227,7 +229,7 @@ describe('alerts to Slack and webhooks', () => {
       await o.commit([
         ...p.writes,
         ...o.publishes.stage.addScreens(p.row.id, r).writes,
-        ...r.flatMap((x) => o.screens.stage.setDesiredManifest(x.screenId, x.manifestId).writes),
+        ...r.flatMap((x) => o.screens.stage.setDesiredManifest(x.screenId, x.manifestId, null).writes),
       ]);
       return p.row;
     };
@@ -254,7 +256,7 @@ describe('alerts to Slack and webhooks', () => {
     await o.commit([
       ...v5.writes,
       ...o.publishes.stage.addScreens(v5.row.id, [{ screenId: screens[1]!, manifestId: 'e'.repeat(64) }]).writes,
-      ...o.screens.stage.setDesiredManifest(screens[1]!, 'e'.repeat(64)).writes,
+      ...o.screens.stage.setDesiredManifest(screens[1]!, 'e'.repeat(64), null).writes,
     ]);
     await finishRollouts(cms, outbox, start + 17 * MIN);
     await deliverAlerts(env, outbox, { now: start + 17 * MIN, guards });
@@ -275,7 +277,7 @@ describe('alerts to Slack and webhooks', () => {
       await o.commit([
         ...p.writes,
         ...o.publishes.stage.addScreens(p.row.id, r).writes,
-        ...r.flatMap((x) => o.screens.stage.setDesiredManifest(x.screenId, x.manifestId).writes),
+        ...r.flatMap((x) => o.screens.stage.setDesiredManifest(x.screenId, x.manifestId, null).writes),
       ]);
       return p.row;
     };
@@ -301,6 +303,129 @@ describe('alerts to Slack and webhooks', () => {
     const later = (await owner.ok<{ publishes: { id: string; playing: number; replaced: number; reached: number | null }[] }>('/api/tools/list_publishes', {}))
       .publishes;
     expect(later.find((h) => h.id === v1.id)).toMatchObject({ playing: 0, replaced: 2, reached: 2 });
+  });
+
+  it('sends a publish request to Slack, the webhook, and by email to each member who may approve when it is sent, never the asker or its reason (M4-09)', async () => {
+    const { owner, org, slackUrl, webhookUrl, outbox } = await orgWithChannels();
+    await owner.ok('/api/tools/update_org_settings', { alerts: { publish_requested: { slack: true, webhook: true } } });
+    const o = testScope(env.DB, org.id);
+    // An editor who asks, another who may approve, and a viewer, who may not.
+    const member = async (name: string, role: string) => {
+      const userId = `${org.id}-${name}`;
+      await env.DB.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, '2026-11-24', '2026-11-24')")
+        .bind(userId, name, `${userId}@signforge.test`)
+        .run();
+      await env.DB.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, '2026-11-24')")
+        .bind(`${userId}-m`, org.id, userId, role)
+        .run();
+      return { userId, email: `${userId}@signforge.test` };
+    };
+    const asker = await member('Ada', 'editor');
+    const other = await member('Ben', 'editor');
+    const viewer = await member('Cy', 'viewer');
+    const ownerEmail = (await orgMembers(env.DB, org.id)).find((m) => m.role === 'owner')!.email;
+    const ask = async (name: string) => {
+      const spot = await o.spots.insert({ name, kind: 'url', durationMs: 10_000, url: `https://example.com/${name}` });
+      const r = await dispatch(
+        registry,
+        'request_publish',
+        { drafts: [{ kind: 'spot', id: spot.id, version: spot.rowVersion }], reason: 'SECRET-REASON-TEXT' },
+        { org: scoped(env.DB, org.id), role: 'editor', actor: { kind: 'user', id: asker.userId, clientId: 'cms' }, blobs: env.BLOBS, services: {} },
+      );
+      if (!r.ok) throw new Error(JSON.stringify(r));
+      return (r.output as { request: { id: string; expiresAt: number } }).request;
+    };
+    const { guards, to } = receivers({ [slackUrl]: [200], [webhookUrl]: [200] });
+    const start = Date.now();
+    const request = await ask('menu');
+    // One run sends Slack and the webhook, and fans the email out to each approver, sending those too (#396).
+    await deliverAlerts(env, outbox, { now: start + MIN, guards });
+    const asks = (addr: string) => outbox.messages.filter((m) => m.to === addr && m.subject.includes('asks to publish'));
+    for (const addr of [ownerEmail, other.email]) {
+      expect(asks(addr), addr).toEqual([
+        {
+          to: addr,
+          subject: `SignForge: Ada asks to publish 1 draft in ${org.name}`,
+          text: `Ada asks to publish 1 draft in ${org.name}. Approve or decline it in SignForge before ${new Date(request.expiresAt).toISOString()} (UTC); after that it expires.\n\nWho gets these is in Settings, Notifications.`,
+        },
+      ]);
+    }
+    expect([...asks(asker.email), ...asks(viewer.email)]).toEqual([]);
+    const event = await to(webhookUrl)[0]!.json();
+    expect(event).toEqual({
+      type: 'publish.requested',
+      id: `evt_publish_requested_${request.id}`,
+      occurredAt: expect.any(String),
+      org: { id: org.id, name: org.name },
+      data: {
+        request: { id: request.id, url: null, drafts: 1, expiresAt: new Date(request.expiresAt).toISOString() },
+        by: { kind: 'user', id: asker.userId, name: 'Ada' },
+      },
+    });
+    const slack = await to(slackUrl)[0]!.json<{ text: string; blocks: unknown[] }>();
+    expect(slack.text).toBe(`Ada asks to publish 1 draft in ${org.name}`);
+    expect(JSON.stringify(slack.blocks)).toContain('*Decide by*');
+    for (const body of [JSON.stringify(event), JSON.stringify(slack), JSON.stringify(outbox.messages)]) expect(body).not.toContain('SECRET-REASON-TEXT');
+
+    // While only owners publish, an editor is not asked to approve: the email goes to whoever may when it is sent.
+    await owner.ok('/api/tools/update_org_settings', { editorsPublish: false });
+    const specials = await ask('specials');
+    // Sent at once, as the call's `deliverNow` does: the approvers' emails with it, not at the next run (#396).
+    const [fanOut] = (await o.alertDeliveries.list({ take: 50 })).filter((d) => d.eventId === `evt_publish_requested_${specials.id}` && d.channel === 'email');
+    await deliverAlert(env, outbox, org.id, fanOut!.id, { now: start + 2 * MIN, guards });
+    expect(asks(ownerEmail)).toHaveLength(2);
+    expect(asks(other.email)).toHaveLength(1);
+
+    // One mailbox that fails stops no other, and its retry sends to it alone (re-check of #386).
+    await owner.ok('/api/tools/update_org_settings', { editorsPublish: true });
+    const failing = {
+      send: async (m: { to: string; subject: string; text: string }) => (m.to === other.email ? Promise.reject(new Error('mailbox full')) : outbox.send(m)),
+    };
+    await ask('lunch');
+    await deliverAlerts(env, failing, { now: start + 3 * MIN, guards });
+    expect(asks(ownerEmail)).toHaveLength(3);
+    expect(asks(other.email)).toHaveLength(1);
+    await deliverAlerts(env, outbox, { now: start + 3 * MIN + HOUR, guards });
+    expect(asks(ownerEmail)).toHaveLength(3);
+    expect(asks(other.email)).toHaveLength(2);
+  });
+
+  it("sends an agent's repeated refusals to Slack and the webhook once an hour, naming its client as a page does (M4-08)", async () => {
+    const { owner, org, slackUrl, webhookUrl, outbox } = await orgWithChannels();
+    await owner.ok('/api/tools/update_org_settings', { alerts: { agent_refused: { slack: true, webhook: true } } });
+    const { clientId, access_token } = await agentToken(owner.t, owner, org.id, ['content:read']);
+    const { grantId } = (await check(access_token))!;
+    const { guards, to } = receivers({ [slackUrl]: [200], [webhookUrl]: [200] });
+    const cms = { ...env, CMS_ORIGIN: 'https://cms.test' };
+    const start = Date.now();
+    const hour = start - (start % HOUR);
+    const refused = { orgId: org.id, grantId, tool: 'update_screen', needs: 'screens:manage', refusals: 3, hour };
+    // Twice in one hour, as two calls racing past the object might: one event.
+    await alertAgentRefused(cms, outbox, refused, start);
+    await alertAgentRefused(cms, outbox, refused, start + MIN);
+    await deliverAlerts(env, outbox, { now: start + MIN, guards });
+    expect([to(slackUrl).length, to(webhookUrl).length]).toEqual([1, 1]);
+    expect(await to(webhookUrl)[0]!.json()).toEqual({
+      type: 'agent.refused',
+      id: `evt_agent_refused_${grantId}_${hour}`,
+      occurredAt: new Date(start).toISOString(),
+      org: { id: org.id, name: org.name },
+      data: {
+        grant: { id: grantId, url: `https://cms.test/settings/api/${grantId}`, client: { id: clientId, name: 'Test agent' } },
+        refusals: 3,
+        tool: 'update_screen',
+        needs: 'screens:manage',
+      },
+    });
+    const slack = await to(slackUrl)[0]!.json<{ text: string; blocks: unknown[] }>();
+    expect(slack.text).toBe(`The agent “Test agent” in ${org.name} was refused 3 times this hour`);
+    expect(JSON.stringify(slack.blocks)).toContain(`<https://cms.test/settings/api/${grantId}|Open the agent in SignForge>`);
+
+    // A grant disconnected since: nobody is told.
+    await owner.ok('/api/tools/revoke_agent_grant', { grantId });
+    await alertAgentRefused(cms, outbox, { ...refused, hour: hour + HOUR }, start + HOUR);
+    await deliverAlerts(env, outbox, { now: start + HOUR, guards });
+    expect([to(slackUrl).length, to(webhookUrl).length]).toEqual([1, 1]);
   });
 
   it("escapes a screen's name in Slack's notification text as in its blocks", async () => {
@@ -429,35 +554,100 @@ describe('alerts to Slack and webhooks', () => {
   });
 });
 
+/** `count` webhook deliveries due at `now` in a new org, and the receiver's URL. */
+async function queuedWebhooks(count: number, now: number, tag: string) {
+  const { org, webhookUrl } = await orgWithChannels();
+  const o = testScope(env.DB, org.id);
+  const event = { type: 'test', occurredAt: new Date(now).toISOString(), org: { id: org.id, name: org.name }, data: { message: 'Budget' } };
+  await o.commit(
+    Array.from({ length: count }, (_, n) => n).flatMap(
+      (n) =>
+        o.alertDeliveries.stage.insert({
+          channel: 'webhook',
+          eventId: `evt_${tag}_${n}`,
+          eventType: 'test',
+          eventJson: JSON.stringify({ ...event, id: `evt_${tag}_${n}` }),
+          nextAttemptAt: now,
+          giveUpAt: now,
+        }).writes,
+    ),
+  );
+  return webhookUrl;
+}
+
 describe("a delivery run's D1 queries", () => {
-  it("stay a handful however many it sends, well under the Free plan's 50 an invocation", async () => {
+  it("stay a handful however many it sends, well under a Paid plan's 1,000 an invocation", async () => {
     const now = Date.now();
     const answers: Record<string, number[]> = {};
-    for (let i = 0; i < 3; i++) {
-      const { org, webhookUrl } = await orgWithChannels();
-      answers[webhookUrl] = [200];
-      const o = testScope(env.DB, org.id);
-      const event = { type: 'test', occurredAt: new Date(now).toISOString(), org: { id: org.id, name: org.name }, data: { message: 'Budget' } };
-      await o.commit(
-        [0, 1, 2, 3].flatMap(
-          (n) =>
-            o.alertDeliveries.stage.insert({
-              channel: 'webhook',
-              eventId: `evt_budget_${n}`,
-              eventType: 'test',
-              eventJson: JSON.stringify({ ...event, id: `evt_budget_${n}` }),
-              nextAttemptAt: now,
-              giveUpAt: now,
-            }).writes,
-        ),
-      );
-    }
+    // DELIVERIES_PER_RUN in all: the claim's limit, and the most the channels' query can bind (two values each, 100 a statement).
+    for (let i = 0; i < DELIVERIES_PER_RUN / 4; i++) answers[await queuedWebhooks(4, now, `budget${i}`)] = [200];
     const { guards, to } = receivers(answers);
     const watched = watchedD1(env.DB);
 
     await deliverAlerts({ ...env, DB: watched.db }, new RecordingEmailSender(), { now, guards });
-    expect(Object.keys(answers).flatMap((url) => to(url))).toHaveLength(12);
+    expect(Object.keys(answers).flatMap((url) => to(url))).toHaveLength(DELIVERIES_PER_RUN);
     expect(watched.seen.queries).toBeLessThanOrEqual(3);
+    expect(DELIVERIES_PER_RUN * 2).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('a delivery run sends concurrently', () => {
+  /** Guards that hold each request until the test lets it go, and say how many are held. */
+  function gated(answers: string[]) {
+    const held: { url: string; go: () => void }[] = [];
+    const arrived: (() => void)[] = [];
+    const sent: string[] = [];
+    const guards: FetchGuards = {
+      resolve: async () => ['93.184.216.34'],
+      fetch: async (input, init) => {
+        const { url } = new Request(input, init);
+        if (!answers.includes(url)) throw new TypeError(`no receiver at ${url}`);
+        await new Promise<void>((go) => {
+          held.push({ url, go });
+          for (const wake of arrived.splice(0)) wake();
+        });
+        sent.push(url);
+        return new Response('ok');
+      },
+    };
+    const heldAtLeast = async (n: number) => {
+      while (held.length < n) await new Promise<void>((r) => arrived.push(r));
+    };
+    return { guards, held, sent, heldAtLeast };
+  }
+
+  it("sends one org's deliveries one at a time, and different orgs' at once", async () => {
+    const now = Date.now();
+    const urls = [await queuedWebhooks(2, now, 'lane0'), await queuedWebhooks(2, now, 'lane1'), await queuedWebhooks(2, now, 'lane2')];
+    const g = gated(urls);
+    const run = deliverAlerts(env, new RecordingEmailSender(), { now, guards: g.guards });
+    // Each org's first is in flight together; none of the seconds, whose turn comes after.
+    await g.heldAtLeast(3);
+    await env.DB.prepare('SELECT 1').first();
+    expect(g.held.map((h) => h.url).toSorted()).toEqual(urls.toSorted());
+    for (const h of g.held.splice(0)) h.go();
+    await g.heldAtLeast(3);
+    expect(g.held.map((h) => h.url).toSorted()).toEqual(urls.toSorted());
+    for (const h of g.held.splice(0)) h.go();
+    await run;
+    expect(g.sent).toHaveLength(6);
+  });
+
+  it('runs at most CONCURRENT_LANES at once, and sends them all', async () => {
+    const now = Date.now();
+    const urls: string[] = [];
+    for (let i = 0; i < CONCURRENT_LANES + 2; i++) urls.push(await queuedWebhooks(1, now, `cap${i}`));
+    const g = gated(urls);
+    const run = deliverAlerts(env, new RecordingEmailSender(), { now, guards: g.guards });
+    await g.heldAtLeast(CONCURRENT_LANES);
+    await env.DB.prepare('SELECT 1').first();
+    expect(g.held).toHaveLength(CONCURRENT_LANES);
+    // As each is answered, the next lane starts.
+    for (const h of g.held.splice(0)) h.go();
+    await g.heldAtLeast(2);
+    for (const h of g.held.splice(0)) h.go();
+    await run;
+    expect(g.sent.toSorted()).toEqual(urls.toSorted());
   });
 });
 

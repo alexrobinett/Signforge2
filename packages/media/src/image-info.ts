@@ -1,7 +1,7 @@
 /**
  * Read an image's type and size from its first bytes, without decoding it. Pure byte parsing, so
  * it runs the same in a browser and in a Worker: the browser uses it to decide whether a file can
- * ship as it is, the server (`finalize_asset`) to check what was uploaded.
+ * ship as it is, the server (`finalize_upload`) to check what was uploaded.
  *
  * Sizes are as displayed: a JPEG whose EXIF orientation turns it a quarter (orientations 5 to 8)
  * reports its width and height swapped, as a browser draws it.

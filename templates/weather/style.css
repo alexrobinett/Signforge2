@@ -1,3 +1,100 @@
+/*! Inter (latin subset, from @fontsource 5.3.0) is licensed under the SIL Open Font License, Version 1.1,
+   which asks that every copy carry its copyright notice and the licence:
+
+   Inter: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
+
+   This Font Software is licensed under the SIL Open Font License, Version 1.1.
+   This license is copied below, and is also available with a FAQ at:
+   http://scripts.sil.org/OFL
+
+
+   -----------------------------------------------------------
+   SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+   -----------------------------------------------------------
+
+   PREAMBLE
+   The goals of the Open Font License (OFL) are to stimulate worldwide
+   development of collaborative font projects, to support the font creation
+   efforts of academic and linguistic communities, and to provide a free and
+   open framework in which fonts may be shared and improved in partnership
+   with others.
+
+   The OFL allows the licensed fonts to be used, studied, modified and
+   redistributed freely as long as they are not sold by themselves. The
+   fonts, including any derivative works, can be bundled, embedded,
+   redistributed and/or sold with any software provided that any reserved
+   names are not used by derivative works. The fonts and derivatives,
+   however, cannot be released under any other type of license. The
+   requirement for fonts to remain under this license does not apply
+   to any document created using the fonts or their derivatives.
+
+   DEFINITIONS
+   "Font Software" refers to the set of files released by the Copyright
+   Holder(s) under this license and clearly marked as such. This may
+   include source files, build scripts and documentation.
+
+   "Reserved Font Name" refers to any names specified as such after the
+   copyright statement(s).
+
+   "Original Version" refers to the collection of Font Software components as
+   distributed by the Copyright Holder(s).
+
+   "Modified Version" refers to any derivative made by adding to, deleting,
+   or substituting -- in part or in whole -- any of the components of the
+   Original Version, by changing formats or by porting the Font Software to a
+   new environment.
+
+   "Author" refers to any designer, engineer, programmer, technical
+   writer or other person who contributed to the Font Software.
+
+   PERMISSION & CONDITIONS
+   Permission is hereby granted, free of charge, to any person obtaining
+   a copy of the Font Software, to use, study, copy, merge, embed, modify,
+   redistribute, and sell modified and unmodified copies of the Font
+   Software, subject to the following conditions:
+
+   1) Neither the Font Software nor any of its individual components,
+   in Original or Modified Versions, may be sold by itself.
+
+   2) Original or Modified Versions of the Font Software may be bundled,
+   redistributed and/or sold with any software, provided that each copy
+   contains the above copyright notice and this license. These can be
+   included either as stand-alone text files, human-readable headers or
+   in the appropriate machine-readable metadata fields within text or
+   binary files as long as those fields can be easily viewed by the user.
+
+   3) No Modified Version of the Font Software may use the Reserved Font
+   Name(s) unless explicit written permission is granted by the corresponding
+   Copyright Holder. This restriction only applies to the primary font name as
+   presented to the users.
+
+   4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+   Software shall not be used to promote, endorse or advertise any
+   Modified Version, except to acknowledge the contribution(s) of the
+   Copyright Holder(s) and the Author(s) or with their explicit written
+   permission.
+
+   5) The Font Software, modified or unmodified, in part or in whole,
+   must be distributed entirely under this license, and must not be
+   distributed under any other license. The requirement for fonts to
+   remain under this license does not apply to any document created
+   using the Font Software.
+
+   TERMINATION
+   This license becomes null and void if any of the above conditions are
+   not met.
+
+   DISCLAIMER
+   THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+   OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+   COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+   DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+   OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
 /* Weather Now. The scene (sky, sun or moon, clouds, rain or snow) follows the condition class
    set on .stage by main.ts, and with sunrise and sunset (.arc) the time of day: main.ts sets
    --p, --day and --glow once per play. Rain and snow are tiles drawn on a canvas once. */
@@ -24,7 +121,9 @@ body {
 }
 .stage {
   --u: 1vmin;
-  --out: calc(var(--sf-duration, 8s) - 0.6s);
+  --d-in: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --d-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --out: calc(var(--sf-duration, 8s) - 0.3s);
   /* The sun's and moon's arc (.arc, below), also where the dawn and dusk glow sits. */
   --rise-x: 44vw;
   --set-x: 92vw;
@@ -142,8 +241,8 @@ body {
   height: 48vmin;
   will-change: transform, opacity;
   animation:
-    orb-in 1.2s cubic-bezier(0.2, 1.2, 0.3, 1) both,
-    fade-out 0.5s ease-in forwards;
+    orb-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
   animation-delay: 0.1s, var(--out);
 }
 .orb .disc {
@@ -162,8 +261,6 @@ body {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  will-change: transform;
-  animation: spin 40s linear infinite;
   background: repeating-conic-gradient(color-mix(in srgb, var(--sf-accent, #ffdc78) 55%, transparent) 0 6deg, transparent 6deg 30deg);
   /* A mask reads only alpha: --opaque is any opaque colour. */
   --opaque: var(--sf-text, #000);
@@ -268,8 +365,6 @@ body {
   border-radius: 10vmin;
   background: var(--cloud);
   opacity: 0;
-  will-change: transform;
-  animation: drift 26s linear infinite;
 }
 .cloud::before,
 .cloud::after {
@@ -290,33 +385,7 @@ body {
   right: 5vmin;
   top: -13vmin;
 }
-/* Clouds keep to the top band; the forecast card sits low and to the left. */
-/* c1 starts already on screen: entering from the edge it read as a clipped cloud by the city name. */
-.c1 {
-  top: 1vh;
-  left: -50vmin;
-  animation-delay: -12s;
-  scale: 0.85;
-}
-.c2 {
-  top: 5vh;
-  left: -50vmin;
-  animation-duration: 38s;
-  animation-delay: -14s;
-  scale: 0.7;
-}
-.c3 {
-  top: 2vh;
-  left: -50vmin;
-  animation-duration: 32s;
-  animation-delay: -24s;
-  scale: 0.55;
-}
 /* Solid colours on every part: overlapping translucent circles show their seams. */
-.partly .c1,
-.partly .c2 {
-  opacity: 0.92;
-}
 .cloudy .cloud,
 .rain .cloud,
 .storm .cloud,
@@ -325,7 +394,7 @@ body {
   opacity: 0.92;
 }
 /* When the sky is covered, a large cloud takes the sun's place, so the side opposite the forecast
-   is not left empty. Still: only rain, snow and the small clouds move. */
+   is not left empty. Still: only rain and snow move. */
 .cloud.hero {
   right: 6vw;
   top: 50%;
@@ -358,8 +427,8 @@ body {
 .fog .cloud.hero {
   opacity: 1;
   animation:
-    fade-in 1s ease both,
-    fade-out 0.5s ease-in forwards;
+    fade-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
   animation-delay: 0.1s, var(--out);
 }
 
@@ -367,11 +436,6 @@ body {
   position: absolute;
   inset: 0;
   overflow: hidden;
-}
-/* Rain falls at an angle: rotate the whole field and oversize it so the corners stay covered. */
-#fx.slant {
-  inset: -25%;
-  transform: rotate(14deg);
 }
 #fx .fall {
   position: absolute;
@@ -383,82 +447,96 @@ body {
   will-change: transform;
   animation: fall 1s linear infinite;
 }
+/* Rain's slant is in its tile (main.ts): a turn slides it a tile left and --drop (four tiles) down,
+   so it starts --drop up and reaches a tile past the right edge. */
+#fx .rain {
+  top: calc(var(--drop) * -1);
+  right: calc(var(--tile) * -1);
+  animation-name: rain;
+}
 #fx .snow {
   animation-name: fall, sway;
   animation-timing-function: linear, ease-in-out;
   animation-direction: normal, alternate;
 }
 
-/* The forecast sits on an opaque card in the kit's surface colour: rain, snow and clouds pass
-   behind it and never cross the reading (a translucent shade still let them through, dimmed). */
+/* The forecast sits on glass: the kit's ground at 75% with a hairline edge and no shadow. The sky shows through; 75%
+   is the lightest at which every text still reads (AA) as painted, over every sky and condition (the tests). */
 .info {
   position: absolute;
   left: calc(var(--u) * 6);
   bottom: calc(var(--u) * 6);
-  padding: calc(var(--u) * 4) calc(var(--u) * 5.5);
-  background: var(--sf-surface, #0f1d36);
+  min-width: calc(var(--u) * 58);
+  padding: calc(var(--u) * 5) calc(var(--u) * 5.6);
+  background: color-mix(in srgb, var(--sf-bg, #0b1a33) 75%, transparent);
   border-radius: min(var(--sf-radius, 3vmin), 4vmin);
-  box-shadow: 0 1.5vmin 5vmin color-mix(in srgb, var(--sf-bg, #000) 35%, transparent);
+  box-shadow: inset 0 0 0 max(1px, 0.12vmin) color-mix(in srgb, var(--sf-text, #fff) 22%, transparent);
   will-change: transform, opacity;
   animation:
-    rise-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
   animation-delay: 0s, var(--out);
-}
-/* On a light kit a shadow of its background reads as a pale halo. */
-.light-kit .info {
-  box-shadow: none;
 }
 .info > * {
   will-change: transform, opacity;
   animation:
-    rise-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both,
-    fade-out 0.5s ease-in forwards;
+    rise-in 0.65s var(--d-in) both,
+    fade-out 0.3s var(--d-out) forwards;
 }
 .city {
-  font-size: calc(var(--u) * 5);
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  animation-delay: 0.2s, var(--out);
+  font-size: calc(var(--u) * 4.2);
+  font-weight: 600;
+  animation-delay: 0.11s, var(--out);
 }
 .temp {
   display: flex;
   align-items: flex-start;
+  /* The trim below takes the figures' top leading, so this is the room the city's descenders (Sydney) need. */
+  margin-top: calc(var(--u) * 1.8);
   font-family: var(--sf-font-display, 'Inter'), sans-serif;
   font-size: calc(var(--u) * 34);
   font-weight: 900;
   line-height: 0.9;
   letter-spacing: -0.05em;
-  animation-delay: 0.35s, var(--out);
+  font-variant-numeric: tabular-nums;
+  animation-delay: 0.22s, var(--out);
+}
+/* The unit's cap top on the figures' cap top: both boxes start at cap height, and the row aligns their tops. */
+.temp > * {
+  text-box: trim-both cap alphabetic;
 }
 .temp .unit {
-  font-size: 0.3em;
-  margin-top: 0.22em;
+  font-size: 0.26em;
   margin-left: 0.08em;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0;
 }
 .cond {
   margin-top: calc(var(--u) * 1.2);
   font-family: var(--sf-font-display, 'Inter'), sans-serif;
-  font-size: calc(var(--u) * 6.4);
+  font-size: calc(var(--u) * 5.4);
   font-weight: 800;
-  animation-delay: 0.5s, var(--out);
+  margin-bottom: calc(var(--u) * 1.6);
+  animation-delay: 0.33s, var(--out);
 }
+/* Two rows of figures in two columns, tabular, under a hairline. */
 .range,
 .extra {
-  display: flex;
-  gap: calc(var(--u) * 5);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: calc(var(--u) * 4);
   font-size: calc(var(--u) * 3.6);
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
   margin-top: calc(var(--u) * 1.6);
 }
 .range {
-  animation-delay: 0.65s, var(--out);
+  padding-top: calc(var(--u) * 1.6);
+  border-top: max(1px, 0.12vmin) solid color-mix(in srgb, var(--sf-text, #fff) 22%, transparent);
+  animation-delay: 0.44s, var(--out);
 }
 .extra {
-  animation-delay: 0.8s, var(--out);
+  animation-delay: 0.55s, var(--out);
   color: var(--sf-muted, color-mix(in srgb, var(--sf-text, #fff) 90%, transparent));
 }
 .range b,
@@ -488,15 +566,6 @@ body {
   margin: 0;
   translate: calc(var(--rise-x) + var(--p) * (var(--set-x) - var(--rise-x))) calc(var(--horizon) - sin(var(--p) * 180deg) * (var(--horizon) - var(--zenith)));
 }
-[data-orientation='portrait'] .c1 {
-  top: 22vh;
-}
-[data-orientation='portrait'] .c2 {
-  top: 30vh;
-}
-[data-orientation='portrait'] .c3 {
-  top: 8vh;
-}
 [data-orientation='portrait'] .info {
   left: 6vw;
   right: 6vw;
@@ -515,14 +584,14 @@ body {
 
 @keyframes orb-in {
   from {
-    transform: translateY(20vh) scale(0.5);
     opacity: 0;
+    transform: translateY(1.5vmin);
   }
 }
 @keyframes rise-in {
   from {
-    transform: translateY(6vh);
     opacity: 0;
+    transform: translateY(1.5vmin);
   }
 }
 @keyframes fade-in {
@@ -533,21 +602,17 @@ body {
 @keyframes fade-out {
   to {
     opacity: 0;
-  }
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@keyframes drift {
-  to {
-    transform: translateX(calc(100vw + 60vmin));
+    transform: translateY(-0.6vmin);
   }
 }
 @keyframes fall {
   to {
     transform: translateY(var(--tile));
+  }
+}
+@keyframes rain {
+  to {
+    transform: translate(calc(var(--tile) * -1), var(--drop));
   }
 }
 @keyframes sway {

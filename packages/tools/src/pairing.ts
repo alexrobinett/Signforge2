@@ -1,25 +1,8 @@
-/**
- * Claiming a pairing code (docs/backend-plan.md#screens, M3-08). An unpaired screen shows a code
- * from `POST /v1/device/pair/start`; a member types it here, which creates the screen and binds
- * the code to it. The screen's next poll collects its credential. The CMS form is M3-11.
- */
-import { z } from 'zod';
-import { displayHours, idempotencyKey, labels, locale, name, orientation, timezone } from './fields';
 import { overLimit } from './labels';
 import { screenView } from './screens';
 import { defineTool, ToolError } from './tool';
 import { outputs } from './outputs';
-
-/** Codes are 6 of these 32 letters (about a billion codes): no 0/O, 1/I, so a code read off a screen types cleanly. */
-export const PAIRING_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-export const PAIRING_CODE_LENGTH = 6;
-const CODE = new RegExp(`^[${PAIRING_CODE_ALPHABET}]{${PAIRING_CODE_LENGTH}}$`);
-
-const code = z
-  .string()
-  .transform((v) => v.toUpperCase().replace(/[\s-]/g, ''))
-  .refine((v) => CODE.test(v), `a pairing code is ${PAIRING_CODE_LENGTH} letters and digits, as the screen shows it`)
-  .describe('The code the screen shows, such as K7M-2QX; case, spaces and dashes do not matter');
+import { inputs } from './inputs';
 
 const notOpen = (code: string) => new ToolError('not_found', `pairing code ${code} is not open: check it, or restart the screen for a new one`);
 
@@ -30,21 +13,14 @@ const claimScreen = defineTool({
   scope: 'screens:manage',
   minRole: 'editor',
   mutates: true,
+  // A pairing code can be planted in content an agent reads, and the device it pairs gets every publish (review of #419).
+  people: true,
   idempotent: true,
   needs: ['rateLimit'],
-  input: z.object({
-    code,
-    name: name('screen'),
-    timezone,
-    orientation,
-    locale: locale.optional(),
-    displayHours: displayHours.optional().describe('Omit for always on'),
-    labels: labels.optional().describe('Its first labels, by key, such as { "region": "north" }; as update_screen_labels sets them'),
-    idempotencyKey,
-  }),
+  input: inputs.claim_screen,
   output: outputs.claim_screen,
   example: { code: 'ABC234', name: 'Lobby', timezone: 'Europe/London', orientation: 'landscape' },
-  target: (_input, output) => ({ kind: 'screen', id: output.screen.id }),
+  target: (_input, output) => (output ? { kind: 'screen', id: output.screen.id } : undefined),
   handler: async ({ org, input, write, blobs, services: { rateLimit } }) => {
     // Counted before the code is looked at, so right and wrong guesses cost the same.
     if (!(await rateLimit('pairing_claim'))) throw new ToolError('rate_limited', 'too many pairing claims; wait a minute and try again');
@@ -67,7 +43,7 @@ const claimScreen = defineTool({
     const labels = input.labels ?? {};
     if (Object.keys(labels).length) {
       const change = { set: labels, remove: [] };
-      const over = overLimit(await org.screens.labels.list(), [screen.id], change);
+      const over = overLimit(await org.screens.labels.list(), [{ screenId: screen.id, ...change }]);
       if (over) throw over;
       write(await org.screens.labels.stage.update([screen.id], change, { newScreen: true }));
     }
@@ -77,7 +53,7 @@ const claimScreen = defineTool({
   refuseFailedCommit: async ({ org, input }) =>
     (await org.pairing.open(input.code, Date.now()))
       ? // Only the org's keys can have moved: no other change reaches the new screen. Any id not stored stands for it.
-        input.labels && overLimit(await org.screens.labels.list(), ['scr_claimed'], { set: input.labels, remove: [] })
+        input.labels && overLimit(await org.screens.labels.list(), [{ screenId: 'scr_claimed', set: input.labels, remove: [] }])
       : notOpen(input.code),
 });
 

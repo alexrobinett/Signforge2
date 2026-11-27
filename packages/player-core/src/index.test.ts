@@ -13,10 +13,17 @@ import {
   planSync,
   resolvePlaylist,
   resolveSpotData,
+  pollBackoffMs,
+  sourceStaleS,
   boundFields,
+  boundImageHashes,
+  hasBoundListImage,
   manifestBoundFields,
+  manifestPhotoSources,
+  manifestSnapshotFiles,
   snapshotFit,
   spotFiles,
+  spotSnapshotFiles,
   validateManifest,
 } from './index';
 
@@ -339,31 +346,74 @@ describe('live data', () => {
   };
 
   it('overlays snapshot values on the static data', () => {
-    expect(resolveSpotData(bound, fields, new Map([['weather', weather]]), NOW, 'en-US')).toEqual({
+    expect(resolveSpotData(bound, fields, new Map([['weather', weather]]), NOW, true, 'en-US')).toEqual({
       data: { city: 'Atlanta', temp: 41.2, high: 60.6 },
       rejected: [],
+      fallback: [],
     });
   });
 
-  it('falls back to the static value when there is no snapshot yet', () => {
-    expect(resolveSpotData(bound, fields, new Map(), NOW, 'en-US')).toEqual({ data: bound.data, rejected: [] });
+  it('falls back to the static value when there is no snapshot yet, and names each bound field', () => {
+    expect(resolveSpotData(bound, fields, new Map(), NOW, true, 'en-US')).toEqual({ data: bound.data, rejected: [], fallback: ['temp', 'high'] });
   });
 
-  it('falls back to the static value once the server has not confirmed the snapshot for a day', () => {
-    const at = (checkedAt: string) => resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt }]]), NOW, 'en-US').data;
+  it('falls back to the static value once the server has not confirmed the snapshot for a day, and says so', () => {
+    const at = (checkedAt: string) => resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt }]]), NOW, true, 'en-US');
     expect(SNAPSHOT_STALE_MS).toBe(24 * 3_600_000);
-    expect(at('2026-11-16T12:00:00Z')).toEqual({ city: 'Atlanta', temp: 41.2, high: 60.6 });
-    expect(at('2026-11-16T11:59:59Z')).toEqual(bound.data);
+    expect(at('2026-11-16T12:00:00Z')).toMatchObject({ data: { city: 'Atlanta', temp: 41.2, high: 60.6 }, fallback: [] });
+    expect(at('2026-11-16T11:59:59Z')).toMatchObject({ data: bound.data, fallback: ['temp', 'high'] });
+  });
+
+  it("goes stale at the snapshot's own age, a calendar's in minutes, and a day for one with none (#624)", () => {
+    const at = (checkedAt: string, age = {}) =>
+      resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt, ...age }]]), NOW, true, 'en-US').fallback;
+    const minutes = { staleS: 1500 };
+    // NOW is 12:00: confirmed 11:35 is 25 minutes old, the edge.
+    expect(at('2026-11-17T11:35:00Z', minutes)).toEqual([]);
+    expect(at('2026-11-17T11:34:59Z', minutes)).toEqual(['temp', 'high']);
+    // Without its own age, the same snapshot is current for a day.
+    expect(at('2026-11-17T11:34:59Z')).toEqual([]);
+    // A check ahead of a trusted clock is a check just made.
+    expect(at('2026-11-17T12:05:00Z', minutes)).toEqual([]);
+  });
+
+  it('is stale with a checkedAt it cannot read (#624)', () => {
+    const at = (checkedAt: unknown) =>
+      resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt } as DataSnapshot]]), NOW, true, 'en-US').fallback;
+    expect(at(undefined)).toEqual(['temp', 'high']);
+    expect(at('')).toEqual(['temp', 'high']);
+    expect(at('yesterday')).toEqual(['temp', 'high']);
+  });
+
+  it("on a clock it does not trust, drops a calendar's data but keeps a day source's, as before (review of #630)", () => {
+    // A Pi restarted from a saved clock with no network: its NOW may be hours behind or ahead of the real time.
+    const at = (checkedAt: string, age = {}) =>
+      resolveSpotData(bound, fields, new Map([['weather', { ...weather, checkedAt, ...age }]]), NOW, false, 'en-US').fallback;
+    expect(at('2026-11-17T11:59:00Z', { staleS: 1500 })).toEqual(['temp', 'high']);
+    expect(at('2026-11-17T11:59:00Z', { staleS: 86_400 })).toEqual([]);
+    expect(at('2026-11-17T11:59:00Z')).toEqual([]);
+    expect(at('2026-11-17T18:00:00Z')).toEqual([]);
+    expect(at('2026-11-16T11:59:59Z')).toEqual(['temp', 'high']);
+  });
+
+  it('gives a calendar one failed poll, its retry and ten minutes, at most a day, and any other kind none (#624)', () => {
+    // The poll due 5 minutes after a success fails, the retry comes 10 minutes later.
+    expect(pollBackoffMs(300, 1)).toBe(600_000);
+    expect(sourceStaleS('ical', 300)).toBe(1500);
+    expect(sourceStaleS('ical', 3600)).toBe(11_400);
+    expect(sourceStaleS('ical', 86_400)).toBe(86_400);
+    for (const format of ['json', 'rss', 'csv', 'json-table', 'provider']) expect(sourceStaleS(format, 300), format).toBeUndefined();
   });
 
   it('keeps the static value for a live value that does not fit its field, and says why', () => {
     const hot = { ...weather, data: { current: { temp: 400 }, daily: {} } };
-    expect(resolveSpotData(bound, fields, new Map([['weather', hot]]), NOW, 'en-US')).toEqual({
+    expect(resolveSpotData(bound, fields, new Map([['weather', hot]]), NOW, true, 'en-US')).toEqual({
       data: bound.data,
       rejected: [
         { source: 'weather', problem: 'field "temp" must be at most 100' },
         { source: 'weather', problem: 'field "high" has no value at the bound path' },
       ],
+      fallback: ['temp', 'high'],
     });
   });
 
@@ -390,7 +440,7 @@ describe('live data', () => {
       },
     };
     const spot = { ...bound, data: { items: [] }, bindings: { items: { source: 'menu', path: 'rows', table: { columns: { name: 'Item', price: 'Price' } } } } };
-    expect(resolveSpotData(spot, listFields, new Map([['menu', menu]]), NOW, 'de-DE')).toEqual({
+    expect(resolveSpotData(spot, listFields, new Map([['menu', menu]]), NOW, true, 'de-DE')).toEqual({
       data: {
         items: [
           { name: 'Soup', price: '4,50' },
@@ -398,12 +448,15 @@ describe('live data', () => {
         ],
       },
       rejected: [{ source: 'menu', problem: 'field "items": row 2: price is longer than 6' }],
+      // Some rows kept: the list is live.
+      fallback: [],
     });
     // A mapped column the file lost: the fallback, and why.
     const lost = { ...menu, data: { columns: ['Dish', 'Price'], rows: [] } };
-    expect(resolveSpotData(spot, listFields, new Map([['menu', lost]]), NOW, 'en-US')).toEqual({
+    expect(resolveSpotData(spot, listFields, new Map([['menu', lost]]), NOW, true, 'en-US')).toEqual({
       data: { items: [] },
       rejected: [{ source: 'menu', problem: 'field "items": the table has no column "Item"' }],
+      fallback: ['items'],
     });
   });
 
@@ -517,7 +570,7 @@ describe('a template with two sources (#193)', () => {
   const forecast = snap('forecast', { current: { temperature_2m: 41.2 } });
   const live = [{ title: 'Live 1', published: '', source: 'Desk' }];
   const news = snap('news', { title: 'Desk', language: 'en', items: live });
-  const play = (...snapshots: DataSnapshot[]) => resolveSpotData(frame, fields, new Map(snapshots.map((x) => [x.id, x])), NOW, 'en-US');
+  const play = (...snapshots: DataSnapshot[]) => resolveSpotData(frame, fields, new Map(snapshots.map((x) => [x.id, x])), NOW, true, 'en-US');
 
   it('is a template a player plays, and its manifest binds each field to its own source', () => {
     const m = manifest({
@@ -538,11 +591,14 @@ describe('a template with two sources (#193)', () => {
   });
 
   it('plays both sources live, one stale with its fields on their fallback, and neither with every fallback', () => {
-    expect(play(forecast, news)).toEqual({ data: { city: 'Atlanta', temp: 41.2, items: live }, rejected: [] });
+    expect(play(forecast, news)).toEqual({ data: { city: 'Atlanta', temp: 41.2, items: live }, rejected: [], fallback: [] });
     const stale = { ...forecast, checkedAt: '2026-11-16T11:59:59Z' };
-    expect(play(stale, news)).toEqual({ data: { city: 'Atlanta', temp: 72, items: live }, rejected: [] });
-    expect(play(forecast, { ...news, checkedAt: '2026-11-16T11:59:59Z' }).data).toEqual({ city: 'Atlanta', temp: 41.2, items: [{ title: 'Fallback' }] });
-    expect(play()).toEqual({ data: frame.data, rejected: [] });
+    expect(play(stale, news)).toEqual({ data: { city: 'Atlanta', temp: 72, items: live }, rejected: [], fallback: ['temp'] });
+    expect(play(forecast, { ...news, checkedAt: '2026-11-16T11:59:59Z' })).toMatchObject({
+      data: { city: 'Atlanta', temp: 41.2, items: [{ title: 'Fallback' }] },
+      fallback: ['items'],
+    });
+    expect(play()).toEqual({ data: frame.data, rejected: [], fallback: ['temp', 'items'] });
   });
 });
 
@@ -612,19 +668,81 @@ describe('files', () => {
       'spot "b" is listed under a different id ("not-b")',
       'schedule entry "e1": priority must be a number',
       'playlist "all": transition must be cut, fade or crossfade with ms between 1 and 10000',
-      'data source "w": refreshS must be at least 60',
+      'data source "w": refreshS must be whole seconds, at least 60',
     ]);
   });
 
   it('holds every id to one grammar and accepts the schemas this player supports', () => {
     // A release plays schema N and N-1, so a screen updated while offline keeps its cached manifest.
-    expect(validateManifest(manifest({ schema: 6 }))).toEqual([]);
     expect(validateManifest(manifest({ schema: 7 }))).toEqual([]);
-    expect(validateManifest(manifest({ schema: 5 }))).toEqual(['manifest schema 5 is not one this player can play (6, 7)']);
-    expect(validateManifest(manifest({ schema: 8 }))).toEqual(['manifest schema 8 is not one this player can play (6, 7)']);
+    expect(validateManifest(manifest({ schema: 8 }))).toEqual([]);
+    expect(validateManifest(manifest({ schema: 6 }))).toEqual(['manifest schema 6 is not one this player can play (7, 8)']);
+    expect(validateManifest(manifest({ schema: 9 }))).toEqual(['manifest schema 9 is not one this player can play (7, 8)']);
     const m = manifest();
     m.screen.id = '../etc';
     expect(validateManifest(m)).toEqual(['screen id "../etc" is not a valid id']);
+  });
+
+  it('extracts feed image hashes from bound list-image fields for manifests and spots (#196)', () => {
+    const f1 = '1'.repeat(64);
+    const t1 = '2'.repeat(64);
+    const f2 = '3'.repeat(64);
+    const extra = '4'.repeat(64);
+    const m = manifest({
+      templates: {
+        'base/news@2.0.0': {
+          html: 'sha-h',
+          manifest: {
+            id: 'news',
+            version: '2.0.0',
+            name: 'News',
+            fields: {
+              items: {
+                type: 'list',
+                label: 'Stories',
+                maxItems: 2,
+                default: [],
+                item: { title: { type: 'text', label: 'Title' }, image: { type: 'image', label: 'Photo' } },
+              },
+            },
+            duration: { defaultMs: 10_000, minMs: 4000, maxMs: 60_000 },
+            orientations: ['landscape'],
+            uses: [],
+            background: '#000',
+          },
+        },
+      },
+      spots: {
+        n: {
+          id: 'n',
+          name: 'News',
+          kind: 'template',
+          template: 'base/news@2.0.0',
+          durationMs: 10_000,
+          data: { items: [] },
+          assets: {},
+          bindings: { items: { source: 'feed', path: 'items' } },
+        },
+      },
+      dataSources: { feed: { id: 'feed', refreshS: 300 } },
+    });
+    const bound = manifestBoundFields(m).get('feed') ?? [];
+    expect(hasBoundListImage(bound)).toBe(true);
+    // What the feed poller is told the manifest shows photos for (#486); a manifest with no list image shows none.
+    expect(manifestPhotoSources(m)).toEqual(['feed']);
+    expect(manifestPhotoSources(manifest())).toEqual([]);
+    const data = {
+      items: [
+        { title: 'One', image: { file: f1, thumb: t1 } },
+        { title: 'Two', image: { file: f2, thumb: f2 } },
+        // Beyond maxItems (2): ignored.
+        { title: 'Three', image: { file: extra, thumb: extra } },
+      ],
+    };
+    expect(boundImageHashes(bound, data)).toEqual([f1, t1, f2]);
+    const snaps = new Map([['feed', { id: 'feed', version: 1, fetchedAt: '2026-11-22T00:00:00Z', checkedAt: '2026-11-22T00:00:00Z', data }]]);
+    expect([...manifestSnapshotFiles([m], snaps)]).toEqual([f1, t1, f2]);
+    expect([...spotSnapshotFiles(m.spots.n!, m, snaps)]).toEqual([f1, t1, f2]);
   });
 
   it('keys each template by its owner, id and version, so a base and an org template cannot collide', () => {

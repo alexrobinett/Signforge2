@@ -1,14 +1,16 @@
 /**
  * Integrations (issue #80, canvas board Integrations): the org's data sources and their health,
  * a failing one in words with its fix, the accounts connected at providers, and the catalogue of
- * connectors with what is built and what is planned. Filter and search are in the URL, and so is
+ * connectors with what is built and what is planned. Filter (Built unless another is chosen, #368) and search are in the URL, and so is
  * what the API's connection callback sends back (`?connected=` or `?connectionError=`).
  */
+import { Choice } from '~/components/ui/choice';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { CloudOffIcon, XIcon } from 'lucide-react';
+import { CloudOffIcon, TriangleAlertIcon, XIcon } from 'lucide-react';
 import { SourcesDialog } from '~/components/integrations/sources-dialog';
 import { PageHeader } from '~/components/page';
+import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -43,7 +45,7 @@ import {
   sourceState,
   sourcesOf,
 } from '~/lib/integrations';
-import { useCanManage, useNow, useOrgId } from '~/lib/live';
+import { useCanManage, useCanPublish, useNow, useOrgId } from '~/lib/live';
 import { sectionFor } from '~/lib/sections';
 import { cn } from '~/lib/utils';
 import { connectionsQuery } from '~/queries/integrations';
@@ -55,7 +57,11 @@ import { useAppStore } from '~/state/provider';
 const section = sectionFor('/integrations');
 
 interface Search {
-  show?: Exclude<Show, 'all'>;
+  /**
+   * When absent, Built (#368): the page opens on what can be used; with a search, All, so a search finds every
+   * connector (review of #459). Either is in the URL only when chosen against that.
+   */
+  show?: Show;
   q?: string;
   connected?: string;
   connectionError?: string;
@@ -66,7 +72,7 @@ const text = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
 export const Route = createFileRoute('/_app/integrations')({
   validateSearch: (s: Record<string, unknown>): Search => {
     const out: Search = {};
-    if (isShow(s.show) && s.show !== 'all') out.show = s.show;
+    if (isShow(s.show)) out.show = s.show;
     const q = text(s.q);
     const connected = text(s.connected);
     const connectionError = text(s.connectionError);
@@ -90,7 +96,7 @@ export const Route = createFileRoute('/_app/integrations')({
 });
 
 const SHOW_WORD: Record<Show, string> = { all: 'All', connected: 'Connected', built: 'Built', planned: 'Planned', later: 'Later' };
-const STATE_WORD: Record<Connector['state'], string> = { built: 'Built', planned: 'Planned', later: 'Later · enterprise' };
+const STATE_WORD: Record<Exclude<Connector['state'], 'built'>, string> = { planned: 'Planned', later: 'Later · enterprise' };
 const TILE: Record<Connector['state'], string> = {
   built: 'bg-primary text-primary-foreground',
   planned: 'bg-accent text-accent-foreground',
@@ -100,6 +106,9 @@ const TILE: Record<Connector['state'], string> = {
 function IntegrationsPage() {
   const orgId = useOrgId();
   const canManage = useCanManage();
+  // A source's address goes to screens with no publish: only someone who may publish fixes it (owner decision on #424).
+  const canPublish = useCanPublish();
+  const canFix = canManage && canPublish;
   const { timezone, locale } = Route.useLoaderData();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
@@ -111,12 +120,16 @@ function IntegrationsPage() {
   const { connections, providers } = useSuspenseQuery(connectionsQuery(orgId)).data;
   const sources = data.dataSources;
   const clock: Clock = { timezone, locale, now: useNow(dataUpdatedAt) };
-  const show: Show = search.show ?? 'all';
   const q = search.q ?? '';
+  const unchosen: Show = q ? 'all' : 'built';
+  const show: Show = search.show ?? unchosen;
   const set = (next: Partial<Search>) => void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
   const all = CATALOGUE.flatMap((g) => g.items);
   const groups = CATALOGUE.map((g) => ({ ...g, items: g.items.filter((c) => shows(c, show, q, sources)) })).filter((g) => g.items.length);
   const notice = connectionNotice(search, connections);
+  // One filled button on the page (#364): the first failing source's fix, else the first Connect shown, else none.
+  const fixing = canFix && sources.some((s) => s.failures > 0 && hasAddress(s));
+  const firstConnect = fixing ? undefined : groups.flatMap((g) => g.items).find((c) => actionOf(c, sources, canManage) === 'Connect')?.name;
 
   return (
     <div className="space-y-6">
@@ -125,7 +138,7 @@ function IntegrationsPage() {
         <div
           role="status"
           className={cn(
-            'flex items-start gap-3 rounded-xl border px-4 py-3 text-[15px]',
+            'flex items-start gap-3 rounded-xl border px-4 py-3 text-md',
             search.connectionError ? 'border-destructive/40 bg-card' : 'border-status-online/40 bg-card',
           )}
         >
@@ -141,10 +154,11 @@ function IntegrationsPage() {
           </Button>
         </div>
       )}
+      <FailingSources sources={sources} clock={clock} canManage={canManage} canFix={canFix} />
       {/* Sources first and "Missing one?" last on a phone; beside the catalogue on a wide screen (the board). */}
       <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] lg:grid-rows-[auto_1fr]">
         <aside aria-label="Sources and accounts" className="flex flex-col gap-3.5 lg:col-start-2 lg:row-start-1">
-          <FeedingNow sources={sources} clock={clock} canManage={canManage} notCurrent={notCurrent} heardAt={dataUpdatedAt} />
+          <FeedingNow sources={sources} clock={clock} notCurrent={notCurrent} heardAt={dataUpdatedAt} />
           {(connections.length > 0 || providers.length > 0) && (
             <Accounts orgId={orgId} connections={connections} providers={providers} sources={sources} canManage={canManage} />
           )}
@@ -153,20 +167,11 @@ function IntegrationsPage() {
         <div className="flex min-w-0 flex-col gap-6 lg:col-start-1 lg:row-span-2 lg:row-start-1">
           <div className="flex flex-wrap items-center gap-2">
             {/* biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, as the board draws it; a fieldset would need a legend shown. */}
-            <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5 text-[15px]">
+            <div role="group" aria-label="Show" className="flex flex-wrap gap-1.5 text-md tabular-nums">
               {SHOW.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  aria-pressed={show === s}
-                  onClick={() => set({ show: s === 'all' ? undefined : s })}
-                  className={cn(
-                    'min-h-10 rounded-full border px-3.5 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                    show === s ? 'border-foreground bg-foreground text-background' : 'border-border-strong bg-card hover:bg-accent',
-                  )}
-                >
+                <Choice key={s} selected={show === s} onClick={() => set({ show: s === unchosen ? undefined : s })} className="min-h-10 rounded-full px-3.5">
                   {SHOW_WORD[s]} {all.filter((c) => shows(c, s, '', sources)).length}
-                </button>
+                </Choice>
               ))}
             </div>
             <span className="flex-1" />
@@ -179,7 +184,7 @@ function IntegrationsPage() {
               placeholder="Find an integration"
               defaultValue={q}
               onChange={(e) => set({ q: e.target.value || undefined })}
-              className="w-full sm:w-56 md:text-[15px]"
+              className="w-full sm:w-56 md:text-md"
             />
           </div>
 
@@ -190,11 +195,11 @@ function IntegrationsPage() {
                   <h2 id={`group-${g.name}`} className="text-xl font-semibold tracking-tight">
                     {g.name}
                   </h2>
-                  <span className="text-[15px] text-muted-foreground">{g.why}</span>
+                  <span className="text-md text-muted-foreground">{g.why}</span>
                 </div>
                 <ul>
                   {g.items.map((c) => (
-                    <ConnectorRow key={c.name} connector={c} sources={sources} canManage={canManage} />
+                    <ConnectorRow key={c.name} connector={c} sources={sources} canManage={canManage} primary={c.name === firstConnect} />
                   ))}
                 </ul>
               </section>
@@ -203,10 +208,7 @@ function IntegrationsPage() {
             <p className="text-muted-foreground">No integration matches.</p>
           )}
         </div>
-        <section
-          aria-labelledby="missing-h"
-          className="lg:col-start-2 lg:row-start-2 flex flex-col gap-2 self-start rounded-[14px] border bg-card p-4 text-[15px]"
-        >
+        <section aria-labelledby="missing-h" className="lg:col-start-2 lg:row-start-2 flex flex-col gap-2 self-start rounded-xl border bg-card p-4 text-md">
           <h2 id="missing-h" className="text-lg font-semibold tracking-tight">
             Missing one?
           </h2>
@@ -218,13 +220,32 @@ function IntegrationsPage() {
   );
 }
 
-function ConnectorRow({ connector: c, sources, canManage }: { connector: Connector; sources: ListedSource[]; canManage: boolean }) {
+/**
+ * What a connector's row offers: Manage (or View) its sources, Connect a feed or a calendar, or nothing.
+ * Feeds and calendars are added here by their address; weather from a place, in a weather spot; a table in a menu board spot.
+ */
+function actionOf(c: Connector, sources: ListedSource[], canManage: boolean) {
+  if (!c.kind) return null;
+  if (sourcesOf(c, sources).length) return canManage ? 'Manage' : 'View';
+  return canManage && (c.kind === 'rss' || c.kind === 'ical') ? 'Connect' : null;
+}
+
+function ConnectorRow({
+  connector: c,
+  sources,
+  canManage,
+  primary,
+}: {
+  connector: Connector;
+  sources: ListedSource[];
+  canManage: boolean;
+  /** The page's one filled button (#364): the first Connect, while no source needs fixing. */
+  primary: boolean;
+}) {
   const openSources = useAppStore((s) => s.openSources);
   const mine = sourcesOf(c, sources);
   const failing = mine.some((s) => s.failures > 0);
-  // Feeds and calendars are added here by their address; weather from a place, in a weather spot; a table in a menu board spot.
-  const addable = c.kind === 'rss' || c.kind === 'ical';
-  const action = !c.kind ? null : mine.length ? (canManage ? 'Manage' : 'View') : canManage && addable ? 'Connect' : null;
+  const action = actionOf(c, sources, canManage);
   const kind = c.kind;
 
   return (
@@ -235,21 +256,22 @@ function ConnectorRow({ connector: c, sources, canManage }: { connector: Connect
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
           <strong className="text-base font-semibold">{c.name}</strong>
-          <span className={cn('text-[13px] font-semibold', c.state === 'built' ? 'text-status-online-foreground' : 'text-muted-foreground')}>
-            {STATE_WORD[c.state]}
-          </span>
+          {/* Built is most rows and needs no word (#374): only what is not built yet says so. */}
+          {c.state !== 'built' && <span className="text-meta font-semibold text-muted-foreground">{STATE_WORD[c.state]}</span>}
         </span>
-        <span className="text-[15px] text-muted-foreground">{c.does}</span>
+        <span className="text-md text-muted-foreground">{c.does}</span>
       </span>
       {(mine.length > 0 || action) && (
         <span className="col-start-2 flex items-center gap-3 sm:col-start-3 sm:justify-end sm:text-right">
           {kind && mine.length > 0 && (
-            <span className={cn('text-sm', failing ? 'text-status-updating-foreground' : 'text-status-online-foreground')}>{connectedWords(kind, mine)}</span>
+            <span className={cn('text-sm tabular-nums', failing ? 'text-status-updating-foreground' : 'text-status-online-foreground')}>
+              {connectedWords(kind, mine)}
+            </span>
           )}
           {kind && action && (
             <Button
-              variant={action === 'Connect' ? 'default' : 'outline'}
-              className="min-h-10 px-3.5 text-[15px] font-semibold"
+              variant={primary ? 'default' : 'outline'}
+              className="min-h-10 px-3.5 text-md font-semibold"
               aria-label={`${action} ${c.name}`}
               onClick={() => openSources(kind, { adding: action === 'Connect' })}
             >
@@ -262,25 +284,59 @@ function ConnectorRow({ connector: c, sources, canManage }: { connector: Connect
   );
 }
 
-/** The board's "Feeding screens now": every source, its last good check, and a failing one in words with its fix. */
+/**
+ * A failing source, at the top of the page (#364): what is wrong in words, the spots it feeds, and its
+ * fix as a button, so the urgent thing is not a link in the margin. The first fix is the page's one filled button.
+ */
+function FailingSources({ sources, clock, canManage, canFix }: { sources: ListedSource[]; clock: Clock; canManage: boolean; canFix: boolean }) {
+  const openSources = useAppStore((s) => s.openSources);
+  const failing = sources.filter((s) => s.failures > 0);
+  // One filled button per view: the first fix; the others are outlined.
+  const first = canFix ? failing.find((s) => hasAddress(s))?.id : undefined;
+  return failing.map((s) => (
+    <Alert key={s.id} variant="destructive" role="alert" aria-labelledby={`failing-${s.id}`}>
+      <TriangleAlertIcon aria-hidden />
+      <AlertTitle id={`failing-${s.id}`} className="wrap-anywhere">
+        {KIND_WORD[s.format]} · {s.name}
+      </AlertTitle>
+      <AlertDescription className="text-foreground">
+        <p>
+          {failingWords(s, clock)}
+          {s.spots.length > 0 && ` It feeds ${s.spots.length === 1 ? 'the spot' : 'the spots'} ${s.spots.map((x) => x.name).join(', ')}.`}
+        </p>
+        {s.format === 'json' && <p>{weatherFixWords(s)}</p>}
+        {canManage && !canFix && hasAddress(s) && <p className="text-sm">Only an owner can fix its address here: screens follow it without a publish.</p>}
+        {canFix && hasAddress(s) && (
+          <Button
+            type="button"
+            variant={s.id === first ? 'default' : 'outline'}
+            className="mt-1 justify-self-start"
+            onClick={() => openSources(kindOf(s.format), { editing: s.id })}
+          >
+            {FIX_WORD[s.format]}
+            <span className="sr-only"> for {s.name}</span>
+          </Button>
+        )}
+      </AlertDescription>
+    </Alert>
+  ));
+}
+
+/** The board's "Feeding screens now": every source and its last good check; a failing one's fix is at the top of the page. */
 function FeedingNow({
   sources,
   clock,
-  canManage,
   notCurrent,
   heardAt,
 }: {
   sources: ListedSource[];
   clock: Clock;
-  canManage: boolean;
   /** The page's poll is failing: what it shows is what SignForge last said, at `heardAt`. */
   notCurrent: boolean;
   heardAt: number;
 }) {
-  const openSources = useAppStore((s) => s.openSources);
-  const failing = sources.filter((s) => s.failures > 0);
   return (
-    <section aria-labelledby="now-h" className="flex flex-col gap-2.5 rounded-[14px] border bg-card p-4">
+    <section aria-labelledby="now-h" className="flex flex-col gap-2.5 rounded-xl border bg-card p-4">
       <h2 id="now-h" className="text-lg font-semibold tracking-tight">
         Feeding screens now
       </h2>
@@ -296,7 +352,7 @@ function FeedingNow({
         )}
       </div>
       {sources.length ? (
-        <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 text-[15px]">
+        <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 text-md">
           {sources.map((s) => {
             const state = sourceState(s, clock);
             return (
@@ -304,7 +360,7 @@ function FeedingNow({
                 <dt className="min-w-0 break-words">
                   {KIND_WORD[s.format]} · {s.name}
                 </dt>
-                <dd className={cn('m-0 font-mono text-[13px]', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
+                <dd className={cn('m-0 text-meta tabular-nums', state.tone === 'failing' ? 'font-semibold text-destructive' : 'text-muted-foreground')}>
                   {state.word}
                 </dd>
               </div>
@@ -314,25 +370,6 @@ function FeedingNow({
       ) : (
         <p className="text-sm text-muted-foreground">No data sources yet. Connect a feed or a calendar from the list.</p>
       )}
-      {failing.map((s) => (
-        <div key={s.id} className="flex flex-col gap-1.5">
-          <p className="text-sm text-muted-foreground">
-            {failingWords(s, clock)}
-            {s.spots.length > 0 && ` It feeds ${s.spots.length === 1 ? 'the spot' : 'the spots'} ${s.spots.map((x) => x.name).join(', ')}.`}
-          </p>
-          {s.format === 'json' && <p className="text-sm text-muted-foreground">{weatherFixWords(s)}</p>}
-          {canManage && hasAddress(s) && (
-            <button
-              type="button"
-              className="inline-flex min-h-10 items-center self-start text-[15px] text-primary underline underline-offset-4"
-              onClick={() => openSources(kindOf(s.format), { editing: s.id })}
-            >
-              {FIX_WORD[s.format]}
-              <span className="sr-only"> for {s.name}</span>
-            </button>
-          )}
-        </div>
-      ))}
     </section>
   );
 }
@@ -366,12 +403,12 @@ function Accounts({
   const busy = (id: string, doing: 'connect' | 'disconnect') => connecting?.id === id && connecting.doing === doing;
 
   return (
-    <section aria-labelledby="accounts-h" className="flex flex-col gap-2.5 rounded-[14px] border bg-card p-4">
+    <section aria-labelledby="accounts-h" className="flex flex-col gap-2.5 rounded-xl border bg-card p-4">
       <h2 id="accounts-h" className="text-lg font-semibold tracking-tight">
         Connected accounts
       </h2>
       {connections.length ? (
-        <ul className="flex flex-col gap-3 text-[15px]">
+        <ul className="flex flex-col gap-3 text-md">
           {connections.map((c) => (
             <li key={c.id} className="flex flex-col gap-1.5">
               <span className="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -385,7 +422,12 @@ function Accounts({
               {canManage && (
                 <span className="flex flex-wrap gap-2">
                   {c.status !== 'active' && (
-                    <Button disabled={connecting !== null} onClick={() => void connect(c.provider, c.id)} aria-label={`Reconnect ${c.account}`}>
+                    <Button
+                      variant="outline"
+                      disabled={connecting !== null}
+                      onClick={() => void connect(c.provider, c.id)}
+                      aria-label={`Reconnect ${c.account}`}
+                    >
                       {busy(c.id, 'connect') ? 'Opening…' : 'Reconnect'}
                     </Button>
                   )}
@@ -423,10 +465,11 @@ function ConfirmDisconnect({ orgId, sources }: { orgId: string; sources: ListedS
   const error = useAppStore((s) => s.integrations.connectError);
   const ask = useAppStore((s) => s.askToDisconnect);
   const disconnect = useAppStore((s) => s.disconnect);
+  const focusBack = useAppStore((s) => s.focusBack);
   const reading = c ? sources.filter((s) => s.connectionId === c.id).map((s) => s.name) : [];
   return (
     <AlertDialog open={c !== null} onOpenChange={(open) => !open && ask(null)}>
-      <AlertDialogContent>
+      <AlertDialogContent onCloseAutoFocus={(e) => focusBack('disconnect', e)}>
         <AlertDialogHeader>
           <AlertDialogTitle className="break-words">Disconnect {c?.account}?</AlertDialogTitle>
           <AlertDialogDescription>

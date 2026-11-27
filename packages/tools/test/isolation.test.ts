@@ -4,7 +4,7 @@
 // own rows, so a check on one id cannot hide a missing check on another. A new tool is covered as
 // soon as it is registered; a new kind of id field fails here until it is mapped below.
 import { scoped, startPairing } from '@signforge/db';
-import { seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing';
+import { ORG_ROW_IDS, seedTeam, seedTwoOrgs, type Seeded, type SeededOrg } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -20,33 +20,24 @@ const FILES = {
 
 /** An org's row for each kind of id a tool input can name (`screenId` → `screen`). */
 const ORG_IDS: Record<string, (o: SeededOrg) => string> = {
-  screen: (o) => o.screen,
-  group: (o) => o.group,
-  credential: (o) => o.credential,
+  ...ORG_ROW_IDS,
   manifest: (o) => files(o).manifest,
-  template: (o) => o.template,
-  templateVersion: (o) => o.templateVersion,
-  spot: (o) => o.templateSpot,
-  playlist: (o) => o.playlist,
-  scheduleEntry: (o) => o.scheduleEntry,
   bundle: (o) => files(o).bundle,
   sources: (o) => files(o).sources,
-  asset: (o) => o.asset,
-  brandKit: (o) => o.brandKit,
-  logoOnDarkAsset: (o) => o.asset,
-  logoOnLightAsset: (o) => o.asset,
-  dataSource: (o) => o.dataSource,
-  alertDelivery: (o) => o.alertDelivery,
-  connection: (o) => o.connection,
-  publish: (o) => o.publish,
 };
 const files = (o: SeededOrg) => FILES[o.orgId as keyof typeof FILES];
 
 /** Ids that name a catalogue every org shares, not an org's row: any org may use them. */
 const CATALOGUE_IDS: Record<string, string> = { displayFont: 'base/oswald', bodyFont: 'base/inter' };
 
-/** Ids that name no row at all, so no org has one to lend: an R2 multipart upload's (finalize_video_upload finds the asset first). */
+/** Ids that name no row at all, so no org has one to lend: an R2 multipart upload's (finalize_upload finds the asset first). */
 const NOT_ROWS = new Set(['upload']);
+
+/**
+ * Inputs whose ids are only compared with the org's own rows, never read by: `allowSample` (#360)
+ * acknowledges sample text in the spots a publish promotes, so org A's spot id matches none of them.
+ */
+const MATCHED_ONLY = new Set(['allowSample']);
 
 /** The kind of id a field names, if it names one: `screenId` → `screen`, `groupIds` → `group`. */
 const kindOf = (key: string) => (key.endsWith('Ids') ? key.slice(0, -3) : key.endsWith('Id') ? key.slice(0, -2) : undefined);
@@ -67,8 +58,10 @@ function idFields(schema: unknown, path: string[] = []): IdField[] {
     items?: { properties?: unknown };
     additionalProperties?: unknown;
   };
+  if (MATCHED_ONLY.has(path.at(-1) ?? '')) return [];
   if (s.anyOf) return s.anyOf.flatMap((b) => idFields(b, path));
-  if (s.items?.properties && idFields(s.items, path).length) throw new Error(`${path.join('.')}: ids inside a list of objects; teach idFields to reach them`);
+  // A list of objects (import_screen_labels' screens): each id in it reached through the list's first item, `0`.
+  if (s.items?.properties) return idFields(s.items, [...path, '0']);
   // A record's values (a spot's bindings by field name): `*` stands for any key, and REACHED_BY gives the input.
   if (typeof s.additionalProperties === 'object') return idFields(s.additionalProperties, [...path, '*']).map((f) => ({ ...f, optional: true }));
   return Object.entries(s.properties ?? {}).flatMap(([key, prop]) => {
@@ -86,7 +79,8 @@ const unique = (fields: IdField[]) => [...new Map(fields.map((f) => [f.path.join
 /** A copy of `v` with `value` at `path` (undefined removes it). */
 function setPath(v: unknown, path: string[], value: unknown): unknown {
   const [key, ...rest] = path;
-  const obj = { ...((v ?? {}) as Record<string, unknown>) };
+  // A list's item, by its place: the list copied as a list.
+  const obj = (/^\d+$/.test(key!) ? [...(Array.isArray(v) ? v : [])] : { ...(v ?? {}) }) as Record<string, unknown>;
   if (rest.length) obj[key!] = setPath(obj[key!], rest, value);
   else if (value === undefined) delete obj[key!];
   else obj[key!] = value;
@@ -126,17 +120,22 @@ function oneForeignId(tool: AnyTool, fields: IdField[], field: IdField, s: Seede
 }
 
 /**
- * Fields whose tool ignores an id it does not find, as its description says, the same for org A's
- * row as for one that does not exist: the call works on org B's rows and says nothing of A's.
- */
-const IGNORES_UNKNOWN = new Set(['remove_group_members.screenIds']);
-
-/**
  * Tools that list what org B's own calls were given, which this test fills with org A's ids: the
  * audit log. Each must list exactly org B's own rows instead.
  */
 const LISTS_CALLS: Record<string, (out: unknown) => unknown> = {
   list_audit_log: (out) => (out as { entries: { at: number; action: string; actor: { id: string } }[] }).entries.map((e) => [e.at, e.action, e.actor.id]),
+};
+
+/**
+ * Tools whose ids sit in a list of draft pins, `{ kind, id, version }`, which no field's name says:
+ * each runs with org B's own draft here, and is refused org A's below.
+ */
+/** What `delete` deletes, by its `type`, and the kind of id each names. */
+const DELETED: Record<string, string> = { asset: 'asset', data_source: 'dataSource', playlist: 'playlist', schedule_entry: 'scheduleEntry' };
+
+const PINNED: Record<string, (o: SeededOrg) => unknown> = {
+  request_publish: (o) => ({ drafts: [{ kind: 'spot', id: o.templateSpot, version: 1 }], reason: 'Weekend hours' }),
 };
 
 /** Fields whose foreign id is refused by the check of another field, which the tool makes first. */
@@ -151,24 +150,29 @@ const REFUSED_BY_ANOTHER = new Set([
  * each, naming org A's row there and org B's own rows elsewhere.
  */
 const REACHED_BY: Record<string, (s: Seeded) => unknown> = {
-  'create_spot.templateVersionId': (s) => ({ name: 'Menu', kind: 'template', templateVersionId: s.a.templateVersion }),
-  'create_spot.assetId': (s) => ({ name: 'Logo', kind: 'image', assetId: s.a.asset }),
-  'update_spot.assetId': (s) => ({ spotId: s.b.imageSpot, assetId: s.a.asset }),
-  'create_spot.bindings.*.dataSourceId': (s) => ({
+  // A change names the row, and takes none of a new one's fields.
+  'save_spot.spotId': (s) => ({ spotId: s.a.templateSpot, name: 'Theirs' }),
+  'save_data_source.dataSourceId': (s) => ({ dataSourceId: s.a.dataSource, name: 'Theirs' }),
+  'save_spot.templateVersionId': (s) => ({ name: 'Menu', kind: 'template', templateVersionId: s.a.templateVersion }),
+  'save_spot.assetId': (s) => ({ name: 'Logo', kind: 'image', assetId: s.a.asset }),
+  'save_spot.bindings.*.dataSourceId': (s) => ({
     name: 'Menu',
     kind: 'template',
     templateVersionId: s.b.templateVersion,
     bindings: { title: { dataSourceId: s.a.dataSource, path: 't' } },
   }),
-  'update_spot.bindings.*.dataSourceId': (s) => ({ spotId: s.b.templateSpot, bindings: { title: { dataSourceId: s.a.dataSource, path: 't' } } }),
   // A schedule entry is aimed at a group or a screen, never both: one input for each.
-  'create_schedule_entry.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen }),
+  'save_schedule_entry.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen }),
   'start_takeover.groupId': (s) => ({ playlistId: s.b.playlist, target: 'group', groupId: s.a.group, endsAt: '2026-11-17T20:00:00Z' }),
   'start_takeover.screenId': (s) => ({ playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen, endsAt: '2026-11-17T20:00:00Z' }),
-  'update_schedule_entry.groupId': (s) => ({ scheduleEntryId: s.b.scheduleEntry, target: 'group', groupId: s.a.group, ifVersion: 1 }),
-  'update_schedule_entry.screenId': (s) => ({ scheduleEntryId: s.b.scheduleEntry, target: 'screen', screenId: s.a.screen, ifVersion: 1 }),
+  'takeover.groupId': (s) => ({ action: 'publish', playlistId: s.b.playlist, target: 'group', groupId: s.a.group, endsAt: '2026-11-17T20:00:00Z' }),
+  'takeover.screenId': (s) => ({ action: 'publish', playlistId: s.b.playlist, target: 'screen', screenId: s.a.screen, endsAt: '2026-11-17T20:00:00Z' }),
+  'takeover.scheduleEntryId': (s) => ({ action: 'end', scheduleEntryId: s.a.scheduleEntry }),
+  // An assetId renews an image's upload, and takes nothing else.
+  'start_upload.assetId': (s) => ({ kind: 'image', assetId: s.a.asset }),
+  'save_schedule_entry.groupId': (s) => ({ scheduleEntryId: s.b.scheduleEntry, target: 'group', groupId: s.a.group, ifVersion: 1 }),
   // A provider source takes a resource with its connection, and no feed URL.
-  'create_data_source.connectionId': (s) => ({ name: 'Rooms', format: 'provider', connectionId: s.a.connection, resource: 'calendar-1' }),
+  'save_data_source.connectionId': (s) => ({ name: 'Rooms', format: 'provider', connectionId: s.a.connection, resource: 'calendar-1' }),
 };
 
 let s: Seeded;
@@ -198,12 +202,15 @@ async function orgAState() {
     scheduleEntries: await a.scheduleEntries.list(),
     alertChannels: await a.alertChannels.list(),
     alertDeliveries: await a.alertDeliveries.list({ take: 100 }),
+    team: await a.members.list(),
+    invitations: await a.invitations.pending(),
   };
 }
 
 beforeAll(async () => {
   s = await seedTwoOrgs(env.DB);
   for (const o of [s.a, s.b]) {
+    await seedTeam(env.DB, o.orgId);
     await env.BLOBS.put(manifestKey(o.orgId, o.screen, files(o).manifest), '{}');
     await env.BLOBS.put(orgBlobKey(o.orgId, files(o).bundle), '<!doctype html>');
     await env.BLOBS.put(orgBlobKey(o.orgId, files(o).sources), '{}');
@@ -232,16 +239,38 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
     const paths = (name: string) =>
       unique(idFields(z.toJSONSchema(registry.get(name)!.input, { io: 'input', unrepresentable: 'any' }))).map((f) => f.path.join('.'));
     expect(paths('assign_brand_kit')).toEqual(['brandKitId', 'screenId', 'groupId']);
-    expect(paths('create_brand_kit')).toEqual(['logoOnDarkAssetId', 'logoOnLightAssetId']);
-    expect(paths('create_group')).toEqual(['screenIds']);
-    expect(paths('update_spot')).toContain('bindings.*.dataSourceId');
+    expect(paths('save_brand_kit')).toEqual(['brandKitId', 'logoOnDarkAssetId', 'logoOnLightAssetId']);
+    expect(paths('save_group')).toEqual(['groupId', 'screenIds']);
+    expect(paths('save_spot')).toContain('bindings.*.dataSourceId');
   });
+
+  it("refuses a draft pin naming org A's draft as not there (version 0), for publish and request_publish", async () => {
+    const pins = [{ kind: 'spot', id: s.a.templateSpot, version: 1 }];
+    for (const [name, input] of [
+      ['publish', { drafts: pins }],
+      ['request_publish', { drafts: pins, reason: 'Weekend hours' }],
+    ] as const) {
+      expect(await dispatch(registry, name, input, callerB), name).toMatchObject({
+        ok: false,
+        error: 'conflict',
+        details: { id: s.a.templateSpot, version: 0 },
+      });
+    }
+  });
+
+  // `delete` names its id by its type (#345), which no field's name says: each type is a case of its own.
+  for (const [type, kind] of Object.entries(DELETED)) {
+    it(`delete: finds nothing of org A as a ${type}`, async () => {
+      const result = await dispatch(registry, 'delete', { type, id: ORG_IDS[kind]!(s.a) }, callerB);
+      expect(result, JSON.stringify(result)).toMatchObject({ ok: false, error: 'not_found', message: expect.stringContaining(ORG_IDS[kind]!(s.a)) });
+    });
+  }
 
   for (const tool of TOOLS) {
     const fields = unique(idFields(z.toJSONSchema(tool.input, { io: 'input', unrepresentable: 'any' })));
-    if (!fields.length) {
+    if (!fields.length && tool.name !== 'delete') {
       it(`${tool.name}: names no ids, and works on org B alone`, async () => {
-        const result = await dispatch(registry, tool.name, tool.example, callerB);
+        const result = await dispatch(registry, tool.name, PINNED[tool.name]?.(s.b) ?? tool.example, callerB);
         expect(result.ok, JSON.stringify(result)).toBe(true);
         const calls = LISTS_CALLS[tool.name];
         if (calls && result.ok) {
@@ -260,17 +289,43 @@ describe("every tool, as org B's owner with one of org A's ids", () => {
         const name = `${tool.name}.${field.path.join('.')}`;
         const input = REACHED_BY[name]?.(s) ?? oneForeignId(tool, fields, field, s);
         const result = await dispatch(registry, tool.name, input, callerB);
-        if (IGNORES_UNKNOWN.has(name)) {
-          expect(result.ok, JSON.stringify(result)).toBe(true);
-          expect(JSON.stringify(result)).not.toContain(ORG_IDS[field.kind]!(s.a));
-        } else {
-          // Refused for org A's id, not for another field.
-          const named = REFUSED_BY_ANOTHER.has(name) ? expect.any(String) : expect.stringContaining(ORG_IDS[field.kind]!(s.a));
-          expect(result, JSON.stringify(result)).toMatchObject({ ok: false, error: 'not_found', message: named });
-        }
+        // Refused for org A's id, not for another field.
+        const named = REFUSED_BY_ANOTHER.has(name) ? expect.any(String) : expect.stringContaining(ORG_IDS[field.kind]!(s.a));
+        expect(result, JSON.stringify(result)).toMatchObject({ ok: false, error: 'not_found', message: named });
       });
     }
   }
+
+  it("finds nothing of org A's in save_group's screens, whichever membership: remove ignores a screen not in the group, as of another org", async () => {
+    const theirs = s.a.screen;
+    for (const input of [
+      { name: 'Theirs', screenIds: [s.b.screen, theirs] },
+      { groupId: s.b.group, screenIds: [theirs], membership: 'set' },
+      { groupId: s.b.group, screenIds: [theirs], membership: 'add' },
+    ])
+      expect(await dispatch(registry, 'save_group', input, callerB), JSON.stringify(input)).toMatchObject({
+        ok: false,
+        error: 'not_found',
+        message: expect.stringContaining(theirs),
+      });
+    const removed = await dispatch(registry, 'save_group', { groupId: s.b.group, screenIds: [theirs], membership: 'remove' }, callerB);
+    expect(removed.ok, JSON.stringify(removed)).toBe(true);
+    expect(JSON.stringify(removed)).not.toContain(theirs);
+  });
+
+  it("finds nothing of org A in a change to org B's spot either: an asset, or a binding's source (#345 PR 4)", async () => {
+    for (const input of [
+      { spotId: s.b.imageSpot, assetId: s.a.asset },
+      { spotId: s.b.templateSpot, bindings: { title: { dataSourceId: s.a.dataSource, path: 't' } } },
+    ]) {
+      const named = 'assetId' in input ? s.a.asset : s.a.dataSource;
+      expect(await dispatch(registry, 'save_spot', input, callerB), JSON.stringify(input)).toMatchObject({
+        ok: false,
+        error: 'not_found',
+        message: expect.stringContaining(named),
+      });
+    }
+  });
 
   it("leaves org A's data and audit log as they were", async () => {
     expect(await orgAState()).toEqual(before);

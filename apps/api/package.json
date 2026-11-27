@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./agent-chat": "./src/agent/chat-shapes.ts",
+    "./agent-inline": "./src/agent/inline-shapes.ts",
     "./roles": "./src/auth/roles.ts",
     "./tab-org": "./src/api/tab-org.ts"
   },
@@ -12,9 +14,13 @@
     "types": "wrangler types --env dev --strict-vars=false",
     "typecheck": "wrangler types --env dev --strict-vars=false >/dev/null && tsc -p . && tsc -p scripts",
     "test": "vitest run",
-    "dev:screen": "wrangler d1 migrations apply DB --local --env dev >&2 && tsx scripts/dev-screen.ts"
+    "check:deploy": "tsx scripts/check-deploy-config.ts",
+    "dev:screen": "wrangler d1 migrations apply DB --local --env dev >&2 && tsx scripts/dev-screen.ts",
+    "eval:agents": "vitest run --config vitest.eval.config.ts"
   },
   "dependencies": {
+    "@better-auth/oauth-provider": "1.7.25",
+    "@modelcontextprotocol/server": "2.4.0",
     "@signforge/compiler": "workspace:*",
     "@signforge/contract": "workspace:*",
     "@signforge/db": "workspace:*",
@@ -22,15 +28,21 @@
     "@signforge/media": "workspace:*",
     "@signforge/player-core": "workspace:*",
     "@signforge/tools": "workspace:*",
+    "@tanstack/ai": "1.8.0",
+    "@tanstack/ai-anthropic": "1.2.1",
+    "@tanstack/ai-openai": "1.2.0",
     "better-auth": "^1.7.25",
-    "hono": "^4.13.19"
+    "hono": "^4.13.19",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.4",
+    "@modelcontextprotocol/client": "2.4.0",
     "@signforge/cli": "workspace:*",
     "@signforge/template-agenda": "workspace:*",
     "@signforge/template-alert": "workspace:*",
     "@signforge/template-announcement": "workspace:*",
+    "@signforge/template-build": "workspace:*",
     "@signforge/template-clock": "workspace:*",
     "@signforge/template-countdown": "workspace:*",
     "@signforge/template-cstore-promo": "workspace:*",
@@ -43,6 +55,7 @@
     "@signforge/template-weather": "workspace:*",
     "@types/node": "^26.6.6",
     "auth": "1.7.25",
+    "js-tiktoken": "1.0.21",
     "tsx": "^4.23.15",
     "vitest": "^5.1.0",
     "wrangler": "^4.164.0"

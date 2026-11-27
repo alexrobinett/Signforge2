@@ -1,13 +1,13 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-plugin';
-import { buildTemplate } from '@signforge/cli/template';
+import { buildTemplate } from '@signforge/template-build';
 // The fonts entry, not the index: Node loads this config, and the compiler's index uses extensionless imports.
 import { FONTS, fontFilePath } from '@signforge/compiler/fonts';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
-import { unstable_readConfig } from 'wrangler';
+import { experimental_readRawConfig, unstable_readConfig } from 'wrangler';
 
 // Tests run inside workerd with the bindings of wrangler.jsonc's `dev` environment, backed by local storage.
-// ADMIN_TOKEN is a fixed test value here, so a local .dev.vars never changes what the tests see.
+// ADMIN_TOKEN and PLAYER_RELEASE_ADMIN_SECRET are fixed test values here, so a local .dev.vars never changes what the tests see.
 // `test/setup.ts` applies packages/db's migrations, the same ones `wrangler d1 migrations apply` runs.
 // TEMPLATE_BUILDS holds every template in templates/, built here in Node as `sf template push`
 // builds them (esbuild cannot run in workerd), for test/templates.test.ts to push.
@@ -68,6 +68,17 @@ function rateLimits() {
   return JSON.stringify(Object.fromEntries(ratelimits.map((r: { name: string; simple: { limit: number; period: number } }) => [r.name, r.simple])));
 }
 
+const PUB_FILE = new URL('../../device/pi/player-release.pub', import.meta.url).pathname;
+
+// DEPLOYED_VARS: each environment's Worker vars, by environment, so a test parses them as the Worker does and a
+// malformed one fails CI, not every queue batch once deployed (#508).
+function deployedVars() {
+  const config = new URL('wrangler.jsonc', import.meta.url).pathname;
+  // Every environment the config names, so one added later is parsed too (review of #548).
+  const names = Object.keys(experimental_readRawConfig({ config }).rawConfig.env ?? {});
+  return JSON.stringify(Object.fromEntries(names.map((env) => [env, unstable_readConfig({ config, env }, { hideWarnings: true }).vars])));
+}
+
 // FONT_FILES: the catalogue's WOFF2 files from fonts/, by repo path, base64, for `sf fonts push`.
 function fontFiles() {
   const root = new URL('../../', import.meta.url).pathname;
@@ -75,27 +86,37 @@ function fontFiles() {
   return JSON.stringify(Object.fromEntries(paths.map((p) => [p, readFileSync(`${root}${p}`).toString('base64')])));
 }
 
-export default defineConfig({
-  plugins: [
-    cloudflareTest(async () => ({
-      wrangler: { configPath: './wrangler.jsonc', environment: 'dev' },
-      miniflare: {
-        bindings: {
-          ADMIN_TOKEN: 'test-admin-token',
-          // find_places's geocoder: a closed port, so no test reaches Open-Meteo.
-          GEOCODING_URL: 'http://127.0.0.1:9/v1/search',
-          // Every feed fetch (the poller's default guards, read_table): a closed port too.
-          FEED_STUB_URL: 'http://127.0.0.1:9',
-          TEST_MIGRATIONS: await readD1Migrations(new URL('../../packages/db/migrations', import.meta.url).pathname),
-          TEMPLATE_BUILDS: await templateBuilds(),
-          FONT_FILES: fontFiles(),
-          RATE_LIMITS: rateLimits(),
-        },
-        serviceBindings: { TEMPLATE_CHECK: templateCheck },
+/** The workerd pool with the test bindings, and `extra` over them: the agent eval's live model (vitest.eval.config.ts). */
+export const workers = (extra: Record<string, string> = {}) =>
+  cloudflareTest(async () => ({
+    wrangler: { configPath: './wrangler.jsonc', environment: 'dev' },
+    miniflare: {
+      bindings: {
+        ADMIN_TOKEN: 'test-admin-token-of-32-characters',
+        PLAYER_RELEASE_ADMIN_SECRET: 'test-release-secret',
+        // The release key screens check, once it is committed: demo's PLAYER_RELEASE_PUBLIC_KEY must be it (releases.test.ts).
+        RELEASE_PUB_FILE: existsSync(PUB_FILE) ? readFileSync(PUB_FILE, 'utf8') : '',
+        // find_places's geocoder: a closed port, so no test reaches Open-Meteo.
+        GEOCODING_URL: 'http://127.0.0.1:9/v1/search',
+        // Every feed fetch (the poller's default guards, read_table): a closed port too.
+        FEED_STUB_URL: 'http://127.0.0.1:9',
+        TEST_MIGRATIONS: await readD1Migrations(new URL('../../packages/db/migrations', import.meta.url).pathname),
+        TEMPLATE_BUILDS: await templateBuilds(),
+        FONT_FILES: fontFiles(),
+        RATE_LIMITS: rateLimits(),
+        DEPLOYED_VARS: deployedVars(),
+        ...extra,
       },
-    })),
-  ],
+      serviceBindings: { TEMPLATE_CHECK: templateCheck },
+    },
+  }));
+
+/** What every run of these tests sets, the eval's too. */
+export const testOptions = {
+  setupFiles: ['test/setup.ts'],
   // No module cache on disk: with it, a worker that starts after another gets every cached module inlined
   // into one message, over workerd's 32 MiB limit, and dies (docs/ci.md, "The API's workerd tests").
-  test: { setupFiles: ['test/setup.ts'], fsModuleCache: false },
-});
+  fsModuleCache: false,
+};
+
+export default defineConfig({ plugins: [workers()], test: testOptions });

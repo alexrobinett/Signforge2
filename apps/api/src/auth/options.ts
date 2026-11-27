@@ -7,8 +7,11 @@ import { newId, type OrgScope } from '@signforge/db';
 import type { BetterAuthOptions, BetterAuthPlugin } from 'better-auth';
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api';
 import { setSessionCookie } from 'better-auth/cookies';
+import { oauthProvider } from '@better-auth/oauth-provider';
 import { emailOTP, organization } from 'better-auth/plugins';
 import type { EmailSender } from '../email';
+import { agentGrants, type ConsentLink, type GrantDeps, OAUTH_SCOPES } from './agent-grants';
+import { clientNameRefusal } from './client-names';
 import { ac, ROLES, roles } from './roles';
 
 /** Session cookies are `sf.*` (`__Secure-sf.*` over https). */
@@ -126,6 +129,34 @@ function membershipAudit(audit: AuthDeps['audit']) {
 }
 
 /**
+ * Open client registration is for public clients only (owner default on #109): one that asks to
+ * hold a secret is refused, as is one that names no method (RFC 7591's default is a secret). And
+ * under a name the consent page can show as it is (./client-names.ts).
+ */
+const refusePublicOnly = {
+  id: 'oauth-public-clients',
+  hooks: {
+    before: [
+      {
+        matcher: (ctx: { path?: string }) => ctx.path === '/oauth2/register',
+        handler: createAuthMiddleware(async (ctx) => {
+          const body = isRecord(ctx.body) ? ctx.body : {};
+          if (body.token_endpoint_auth_method !== 'none') {
+            throw new APIError('BAD_REQUEST', {
+              error: 'invalid_client_metadata',
+              error_description: 'only public clients may register: token_endpoint_auth_method must be none',
+            });
+          }
+          // Only what no page can show; whether the consent page shows the name is decided there (`plainName`).
+          const refused = typeof body.client_name === 'string' ? clientNameRefusal(body.client_name) : undefined;
+          if (refused) throw new APIError('BAD_REQUEST', { error: 'invalid_client_metadata', error_description: refused });
+        }),
+      },
+    ],
+  },
+} satisfies BetterAuthPlugin;
+
+/**
  * Better Auth always accepts its built-in `admin` and `member` names and comma-joined roles.
  * SignForge has exactly one of owner, editor or viewer per member.
  */
@@ -141,11 +172,33 @@ export interface AuthDeps {
   audit: (orgId: string, entry: Parameters<OrgScope['auditLog']['append']>[0]) => Promise<unknown>;
   /** The org a new session starts in, or null to let the member choose (`startingOrg`). */
   startingOrg: (userId: string) => Promise<string | null>;
+  /** The `/mcp` resource agents' tokens are for (RFC 8707), on the CMS's host: `<appUrl>/mcp`. */
+  mcpResource: string;
+  /** Agent grants, written at consent and ended with a membership (./agent-grants.ts). */
+  grants: GrantDeps;
+  /** This instance's consent link (./agent-grants.ts); `createAuth` completes it. */
+  consent: ConsentLink;
 }
 
-export function authOptions({ email, appUrl, audit, startingOrg }: AuthDeps) {
+const HOUR_S = 60 * 60;
+const DAY_S = 24 * HOUR_S;
+
+export function authOptions({ email, appUrl, audit, startingOrg, mcpResource, grants, consent }: AuthDeps) {
   return {
     basePath: '/api/auth',
+    // The provider's routes that would go around the grant, none of which the CMS uses. Its own consent
+    // would issue a code with no grant behind it: consent is ours (./agent-grants.ts), which calls it
+    // through `auth.api`, which these paths do not stop. Updating a consent would let a person widen
+    // the provider's record past the grant. The session's client management would make a
+    // confidential client, which open registration refuses (refusePublicOnly).
+    disabledPaths: [
+      '/oauth2/consent',
+      '/oauth2/update-consent',
+      '/oauth2/create-client',
+      '/oauth2/update-client',
+      '/oauth2/client/rotate-secret',
+      '/oauth2/delete-client',
+    ],
     // Password hashing does not fit the free plan's CPU limit; sign-in is passwordless.
     emailAndPassword: { enabled: false },
     session: { cookieCache: { enabled: true, maxAge: 5 * 60 } },
@@ -168,7 +221,13 @@ export function authOptions({ email, appUrl, audit, startingOrg }: AuthDeps) {
     advanced: {
       cookiePrefix: COOKIE_PREFIX,
       ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] },
-      database: { generateId: ({ model }: { model: string }) => newId(ID_PREFIX[model] ?? model.slice(0, 3).toLowerCase()) },
+      database: {
+        generateId: ({ model }: { model: string }) => newId(ID_PREFIX[model] ?? model.slice(0, 3).toLowerCase()),
+        // On by default since 1.7: about 19 statements of table introspection once per instance, and the
+        // instance is built per request (M4-01's RESULTS, section 1). The migrations own the schema, and
+        // test/auth-platform.test.ts checks it against Better Auth's.
+        validateSchema: false,
+      },
     },
     telemetry: { enabled: false },
     hooks: { after: refreshCacheAfterOrgChange },
@@ -208,6 +267,33 @@ export function authOptions({ email, appUrl, audit, startingOrg }: AuthDeps) {
         },
       }),
       membershipAudit(audit),
+      // Agents' OAuth (M4-04; spike/m4-oauth/RESULTS.md). The issuer is `<appUrl>/api/auth`, the one resource `/mcp`.
+      oauthProvider({
+        // One CMS page for both: signed out, it sends the person through sign-in and back to itself.
+        loginPage: '/connect',
+        consentPage: '/connect',
+        scopes: [...OAUTH_SCOPES],
+        // Opaque tokens, stored as SHA-256 hashes and looked up with their grant on every call, so a
+        // revocation applies at once and no signing key exists.
+        disableJwtPlugin: true,
+        storeTokens: 'hashed',
+        grantTypes: ['authorization_code', 'refresh_token'],
+        // Open registration, for public clients (MCP clients register so): refusePublicOnly below.
+        allowDynamicClientRegistration: true,
+        allowUnauthenticatedClientRegistration: true,
+        // Native clients (Claude Code, Cursor) register loopback callbacks without an application_type.
+        clientRegistrationDefaultApplicationType: 'infer',
+        resources: [mcpResource],
+        // One resource, which every client may ask for (first-party clients are seeded without links).
+        enforcePerClientResources: false,
+        accessTokenExpiresIn: HOUR_S,
+        refreshTokenExpiresIn: 30 * DAY_S,
+        // The org rides on the consent's reference id, the grant's id, set only while ./agent-grants.ts
+        // completes a consent: no stored consent is ever found, so every authorization asks again.
+        postLogin: { page: '/connect', shouldRedirect: () => false, consentReferenceId: () => consent.grantId },
+      }),
+      refusePublicOnly,
+      agentGrants(grants, consent),
     ],
   } satisfies BetterAuthOptions;
 }

@@ -164,7 +164,29 @@ interface Flight<E, C> {
 }
 
 export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>): VersionedDrafts<E, C> {
-  const { state, clock } = options;
+  const { clock } = options;
+  /** This store's drafts edited and not saved, their save failed or not yet sent (`unsaved`): each leaves once saved, or dropped. */
+  const unsavedHere = new Set<string>();
+  const edited = (key: string) => {
+    const d = options.state.read()[key];
+    if (!d) return;
+    unsavedHere.add(d.id);
+    unsaved.set(d.id, () => options.currentOrg() === d.orgId);
+  };
+  const forget = () => state.write(() => ({}));
+  const state = {
+    read: options.state.read,
+    write: (change: (drafts: Drafts<E>) => Drafts<E>) => {
+      stores.add(forget);
+      options.state.write(change);
+      const ids = new Set(Object.values(options.state.read()).map((d) => d.id));
+      for (const id of unsavedHere)
+        if (!ids.has(id)) {
+          unsavedHere.delete(id);
+          unsaved.delete(id);
+        }
+    },
+  };
   /** By draft id. */
   const flights = new Map<string, Flight<E, C>>();
   /** The last save queued on each record that is still to finish, by org and record: the next one waits for it. */
@@ -236,6 +258,12 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
         return settle((x) => ({ ...x, status: 'unsaved' }));
       }
       if (answer.version !== undefined) moved(answer.version);
+      // Saved, unless a field was typed meanwhile and not sent: that one is still unsaved (#479).
+      const now = state.read()[key];
+      if (!now || now.id !== id || now.edit === sent) {
+        unsavedHere.delete(id);
+        unsaved.delete(id);
+      }
       settle((x) => ({
         ...x,
         record: answer.record ?? x.record,
@@ -249,6 +277,15 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
       flight.next = null;
       if (!here()) return settle((x) => ({ ...x, status: 'unsaved' }));
       const gone = d.record !== null && err instanceof Refusal && (options.gone?.(err, key) ?? false);
+      // Not tried again until asked: closing the tab now loses it (a dialog's draft may never have been edited), unless
+      // the record itself is gone.
+      if (gone) {
+        unsavedHere.delete(id);
+        unsaved.delete(id);
+      } else {
+        unsavedHere.add(id);
+        unsaved.set(id, () => options.currentOrg() === orgId);
+      }
       settle((x) => ({ ...x, status: 'unsaved', stale: isStale(err), gone, error: isStale(err) ? STALE : toolMessage(err) }));
     }
   }
@@ -271,6 +308,7 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
     }
     const started: Flight<E, C> = { next: { context }, done: Promise.resolve(d), result: { ...d, status: 'saving', pending: true, error: null } };
     flights.set(d.id, started);
+    sending += 1;
     const lane = `${d.orgId}/${d.record ?? key}`;
     const run = async () => {
       for (let n = started.next; n; n = started.next) {
@@ -278,6 +316,7 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
         await attempt(key, started, n.context);
       }
       flights.delete(d.id);
+      sending -= 1;
       if (lanes.get(lane) === started.done) lanes.delete(lane);
       // Every way out leaves the draft able to save again: no save of it is on its way now.
       const done = (x: Draft<E>): Draft<E> => ({ ...x, pending: false, status: x.status === 'saving' ? 'unsaved' : x.status });
@@ -295,38 +334,98 @@ export function createVersionedDrafts<E, C = void>(options: DraftsOptions<E, C>)
   return {
     open: (key, start) => state.write((drafts) => ({ ...drafts, [key]: fresh(start) })),
 
-    edit: (key, start, f) =>
+    edit: (key, start, f) => {
       state.write((drafts) => {
         const d = drafts[key];
         const base = d?.orgId !== start.orgId ? fresh(start) : current(d, start.version) ? d : { ...fresh(start), savedAt: d.savedAt };
         return { ...drafts, [key]: { ...base, edit: f(base.edit), status: 'unsaved' } };
-      }),
+      });
+      edited(key);
+    },
 
-    update: (key, f) =>
+    update: (key, f) => {
       state.write((drafts) => {
         const d = drafts[key];
         return d ? { ...drafts, [key]: { ...d, edit: f(d.edit), status: 'unsaved' } } : drafts;
-      }),
+      });
+      edited(key);
+    },
 
     save,
 
     drop: (key) => state.write((drafts) => Object.fromEntries(Object.entries(drafts).filter(([k]) => k !== key))),
 
-    forget: () => state.write(() => ({})),
+    forget,
   };
 }
 
-/** Autosave: `save(key)` runs `ms` after the last edit of each draft, unless it is edited again first. */
-export function autosave(clock: Clock, ms: number, save: (key: string) => Promise<unknown>): (key: string) => void {
-  const timers = new Map<string, () => void>();
-  return (key) => {
-    timers.get(key)?.();
-    timers.set(
-      key,
-      clock.after(ms, () => {
-        timers.delete(key);
-        void save(key);
-      }),
-    );
-  };
+/** How long after the last edit an editor saves: the spot, playlist and brand kit editors alike (#366). */
+export const AUTOSAVE_MS = 1000;
+
+/** Saves on their way, in every store. */
+let sending = 0;
+
+/**
+ * Drafts edited and not saved, by draft id, in every store: a settings field typed and not left, a save that failed
+ * (review of #461, #466). Kept until saved or dropped. Each with whether it can still be saved: one of an org the tab
+ * has left cannot, so it does not make the tab ask before closing (#479).
+ */
+const unsaved = new Map<string, () => boolean>();
+
+/**
+ * Each store with drafts, by its `forget`, for `forgetDrafts`: added at its first write, which only the browser makes, so
+ * the server, which makes a store per request, keeps none.
+ */
+const stores = new Set<() => void>();
+
+/**
+ * Drops every store's drafts, and every edit counted as not saved: the tab has left the org they were made in (a switch, a
+ * create). Kept, they would come back with the tab to that org, shown and counted as unsaved, on a read long gone.
+ */
+export function forgetDrafts() {
+  for (const forget of stores) forget();
+  unsaved.clear();
 }
+
+/** An edit outside these drafts that is not saved (an AI choice that got no answer, #479): counted as theirs are. */
+export const noteUnsaved = (id: string, saveable: () => boolean) => void unsaved.set(id, saveable);
+/** That edit saved, or let go. */
+export const noteSaved = (id: string) => void unsaved.delete(id);
+
+/**
+ * Every save still waiting out its autosave delay, in every store. Leaving the org would strand
+ * them (a draft saves only in its own org), and closing the tab would lose them: both send them
+ * first (`saveWaiting`). Only a waiting save is kept here, so it holds nothing once they have gone.
+ */
+const waiting = new Set<() => Promise<unknown>>();
+
+/**
+ * Autosave: `save(key)` runs `ms` after the last edit of each draft, unless it is edited again first. `cancel(key)` lets
+ * a waiting one go, for an action that sends the draft itself and must not race it (a delete, #445).
+ */
+export function autosave(clock: Clock, ms: number, save: (key: string) => Promise<unknown>): ((key: string) => void) & { cancel: (key: string) => void } {
+  const timers = new Map<string, { cancel: () => void; now: () => Promise<unknown> }>();
+  const cancel = (key: string) => {
+    const waits = timers.get(key);
+    if (!waits) return;
+    waits.cancel();
+    timers.delete(key);
+    waiting.delete(waits.now);
+  };
+  const soon = (key: string) => {
+    cancel(key);
+    const now = () => {
+      cancel(key);
+      return save(key);
+    };
+    timers.set(key, { cancel: clock.after(ms, () => void now()), now });
+    waiting.add(now);
+  };
+  return Object.assign(soon, { cancel });
+}
+
+/** Sends every save still waiting out its delay now, and resolves once they are answered. */
+export const saveWaiting = () => Promise.all([...waiting].map((now) => now()));
+
+/** Whether an edit is not saved yet: waiting, on its way, failed, or typed and not sent. Closing the tab now could lose it. */
+export const savesWaiting = () => waiting.size > 0 || sending > 0 || [...unsaved.values()].some((saveable) => saveable());

@@ -10,27 +10,33 @@
  * commit, through the notifier's `manifests` (the API: a queue, 50 screens a message). The same
  * batch deletes the weather sources the spot editor made that no spot binds any more.
  *
- * `end_takeover` deletes a takeover and publishes that alone, the same way, in one batch.
+ * `takeover` ends a takeover, deleting it and publishing that alone, the same way, in one batch.
  *
  * `publish_manifest_to_screen` points one screen at a manifest `sf push` uploaded.
  */
-import { published, type OrgScope } from '@signforge/db';
+import { SYSTEM_KEYS } from '@signforge/compiler/selector';
+import { ruleOf } from './memberships';
+import { reaches, targetIdOf } from '@signforge/compiler/schedule';
+import type { ScreenManifest } from '@signforge/contract';
+import { published, rollbackOpen, STORAGE_GRACE_MS, type OrgScope, type ScheduleEntryRow, type StoredManifest } from '@signforge/db';
+import { manifestPhotoSources } from '@signforge/player-core';
 import { z } from 'zod';
+import { clearOfSweep } from './assets';
 import { madeBySpotEditor } from './data-sources';
 import { sha256Hex } from './dispatch';
-import { id } from './fields';
 import { parseHeartbeat } from './heartbeat';
-import { keysetPage, pageInput } from './paging';
-import { publishOrg, type DraftPin } from './publishing';
+import { defaultConflict } from './playlists';
+import { keysetPage } from './paging';
+import { groupMoves, loadOrg, publishOrg, readTargets, recordTargets, type DraftKind, type DraftPin, type OrgGraph, type SampleAck } from './publishing';
+import { entryView, missingAim, takeoverOf } from './schedule';
 import { manifestKey } from './r2';
 import { outcomeOf, tally } from './rollout';
 import { screenState } from './screen-state';
 import { stateInput } from './screens';
 import { unreachableAfterMs } from './settings';
-import { defineTool, notFound, ToolError, type ToolContext } from './tool';
-import { draftRef, outputs, type publishOutput, type ToolOutput } from './outputs';
-
-const SHA256 = /^[0-9a-f]{64}$/;
+import { defineTool, isAgent, notFound, ToolError, type Actor, type ToolContext } from './tool';
+import { outputs, publishChanges, type publishOutput, type ToolOutput } from './outputs';
+import { inputs, takeoverInput, takeoverRules } from './inputs';
 
 const publishManifestToScreen = defineTool({
   name: 'publish_manifest_to_screen',
@@ -39,30 +45,56 @@ const publishManifestToScreen = defineTool({
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
-  input: z.object({
-    screenId: id('screen'),
-    manifestId: z.string().regex(SHA256, 'not a manifest id (64 lowercase hex characters)').describe("The manifest's id, the SHA-256 in its `id` field"),
-  }),
+  // A developer's path (`sf push`, /admin), which act as the system: no agent pushes a raw manifest (#345).
+  people: true,
+  input: inputs.publish_manifest_to_screen,
   output: outputs.publish_manifest_to_screen,
   example: { screenId: 'scr_example', manifestId: '0'.repeat(64) },
   target: (input) => ({ kind: 'screen', id: input.screenId }),
   handler: async ({ org, blobs, input, write, notify }) => {
     const screen = await org.screens.get(input.screenId);
     if (!screen) throw notFound('screen', input.screenId);
+    // Seen stored from now, so never one the storage sweep deletes before this commits (#235).
+    const since = Date.now();
+    const at = { screenId: screen.id, manifestId: input.manifestId };
+    await manifestsNotSwept(org, [at], since);
     // A manifest is stored only once every file it lists is in R2 (the /admin upload checks), so
     // a stored manifest is one the screen can fetch completely. The key is under this org alone.
-    if (!(await blobs.head(manifestKey(org.orgId, screen.id, input.manifestId)))) {
+    const stored = await blobs.get(manifestKey(org.orgId, screen.id, input.manifestId));
+    if (!stored) {
       throw new ToolError('not_found', `manifest ${input.manifestId} has not been uploaded for screen ${screen.id}`);
     }
     const changed = screen.desiredManifestId !== input.manifestId;
     if (changed) {
-      write(org.screens.stage.setDesiredManifest(screen.id, input.manifestId));
+      // Checked as /admin stored it. Its files are fenced against the storage sweep and indexed with the switch, so the
+      // sweep keeps them from the commit on (#235, review of #429, round 2).
+      const manifest = await stored.json<ScreenManifest>();
+      const files = Object.keys(manifest.files);
+      await clearOfSweep(org, write, files);
+      // A file the sweep deleted since the push checked it was there (#432): refused, from a read and at the commit.
+      const now = Date.now();
+      const deleted = await org.storage.deleted(files, now);
+      if (deleted.length) throw new ToolError('conflict', 'the storage clean-up deleted files this manifest names: push again to upload them', { deleted });
+      write({ row: undefined, writes: org.storage.stage.notDeleted(files, now) });
+      write(org.storage.stage.index([{ screenId: screen.id, id: input.manifestId, files }], Date.now()));
+      write({ row: undefined, writes: org.storage.stage.manifestsStored([at], since, since) });
+      // The sources it shows photos for, beside it, so the feed poller reads no manifest (#486).
+      write(org.screens.stage.setDesiredManifest(screen.id, input.manifestId, manifestPhotoSources(manifest)));
       // The screen's socket carries it at once; its next sync would anyway.
       notify((screens) => screens.manifest(screen.id, input.manifestId));
     }
     return { screenId: screen.id, manifestId: input.manifestId, changed };
   },
 });
+
+/**
+ * Refuses a writer while the storage sweep is deleting a manifest it is about to store again or point screens at
+ * (#235): claimed at `since`, or deleted at or after it, `since` being before the writer stores them.
+ */
+async function manifestsNotSwept(org: OrgScope, stored: readonly StoredManifest[], since: number) {
+  if ((await org.storage.manifestsGone(stored, since, since)).length)
+    throw new ToolError('conflict', 'the storage clean-up is deleting an earlier copy of this content: try again in a few minutes');
+}
 
 /** How long a source the spot editor made is kept unbound: its autosave binds it a second or so later, longer while the draft cannot be saved. */
 const SOURCE_GRACE_MS = 15 * 60_000;
@@ -78,40 +110,116 @@ function sourcesIn(json: string | null | undefined): string[] {
 /**
  * Stage a publish's record and its screens' switches, and queue telling the screens: the part of
  * a publish and a roll back that is the same. The caller has staged the move of the revision.
+ * `photoSources`: what each manifest shows photos for (`manifestPhotoSources`, #486), null if not known.
  */
 async function switchScreens(
   ctx: Pick<ToolContext<unknown>, 'org' | 'actor' | 'write' | 'notify'>,
   revision: number,
-  rows: { screenId: string; manifestId: string }[],
+  rows: { screenId: string; manifestId: string; photoSources: string[] | null }[],
   restoresId?: string,
+  changes?: PublishView['changes'],
+  targetsJson: string | null = null,
+  /** The latest publish, if the caller read it already (`runPublish`, with its record). */
+  latest?: { id: string } | null,
 ) {
   const { org, actor, write, notify } = ctx;
-  const [previous] = await org.publishes.history({ limit: 1 });
-  const made = write(org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId }));
-  write(org.publishes.stage.addScreens(made.id, rows));
-  for (const r of rows) write(org.screens.stage.setDesiredManifest(r.screenId, r.manifestId));
-  if (rows.length) notify((screens) => screens.manifests(rows));
+  const previous = latest === undefined ? (await org.publishes.history({ limit: 1 }))[0] : latest;
+  const changesJson = changes ? JSON.stringify(changes) : null;
+  const made = write(
+    org.publishes.stage.insert({ status: 'published', actorKind: actor.kind, actorId: actor.id, revision, restoresId, changesJson, targetsJson }),
+  );
+  const switched = rows.map(({ screenId, manifestId }) => ({ screenId, manifestId }));
+  write(org.publishes.stage.addScreens(made.id, switched));
+  for (const r of rows) write(org.screens.stage.setDesiredManifest(r.screenId, r.manifestId, r.photoSources));
+  if (rows.length) notify((screens) => screens.manifests(switched));
   return { id: made.id, revision, screens: rows.length, previousId: previous?.id ?? null };
+}
+
+/** What a publish is held to, each checked against what it compiled and guarded in its batch. */
+interface HeldTo {
+  /** An approved request's: nothing removed that it does not pin. */
+  exact?: boolean;
+  /** The brand state (`brandKits.state`) the manifests must be compiled with. */
+  brand?: string;
+  /** The default playlist the manifests must be compiled with; null: none. */
+  ifDefault?: string | null;
+  /** The screens it must switch, exactly, by id. */
+  screens?: readonly string[];
 }
 
 /**
  * A publish: promote the chosen drafts (all with `drafts` undefined), delete the `end` entries,
- * compile every screen, store and switch the changed ones. `publish` and `end_takeover`.
+ * compile every screen, store and switch the changed ones. `publish`, `takeover`, and an
+ * approved request. `held`: what it may publish only while it is still so (`HeldTo`), each held to
+ * the commit. `added`: entries staged before this in the call's batch (`takeover`'s publish).
+ * `loaded`: the org as the caller read it to check what it holds the publish to (`takeover`'s card guards).
  */
-async function runPublish(ctx: ToolContext<unknown>, drafts: readonly DraftPin[] | undefined, end: readonly string[] = []): Promise<ToolOutput<'publish'>> {
+export async function runPublish(
+  ctx: ToolContext<unknown>,
+  drafts: readonly DraftPin[] | undefined,
+  end: readonly string[] = [],
+  held: HeldTo = {},
+  allowSample: readonly SampleAck[] = [],
+  added: readonly ScheduleEntryRow[] = [],
+  loaded?: OrgGraph,
+): Promise<ToolOutput<'publish'>> {
   const { org, blobs, write } = ctx;
-  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end);
+  const { brand, ifDefault, screens: switching } = held;
+  const result = await publishOrg(org, { hash: sha256Hex, now: new Date() }, drafts, end, held.exact ?? false, allowSample, added, loaded);
+  // The brand kits as compiled, not as read again: a kit changed and changed back while it compiled
+  // would pass a second read, and its batch then guards the very rows the manifests were made from.
+  if (brand !== undefined && result.brand !== brand)
+    throw new ToolError('conflict', 'the brand kits have changed since this was asked for, and would go live with it: ask again', { brand: true });
+  // `ifDefault` against the default as compiled, not as read before: one switched and switched back
+  // while it compiled would pass a check made first, and its manifests fall back to the other.
+  const moved = ifDefault === undefined ? undefined : defaultConflict(result.read.defaultPlaylist, ifDefault);
+  if (moved) throw moved;
+  const switches = result.screens.flatMap((s) => (s.manifest && s.manifest.id !== s.current ? [s.screenId] : [])).sort();
+  if (switching !== undefined && switches.join(',') !== [...switching].sort().join(','))
+    throw new ToolError('conflict', 'the screens this publish would switch have changed since they were shown: ask again', { screens: switches });
+  // The brand state's, the default's and the screens' guards go with the batch whether or not anything else is written.
+  write({ row: undefined, writes: result.keptCleared });
+  if (brand !== undefined) write(org.brandKits.stage.unchanged(result.brand));
+  if (ifDefault !== undefined) write(org.settings.stage.defaultIs(ifDefault));
+  // The screens as compiled: one added or deleted before the batch fails it, and the publish runs again from a fresh read.
+  if (switching !== undefined) write(org.screens.stage.are(result.read.screens.map((s) => s.id)));
   const screens = result.screens.map((s) => ({
     screenId: s.screenId,
     outcome: !s.manifest ? ('failed' as const) : s.manifest.id === s.current ? ('unchanged' as const) : ('updated' as const),
     problems: s.problems,
   }));
-  const report = { promoted: result.drafts.promoted, held: result.drafts.held, removed: result.drafts.removed, screens };
+  const report = { promoted: result.drafts.promoted, held: result.drafts.held, removed: result.drafts.removed, madeDefault: result.madeDefault, screens };
   const changed = result.screens.flatMap((s) => (s.manifest && s.manifest.id !== s.current ? [s.manifest] : []));
+  // Stored again below: refused while the storage sweep deletes one of them, or if it deleted one after now (#235).
+  const since = Date.now();
+  const stored = changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id }));
+  await manifestsNotSwept(org, stored, since);
   // Deleted entries go in the same batch as the switches; on their own they make no publish.
-  write({ row: undefined, writes: result.removals });
-  if (!result.drafts.promoted.length && !changed.length) return { publish: null, ...report, removedDataSources: [] };
+  const removals = { row: undefined, writes: result.removals };
+  // The guards of pins live as they are go only beside a write: an approval's decision, or this publish's own. A plain
+  // publish of pins that changes nothing writes nothing, no audit row either (#396).
+  const pinGuards = { row: undefined, writes: result.pinGuards };
+  if (!result.drafts.promoted.length && !changed.length) {
+    write(removals);
+    if (held.exact || result.removals.length || result.keptCleared.length) write(pinGuards);
+    return { publish: null, ...report, removedDataSources: [] };
+  }
   write({ row: undefined, writes: result.writes });
+  // After the revision's guard, which `result.writes` opens with: a batch lost to another publish is told by the first
+  // read of its guards, not after every removal's or pin's (#396, #523).
+  write(removals);
+  write(pinGuards);
+  // What the manifests it stores name, for the storage sweep to keep (#235), and held to the commit: a file of an asset
+  // deleted while this compiled refuses the batch, and the publish runs again from a fresh read (review of #429).
+  const files = [...new Set(changed.flatMap((m) => Object.keys(m.files)))];
+  write({ row: undefined, writes: org.storage.stage.filesLive(files) });
+  write({ row: undefined, writes: org.storage.stage.manifestsStored(stored, since, since) });
+  write(
+    org.storage.stage.index(
+      changed.map((m) => ({ screenId: m.screen.id, id: m.id, files: Object.keys(m.files) })),
+      Date.now(),
+    ),
+  );
   // The spot editor's weather sources nothing binds: not as drafted, not as published once this
   // commits, and not as published before it, which Undo sends screens back to (that one goes at
   // the next publish). One made in the last minutes may be about to be bound by an autosave.
@@ -122,10 +230,45 @@ async function runPublish(ctx: ToolContext<unknown>, drafts: readonly DraftPin[]
     .map((d) => d.id)
     .sort();
   write(org.dataSources.stage.deleteUnbound(removedDataSources, madeBefore));
+  // What it made live and removed (#370), named as screens have them after it: a draft made live by its draft, which
+  // becomes the published one; a schedule entry by its playlist as published after this publish (its draft only when
+  // this publish makes that live too); one removed by what was published, as it played.
+  const spots = new Map(result.read.spots.map((s) => [s.id, s]));
+  const playlists = new Map(result.read.playlists.map((p) => [p.id, p]));
+  const entries = new Map(result.read.entries.map((e) => [e.id, e]));
+  const promotedPlaylists = new Set(result.drafts.promoted.flatMap((d) => (d.kind === 'playlist' ? [d.id] : [])));
+  // Every draft it reports is one this publish read. `live`: the name screens have, not the draft's.
+  const playlistName = (id: string, live: boolean) => {
+    const p = playlists.get(id);
+    if (!p) return '';
+    return (live ? published(p)?.name : undefined) ?? p.name;
+  };
+  const nameOf = (d: { kind: DraftKind; id: string }, removed: boolean) => {
+    if (d.kind === 'spot') return spots.get(d.id)?.name ?? '';
+    if (d.kind === 'playlist') return playlistName(d.id, false);
+    const e = entries.get(d.id);
+    if (!e) return '';
+    const playlistId = (removed ? published(e)?.playlistId : undefined) ?? e.playlistId;
+    return playlistName(playlistId, removed || !promotedPlaylists.has(playlistId));
+  };
+  // The publish before, with its record of whom each group reached: the smart groups this one moves screens in or out
+  // of are named in its changes, so its history row says why it changed screens with no draft (#187, review of #621).
+  const [latest] = await org.publishes.history({ limit: 1, targets: true });
+  const groupsMoved = latest?.targetsJson ? groupMoves(readTargets(latest.targetsJson), result.graph, new Set(changed.map((m) => m.screen.id))) : [];
+  const changes = summarizeChanges([
+    ...result.drafts.promoted.map((d) => ({ kind: d.kind, name: nameOf(d, false), removed: false })),
+    ...result.drafts.removed.map((d) => ({ kind: d.kind, name: nameOf(d, true), removed: true })),
+    ...groupsMoved.map((g) => ({ kind: 'group' as const, name: g.name, removed: false })),
+  ]);
   const made = await switchScreens(
     ctx,
     result.revision + 1,
-    changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id })),
+    changed.map((m) => ({ screenId: m.screen.id, manifestId: m.id, photoSources: manifestPhotoSources(m) })),
+    undefined,
+    changes,
+    // Whom each group reached, as this publish resolved them (#187), with its row in the same batch.
+    recordTargets(result.graph),
+    latest ?? null,
   );
   // Stored before the switch commits, so a screen told of a manifest can fetch it. Keyed by
   // content: one stored by a publish that then lost its commit is the same object again.
@@ -135,69 +278,155 @@ async function runPublish(ctx: ToolContext<unknown>, drafts: readonly DraftPin[]
   return { publish: made, ...report, removedDataSources };
 }
 
+/**
+ * `allowSample` (#360), which only a person may pass: an agent passing it is refused, never quietly
+ * ignored. A person's press of the agent drawer's confirmation card that listed exactly these
+ * acknowledgements (`confirmed`, #351) is theirs, though the drawer sends it.
+ */
+export function peopleAllowSample(ctx: { actor: Actor; confirmed: boolean; input: { allowSample?: SampleAck[] } }): SampleAck[] {
+  const acks = ctx.input.allowSample ?? [];
+  if (acks.length && isAgent(ctx.actor) && !ctx.confirmed) throw new ToolError('forbidden', 'only a person may publish sample text anyway (allowSample)');
+  return acks;
+}
+
 const publish = defineTool({
   name: 'publish',
   description:
-    'Publish to screens: promote drafts that pass their checks, compile every screen, and switch each screen whose content changed; the rest are not touched. Without drafts, every changed draft in the organization is published. With drafts, only those, each pinned at the version given: refused with a conflict, details { id, version }, if one has changed since. With drafts: [], no draft, but every screen is compiled again: what a deleted schedule entry or a new default playlist needs. A draft that fails its checks keeps its published version and is listed in held with why; a screen that cannot be compiled keeps what it plays and is listed with its problems. Nothing reaches a screen until the organization has a default playlist (set_default_playlist). Deleted schedule entries go with it (all of them, or the pinned ones), and takeovers that have ended, which play nowhere again: listed in removed. Returns { publish, promoted, held, removed, screens }; publish is null when no draft was promoted and no screen changed. Undo with roll_back_publish.',
+    'Publish drafts to screens: promote those that pass their checks, compile every screen, and switch each whose content changed. Without drafts, every changed draft; with drafts, only those, at the versions given; with drafts: [], none, but every screen compiled again. describe(publish) has the rules: versions and held drafts, the default playlist, what is removed, sample text (which refuses it) and the if* guards. Returns { publish, promoted, held, removed, madeDefault, screens }; publish is null when nothing changed. Undo with roll_back_publish.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
+  partialAgents: 'only a person publishes sample text anyway (allowSample)',
   publishes: true,
-  input: z.object({
-    drafts: z
-      .array(draftRef.extend({ version: z.number().int().positive().describe('The version you chose it at') }))
-      .max(500)
-      .optional()
-      .describe(
-        'The drafts to publish, each at the version you chose it at; omit to publish every changed draft. An empty list publishes no draft and compiles every screen again: for a deleted schedule entry or a new default playlist',
-      ),
-  }),
+  input: inputs.publish,
   output: outputs.publish,
   example: {},
-  target: (_input, output) => (output.publish ? { kind: 'publish', id: output.publish.id } : undefined),
-  handler: (ctx) => runPublish(ctx, ctx.input.drafts),
+  target: (_input, output) => (output?.publish ? { kind: 'publish', id: output.publish.id } : undefined),
+  // The default it set is a change of the org's settings: its row says so.
+  auditDetail: (output) => (output.madeDefault ? { madeDefault: output.madeDefault } : undefined),
+  handler: async (ctx) => {
+    const { input } = ctx;
+    return runPublish(ctx, input.drafts, [], { ifDefault: input.ifDefault, brand: input.ifBrand, screens: input.ifScreens }, peopleAllowSample(ctx));
+  },
 });
 
-const endTakeover = defineTool({
-  name: 'end_takeover',
+/** The same versions by id, whatever their order. */
+const sameVersions = (a: Readonly<Record<string, number | null>>, b: Readonly<Record<string, number | null>>) =>
+  Object.keys(a).length === Object.keys(b).length && Object.entries(a).every(([k, v]) => Object.hasOwn(b, k) && b[k] === v);
+
+const takeover = defineTool({
+  name: 'takeover',
   description:
-    'End a takeover now: delete it and publish that alone, in one step, so its screens drop it at once (a screen ends the spot on screen when the winning takeover changes) and nothing is left half done. No draft is published with it. Returns what publish returns; publish is null if the takeover was never published.',
+    'Take over screens now, or end a takeover now, in one step sent whole or not at all; nothing else is published with it. action publish takes what start_takeover takes, makes the takeover and publishes it, with the drafts it needs in with, each at its version (its playlist and spots, if never published); one that cannot be published leaves no draft. action end, with scheduleEntryId, deletes a takeover and publishes that, so its screens drop it at once. Returns what publish returns, and for publish the takeover as entry.',
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
   publishes: true,
-  input: z.object({ scheduleEntryId: id('schedule entry').describe('The takeover') }),
-  output: outputs.end_takeover,
-  example: { scheduleEntryId: 'sch_example' },
-  target: (input) => ({ kind: 'schedule_entry', id: input.scheduleEntryId }),
-  handler: async (ctx) => {
-    const row = await ctx.org.scheduleEntries.get(ctx.input.scheduleEntryId);
-    if (!row || row.endsAt === null) throw notFound('takeover', ctx.input.scheduleEntryId);
-    return runPublish(ctx, [], [row.id]);
+  input: inputs.takeover,
+  // The same rules: the drawer checks the model's call against this, and a call they refuse is no card (review of #553).
+  listedInput: () => z.strictObject(takeoverInput).superRefine(takeoverRules),
+  output: outputs.takeover,
+  example: { action: 'publish', playlistId: 'pls_example', target: 'org', endsAt: '2026-11-17T20:00:00Z' },
+  target: (input, output) => {
+    const entryId = input.scheduleEntryId ?? output?.entry?.id;
+    return entryId === undefined ? undefined : { kind: 'schedule_entry', id: entryId };
   },
+  handler: async (ctx) => {
+    const { org, input, write } = ctx;
+    if (input.action === 'end') {
+      // Given with end: the input refuses it otherwise.
+      const entryId = input.scheduleEntryId!;
+      const row = await org.scheduleEntries.get(entryId);
+      if (!row || row.endsAt === null) throw notFound('takeover', entryId);
+      // At the version read, held to the commit: the publish's own removal is guarded at the version it reads, later.
+      if (input.ifVersion !== undefined) {
+        if (row.rowVersion !== input.ifVersion) {
+          const playlist = await org.playlists.get(row.playlistId);
+          throw new ToolError('conflict', `the takeover of ${playlist?.name ?? 'its playlist'} has changed since it was read`, {
+            id: row.id,
+            version: row.rowVersion,
+          });
+        }
+        write(org.scheduleEntries.stage.unchanged(row));
+      }
+      return runPublish(ctx, [], [row.id]);
+    }
+    // Given with publish: the input refuses it otherwise.
+    const fields = { ...input, playlistId: input.playlistId!, target: input.target!, endsAt: input.endsAt! };
+    // The card's guards, against the org as this publish reads it (#408). What it plays moves only with a publish, which
+    // this publish's revision guard refuses; the screens it reaches are held by a guard of their own.
+    const read = input.ifReach || input.ifPlays ? await loadOrg(org) : undefined;
+    if (read && input.ifPlays) {
+      const playlist = read.playlists.find((p) => p.id === fields.playlistId);
+      if (!playlist) throw new ToolError('conflict', 'its playlist was deleted since it was shown');
+      const items = published(playlist)?.items ?? read.items.get(fields.playlistId) ?? [];
+      const spots = Object.fromEntries(read.spots.filter((s) => items.includes(s.id)).map((s) => [s.id, s.publishedVersion]));
+      if (playlist.publishedVersion !== input.ifPlays.playlist || !sameVersions(spots, input.ifPlays.spots))
+        throw new ToolError('conflict', `${playlist.name}, or a spot of it, was published again since it was shown`);
+    }
+    if (read && input.ifReach) {
+      const reach = read.screens
+        .filter((s) => reaches({ target: fields.target, targetId: targetIdOf(fields) }, { id: s.id, groups: read.groupsOf.get(s.id) ?? [] }))
+        .map((s) => s.id)
+        .sort();
+      if (reach.join(',') !== [...input.ifReach].sort().join(','))
+        throw new ToolError('conflict', 'the screens it would play on have changed since they were shown', { screens: reach });
+      // A screen deleted from the org, or a member added or removed, before the batch refuses it; one screen is the entry's own key.
+      if (fields.target === 'org') write(org.screens.stage.are(reach));
+      if (fields.target === 'group') {
+        // A smart group reaches the screens its rule matches as labelled when it is sent (owner decision, #186): its
+        // rule and the labels as read hold the press to the screens shown. A group of listed screens, its rows.
+        const stored = read.rules.find((g) => g.id === fields.groupId);
+        if (stored === undefined) write(org.screenGroups.stage.membersAre(fields.groupId!, reach));
+        else {
+          write(org.screenGroups.stage.ruleIs(fields.groupId!, stored.selectorJson));
+          // What the rule reads: the labels of its keys, and the screens themselves when it names a system label or
+          // has a missing term, which a screen claimed meanwhile, with no labels, matches (review of #608).
+          const terms = ruleOf(stored)!.all;
+          const keys = [...new Set(terms.map((t) => t.key))];
+          const screens = terms.some((t) => t.op === 'missing' || SYSTEM_KEYS.some((x) => x === t.key));
+          write(org.screens.labels.stage.are(keys, read.labels, screens ? read.screens : undefined));
+        }
+      }
+    }
+    // The takeover staged first in the batch, then published with what it needs: the publish reads it as there.
+    const made = write(await org.scheduleEntries.stage.insert(await takeoverOf(org, fields, Date.now())));
+    const out = await runPublish(ctx, [{ kind: 'schedule_entry', id: made.id, version: made.rowVersion }, ...(input.with ?? [])], [], {}, [], [made], read);
+    // Held (its playlist not published, a check it fails): nothing is written, not even the draft.
+    const held = out.held.find((h) => h.kind === 'schedule_entry' && h.id === made.id);
+    if (held || !out.promoted.some((p) => p.kind === 'schedule_entry' && p.id === made.id))
+      throw new ToolError('conflict', `the takeover cannot be published: ${held?.problems.join('; ') ?? 'it was not promoted'}`, { held: out.held });
+    // As published in the same batch.
+    return { ...out, entry: entryView(org.scheduleEntries.stage.publish(made).row) };
+  },
+  refuseFailedCommit: async ({ org, input }) => missingAim(org, input),
 });
 
 const rollBackPublish = defineTool({
   name: 'roll_back_publish',
   description:
-    "Put screens back to what an earlier publish gave them: each screen goes back to the manifest it had right after that publish, with nothing compiled again. Screens no publish up to it reached keep what they play. Recorded as a new publish, which itself can be rolled back. Drafts and their published versions are not changed, so the next publish sends the current published content again. A publish keeps the data sources and assets the one before it used, so undoing the latest publish finds them all; a roll back further than that can reach a manifest whose data source or asset has since been deleted, and a screen then shows that spot's last values, then its fallback. To undo a publish, pass it as ifLatest: refused with a conflict if a later publish has been made since, which a roll back would undo too. Returns { publish }, null when every screen already had it.",
+    "Put screens back to what an earlier publish gave them: each screen goes back to the manifest it had right after that publish, with nothing compiled again. Screens no publish up to it reached keep what they play. Recorded as a new publish, which itself can be rolled back. Drafts and their published versions are not changed, so the next publish sends the current published content again. A publish keeps the data sources and assets the one before it used, so undoing the latest publish finds them all; a roll back further than that can reach a manifest whose data source or asset has since been deleted, and a screen then shows that spot's last values, then its fallback. To undo a publish, pass it as ifLatest: refused with a conflict if a later publish has been made since, which a roll back would undo too. A publish made more than 90 days ago is refused with a conflict (details { tooOld: true }): the storage clean-up keeps the files of the last 90 days' publishes, and no older. Returns { publish }, null when every screen already had it.",
   scope: 'content:publish',
   minRole: 'editor',
   mutates: true,
   publishes: true,
-  input: z.object({
-    publishId: id('publish').describe('The publish to go back to'),
-    ifLatest: id('publish').optional().describe('For an undo: the publish being undone. Refused with a conflict unless it is still the latest'),
-  }),
+  input: inputs.roll_back_publish,
   output: outputs.roll_back_publish,
   example: { publishId: 'pub_example' },
   target: (input) => ({ kind: 'publish', id: input.publishId }),
   handler: async (ctx) => {
-    const { org, input, write } = ctx;
+    const { org, input, write, blobs } = ctx;
     // The revision before the screens: a publish committed after this read fails the guard.
     const revision = (await org.settings.get())?.publishRevision ?? 0;
     const target = await org.publishes.get(input.publishId);
     if (!target) throw notFound('publish', input.publishId);
+    // As far back as the storage sweep keeps every file and manifest, and no further (owner decision on #235).
+    if (!rollbackOpen(target.createdAt, Date.now()))
+      throw new ToolError(
+        'conflict',
+        `publish v${target.revision} was made more than 90 days ago: its files may no longer be stored, so it can no longer be rolled back to`,
+        { tooOld: true },
+      );
     if (input.ifLatest) {
       // Read after the revision: a publish made since fails the batch's guard, and the rerun lands here.
       const [latest] = await org.publishes.history({ limit: 1 });
@@ -210,12 +439,67 @@ const rollBackPublish = defineTool({
     const desired = new Map(screens.map((s) => [s.id, s.desiredManifestId]));
     const rows = then.filter((r) => desired.has(r.screenId) && desired.get(r.screenId) !== r.manifestId);
     if (!rows.length) return { publish: null };
+    // Pointed at as they are stored: refused if the storage sweep has deleted or is deleting one (#235).
+    const stored = rows.map((r) => ({ screenId: r.screenId, manifestId: r.manifestId }));
+    const now = Date.now();
+    if ((await org.storage.manifestsGone(stored, now, 0)).length)
+      throw new ToolError('conflict', `publish v${target.revision}'s manifests are no longer stored, so it can no longer be rolled back to`, { tooOld: true });
+    write({ row: undefined, writes: org.storage.stage.manifestsStored(stored, now, 0) });
     write(org.publishes.stage.advance(revision));
-    return { publish: await switchScreens(ctx, revision + 1, rows, target.id) };
+    // What each shows photos for (#486), read once here so the feed poller need not. One that cannot be read is not
+    // known: the poller reads it then, and finds what a screen would.
+    const withSources = await Promise.all(
+      rows.map(async (r) => {
+        const obj = await blobs.get(manifestKey(org.orgId, r.screenId, r.manifestId));
+        return { ...r, photoSources: obj ? manifestPhotoSources(await obj.json<ScreenManifest>()) : null };
+      }),
+    );
+    // Screens go back to what that publish sent, so whom its groups reached is theirs again: the next preview compares with it (review of #620).
+    return { publish: await switchScreens(ctx, revision + 1, withSources, target.id, undefined, target.targetsJson) };
   },
 });
 
 type PublishView = z.output<typeof publishOutput>;
+
+/** Names kept per kind, at most; then fewer while the whole is over `CHANGES_BYTES`. */
+const CHANGES_NAMES = 10;
+/** The most a publish's changes may take on its row, as JSON: D1 refuses a value over 2 MB, and the page shows a line. */
+export const CHANGES_BYTES = 4096;
+
+/**
+ * What a publish changed, by kind (#370): exact counts, and the first names of each, each once, while the whole is
+ * under `CHANGES_BYTES`. A publish of thousands of drafts with long names keeps its counts and a few of them.
+ */
+export function summarizeChanges(items: readonly { kind: DraftKind | 'group'; name: string; removed: boolean }[]): z.output<typeof publishChanges> {
+  const groups = (['spot', 'playlist', 'schedule_entry', 'group'] as const).flatMap((kind) =>
+    [false, true].flatMap((removed) => {
+      const these = items.filter((i) => i.kind === kind && i.removed === removed);
+      if (!these.length) return [];
+      const distinct = [...new Set(these.map((i) => i.name))];
+      const names = distinct.slice(0, CHANGES_NAMES);
+      return [{ kind, removed, count: these.length, names, omitted: distinct.length - names.length }];
+    }),
+  );
+  const bytes = () => new TextEncoder().encode(JSON.stringify(groups)).length;
+  while (bytes() > CHANGES_BYTES) {
+    const longest = groups.reduce((a, b) => (b.names.length > a.names.length ? b : a));
+    if (!longest.names.length) break;
+    longest.names.pop();
+    longest.omitted += 1;
+  }
+  return groups;
+}
+
+/** A publish's changes as its row keeps them: none when it has none, or when what is there is not that shape. */
+function changesOf(json: string | null): PublishView['changes'] {
+  if (json === null) return null;
+  try {
+    const read = publishChanges.safeParse(JSON.parse(json));
+    return read.success ? read.data : null;
+  } catch {
+    return null;
+  }
+}
 
 const publishView = (h: Awaited<ReturnType<OrgScope['publishes']['history']>>[number]): PublishView => {
   const { screens, playing, replaced, open } = tally(h.rollout);
@@ -226,12 +510,14 @@ const publishView = (h: Awaited<ReturnType<OrgScope['publishes']['history']>>[nu
     restoresRevision: h.restoresRevision,
     by: { kind: h.actorKind, id: h.actorId, name: h.actorName },
     createdAt: h.createdAt,
+    rollBackUntil: h.createdAt + STORAGE_GRACE_MS,
     finishedAt: h.finishedAt,
     reached: h.reached,
     screens,
     playing,
     replaced,
     open,
+    changes: changesOf(h.changesJson),
   };
 };
 
@@ -242,7 +528,7 @@ const listPublishes = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_publishes,
   output: outputs.list_publishes,
   example: {},
   handler: async ({ org, input }) => {
@@ -258,11 +544,11 @@ const listPublishes = defineTool({
 const getPublish = defineTool({
   name: 'get_publish',
   description:
-    'Get one publish, or the latest without publishId, with its rollout: each screen it switched, and where it stands. playing: it says it plays it. downloading: it is fetching the new files (filesMissing). asleep: outside its display hours until wakesAt; it takes it when it wakes. offline: not heard from since lastSeenAt; it plays what it has from its cache and takes it when back. waiting: online, and switching now. fell_back: the new manifest played nothing, so it went back to its last good one. revoked: its credential was revoked. replaced: a later publish switched it since. Returns { publish, screens }, or { publish: null } if there has been no publish.',
+    "Get one publish, or the latest without publishId, with its rollout: each screen it switched, and where it stands (describe(publish)'s rules say what each state means). Returns { publish, screens, targets }, or { publish: null } if there has been no publish; targets (asked for): whom each group reached then.",
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ publishId: id('publish').optional().describe('Omit for the latest publish') }),
+  input: inputs.get_publish,
   output: outputs.get_publish,
   example: {},
   handler: async ({ org, input }) => {
@@ -273,8 +559,8 @@ const getPublish = defineTool({
       // The history from this publish down: its first row is this one, with its rollout counts.
       beforeRevision = asked.revision + 1;
     }
-    const [found] = await org.publishes.history({ limit: 1, beforeRevision });
-    if (!found) return { publish: null, screens: [] };
+    const [found] = await org.publishes.history({ limit: 1, beforeRevision, targets: input.targets });
+    if (!found) return { publish: null, screens: [], targets: null };
     const [rows, afterMs] = await Promise.all([org.publishes.rollout(found.id), unreachableAfterMs(org)]);
     const now = Date.now();
     const screens = rows.map((r) => {
@@ -288,10 +574,31 @@ const getPublish = defineTool({
         filesMissing: outcome === 'downloading' ? state.filesMissing : null,
         wakesAt: outcome === 'asleep' ? state.wakesAt : null,
         lastSeenAt: r.lastSeenAt,
+        state: { kind: state.kind, reason: state.reason },
       };
     });
-    return { publish: publishView(found), screens };
+    return { publish: publishView(found), screens, targets: found.targetsJson === null ? null : readTargets(found.targetsJson) };
   },
 });
 
-export const publishTools = [publishManifestToScreen, publish, endTakeover, rollBackPublish, listPublishes, getPublish];
+const countDrafts = defineTool({
+  name: 'count_drafts',
+  description:
+    'Count the drafts with changes screens do not have yet, by kind: never published, or edited since (one put back as it was still counts). One count each, for a badge; list them with list_spots, list_playlists or list_schedule_entries and unpublished. Returns { spots, playlists, scheduleEntries }.',
+  scope: 'content:read',
+  minRole: 'viewer',
+  mutates: false,
+  input: inputs.count_drafts,
+  output: outputs.count_drafts,
+  example: {},
+  handler: async ({ org }) => {
+    const [spots, playlists, scheduleEntries] = await Promise.all([
+      org.spots.countUnpublished(),
+      org.playlists.countUnpublished(),
+      org.scheduleEntries.countUnpublished(),
+    ]);
+    return { spots, playlists, scheduleEntries };
+  },
+});
+
+export const publishTools = [publishManifestToScreen, publish, takeover, rollBackPublish, listPublishes, getPublish, countDrafts];

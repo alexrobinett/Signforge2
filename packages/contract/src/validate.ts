@@ -21,19 +21,65 @@ import {
   LIVE_SOURCES,
   MAX_IDENTIFY_SECONDS,
   MAX_SNAPSHOT_BYTES,
+  SNAPSHOT_STALE_MS,
+  FAILED_RELEASE_REASONS,
+  MAX_RELEASE_BYTES,
+  MAX_RELEASE_FILES,
+  MAX_RELEASE_MANIFEST_BYTES,
+  MAX_RELEASE_PATH_LENGTH,
+  PLAYER_RELEASE_FORMAT,
+  RELEASE_PATH_SEGMENT,
+  RELEASE_SIGNATURE,
+  RESERVED_RELEASE_PATH,
+  PLAYER_CHANNELS,
+  MAX_SYNC_BLOBS,
   MAX_SYNC_PLAY_COUNTS,
+  MAX_SYNC_RESPONSE_BLOBS,
   PREVIEW_PROTOCOL,
   SCREEN_KINDS,
+  MAX_IMAGE_BOX,
   MAX_URL_BYTES,
   SUPPORTED_MANIFEST_SCHEMAS,
-  SUPPORTED_PROTOCOLS,
   TABLE_ROWS_PATH,
   TEMPLATE_BUDGET,
+  TEMPLATE_CHECKS,
   templateKey,
   WEATHER_UNITS,
   type BrandKit,
   type DisplayHours,
+  type DisplayOutput,
+  type SyncResponse,
+  type SyncRequest,
+  type FailedPlayerRelease,
+  type PlayerReleaseManifest,
+  type PlayerReleaseFile,
+  type PlayerReleaseOffer,
+  type PlayerChannel,
+  type SupervisorAliveResponse,
+  type Sha256,
+  type ServerSocketMessage,
+  type ScreenKind,
+  type PlayCount,
+  type PairStartResponse,
+  type PairStartRequest,
+  type PairPollResponse,
+  type DisplayStatus,
+  type DisplayOverride,
+  type DeviceSocketMessage,
+  type DeviceCommand,
+  type DataSnapshot,
+  type Capability,
   type FieldDef,
+  type ListItemFieldDef,
+  type LiveData,
+  type PreviewHostMessage,
+  type TemplateRuntimeReport,
+  type Orientation,
+  type Playlist,
+  type ScheduleEntry,
+  type Spot,
+  type TargetLevel,
+  type NewsImage,
   type ScalarFieldDef,
   type ScreenManifest,
   type TableFeed,
@@ -41,6 +87,25 @@ import {
   type TemplateCheckReport,
   type TemplateManifest,
 } from './shapes.ts';
+import { playsProtocol, playsSchema, THIS_PLAYER } from './playable.ts';
+import {
+  accepted,
+  assertSame,
+  custom,
+  type Infer,
+  is,
+  listOf,
+  literal,
+  object,
+  optional,
+  record,
+  refused,
+  said,
+  type Same,
+  type Shape,
+  variant,
+  within,
+} from './shape.ts';
 import { bundleScripts } from './scripts.ts';
 
 // ------------------------------------------------------------------ helpers
@@ -54,8 +119,17 @@ const isText = (v: unknown): v is string => typeof v === 'string' && v.length > 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isCount = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 const isIdValue = (v: unknown): v is string => typeof v === 'string' && ID_PATTERN.test(v);
-/** A manifest id as a screen reports it: lowercase hex sha256, as `canonicalJson` describes. */
-const isManifestId = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+/** A lowercase hex SHA-256 hash: manifest ids, file hashes and feed image hashes. */
+const isSha256 = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+const isManifestId = isSha256;
+const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
+// Array.from reads a hole as undefined, which `every` would skip: JSON has none, but a value passed in by hand may.
+const wholeNumbers = (v: unknown): v is number[] => Array.isArray(v) && Array.from(v).every((n) => Number.isSafeInteger(n));
+const versions: (v: unknown) => v is readonly number[] = wholeNumbers;
+/** Whether `v` is a `NewsImage` (`{ file, thumb }`, both lowercase hex SHA-256 hashes). */
+export const isNewsImage = (v: unknown): v is NewsImage => isObj(v) && isSha256(v.file) && isSha256(v.thumb);
+/** A snapshot's stale age: whole seconds from a minute to SNAPSHOT_STALE_MS. */
+const isStaleS = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= MIN_REFRESH_S && (v as number) * 1000 <= SNAPSHOT_STALE_MS;
 /** An ISO 8601 date and time, such as `2026-11-17T13:00:00Z`. */
 const isInstant = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) && !Number.isNaN(Date.parse(v));
 
@@ -73,6 +147,25 @@ export function show(v: unknown): string {
   s ??= typeof v;
   return s.length > 60 ? `${s.slice(0, 57)}...` : s;
 }
+
+/** The problems `shape` finds in `v`: none when it reads. */
+const problemsOf = <T>(shape: Shape<T>, v: unknown): string[] => {
+  const r = shape.read(v);
+  return r.ok ? [] : r.problems;
+};
+
+/** `rules`, in the words and order they always had, and then `shape`, which gives back only the declared keys (#156). */
+const checked = <T>(rules: (v: unknown) => string[], shape: Shape<T>): Shape<T> =>
+  custom((v) => {
+    const problems = rules(v);
+    return problems.length ? refused(problems) : shape.read(v);
+  });
+
+const text = (what: string) => is(isStr, `${what} must be text`);
+const number = (what: string) => is(isNum, `${what} must be a number`);
+const textMap = (what: string) => record(text('it'), (k) => `${what} "${k}"`, `${what}s must map names to text`);
+const texts = (what: string) => is((v): v is string[] => Array.isArray(v) && Array.from(v).every(isStr), `${what} must be a list of text`);
+const oneOf = <const L extends readonly string[]>(values: L, problem: string) => is((v): v is L[number] => values.some((x) => x === v), problem);
 
 const prefix = (where: string, problems: string[]) => problems.map((p) => `${where}: ${p}`);
 /** Check each item of a list; problems are prefixed with the 1-based position. */
@@ -118,6 +211,12 @@ export function safeUrl(url: unknown): boolean {
 
 // ----------------------------------------------------------- template fields
 
+/**
+ * Characters as a reader sees them (grapheme clusters), for `maxMarks`: marks are counted per character, not per run, as a
+ * joiner between runs of them would hide a stack in one character (review of #448). In Node, browsers and Workers alike.
+ */
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
 const SCALAR_TYPES = ['text', 'number', 'boolean', 'color', 'select', 'url', 'date', 'datetime'] as const;
 
 /** How a `date` and a `datetime` are written, and how a message names them. */
@@ -151,6 +250,8 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
     case 'text':
       if (!isStr(v)) return `field "${name}" must be text`;
       if (def.maxLength && v.length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;
+      if (def.maxMarks && [...GRAPHEMES.segment(v)].some(({ segment }) => (segment.match(/\p{M}/gu)?.length ?? 0) > (def.maxMarks ?? 0)))
+        return `field "${name}" stacks more than ${def.maxMarks} accents or marks on one character`;
       return undefined;
     case 'number':
       if (!isNum(v)) return `field "${name}" must be a number`;
@@ -165,16 +266,20 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
       return isStr(v) ? undefined : `field "${name}" must be a colour`;
     case 'select':
       return isStr(v) && def.options.includes(v) ? undefined : `field "${name}" must be one of ${def.options.join(', ')}`;
-    case 'url':
+    case 'url': {
       if (!isStr(v)) return `field "${name}" must be an https address`;
       // A lone surrogate has no UTF-8 form: no QR code can carry it. In a `u` pattern a pair is one code point, so only lone ones match.
       if (/\p{Surrogate}/u.test(v)) return `field "${name}" must be well-formed text`;
       // The URL parser ignores space around an address, but the value is stored and drawn as typed: a QR code would carry it.
       if (v !== v.trim()) return `field "${name}" must not start or end with a space`;
       if (v !== '' && !safeUrl(v)) return `field "${name}" must be an https address`;
-      if (new TextEncoder().encode(v).length > MAX_URL_BYTES) return `field "${name}" is longer than ${MAX_URL_BYTES} bytes`;
+      const bytes = new TextEncoder().encode(v).length;
+      if (bytes > MAX_URL_BYTES) return `field "${name}" is longer than ${MAX_URL_BYTES} bytes`;
       if (def.maxLength && v.length > def.maxLength) return `field "${name}" is longer than ${def.maxLength}`;
+      if (def.maxBytes && bytes > def.maxBytes)
+        return `field "${name}" is longer than ${def.maxBytes} bytes, the most its QR code holds. Some characters use more than one byte`;
       return undefined;
+    }
     case 'date':
     case 'datetime': {
       if (!isStr(v)) return `field "${name}" must be ${CALENDAR[def.type].what}`;
@@ -191,7 +296,9 @@ function scalarProblem(name: string, def: ScalarFieldDef, v: unknown): string | 
   }
 }
 
-/** What is wrong with one field definition. List items may hold only scalar fields. */
+const isBoxSide = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 1 && (v as number) <= MAX_IMAGE_BOX;
+
+/** What is wrong with one field definition. List items may hold scalars or an optional image (`NewsImage`). */
 function fieldDefProblems(name: string, def: unknown, inList = false): string[] {
   const where = `field "${name}"`;
   if (!isObj(def)) return [`${where} is not a field definition`];
@@ -203,8 +310,12 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
   };
   switch (def.type) {
     case 'text':
+      optional('maxLength', (v) => Number.isSafeInteger(v) && (v as number) > 0, 'a whole number above 0');
+      optional('maxMarks', (v) => Number.isSafeInteger(v) && (v as number) > 0, 'a whole number above 0');
+      break;
     case 'url':
       optional('maxLength', (v) => Number.isSafeInteger(v) && (v as number) > 0, 'a whole number above 0');
+      optional('maxBytes', (v) => Number.isSafeInteger(v) && (v as number) > 0 && (v as number) <= MAX_URL_BYTES, `a whole number from 1 to ${MAX_URL_BYTES}`);
       break;
     case 'number':
       optional('min', isNum, 'a number');
@@ -230,7 +341,11 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
       if (!Array.isArray(def.options) || !def.options.length || !def.options.every(isStr)) out.push(`${where}: options must be a list of text`);
       break;
     case 'image':
-      if (inList) out.push(`${where}: a list row cannot hold an image`);
+      if (!has('portraitBox')) return out;
+      // A list row's image is a feed's photo, which has no renditions to choose from.
+      if (inList) return [...out, `${where}: a list row's image cannot have a portraitBox`];
+      if (!isObj(def.portraitBox) || !['w', 'h'].every((k) => isBoxSide(own(def.portraitBox, k))))
+        out.push(`${where}: portraitBox must be { w, h }, each a whole number from 1 to ${MAX_IMAGE_BOX}`);
       return out;
     case 'list':
       if (inList) return [...out, `${where}: a list row cannot hold a list`];
@@ -249,7 +364,13 @@ function fieldDefProblems(name: string, def: unknown, inList = false): string[] 
   return out;
 }
 
-function listProblems(name: string, def: Extract<FieldDef, { type: 'list' }>, v: unknown): string[] {
+/**
+ * A list value's problems. Rows a spot stores (its data, a template's default) hold only the item's
+ * columns: another key would ride along in the manifest to every screen, unseen by the editor, so it
+ * is refused (#264). A live value's rows (`open`) may carry more than the template shows, as a
+ * feed's stories do: those keys are not read.
+ */
+function listProblems(name: string, def: Extract<FieldDef, { type: 'list' }>, v: unknown, open = false): string[] {
   if (!Array.isArray(v)) return [`field "${name}" must be a list`];
   const out: string[] = [];
   if (def.maxItems && v.length > def.maxItems) out.push(`field "${name}" has more than ${def.maxItems} rows`);
@@ -258,7 +379,13 @@ function listProblems(name: string, def: Extract<FieldDef, { type: 'list' }>, v:
       out.push(`field "${name}" row ${i + 1} must be an object`);
       return;
     }
+    if (!open) for (const k of Object.keys(row)) if (!Object.hasOwn(def.item, k)) out.push(`field "${name}" row ${i + 1} has no column "${k}"`);
     for (const [k, d] of Object.entries(def.item)) {
+      if (d.type === 'image') {
+        const cell = own(row, k);
+        if (cell !== undefined && !isNewsImage(cell)) out.push(`field "${name}[${i + 1}].${k}" must be an image hash pair ({ file, thumb })`);
+        continue;
+      }
       const cell = own(row, k) ?? d.default;
       if (cell === undefined) out.push(`field "${name}" row ${i + 1} is missing "${k}"`);
       else {
@@ -270,8 +397,8 @@ function listProblems(name: string, def: Extract<FieldDef, { type: 'list' }>, v:
   return out;
 }
 
-/** Check a template's `template.json`. Returns problems; empty means valid. */
-export function validateTemplateManifest(m: unknown): string[] {
+/** The rules of a template's `template.json` beyond its shape. */
+function templateManifestRules(m: unknown): string[] {
   if (!isObj(m)) return ['manifest is not an object'];
   const errors: string[] = [];
   if (!isStr(m.id) || !/^[a-z0-9][a-z0-9-]*$/.test(m.id)) errors.push('id must be lowercase letters, digits and dashes');
@@ -294,6 +421,102 @@ export function validateTemplateManifest(m: unknown): string[] {
   if (m.live !== undefined) errors.push(...prefix('live', liveProblems(m.live, isObj(m.fields) ? m.fields : {})));
   return errors;
 }
+
+const label = text('label');
+const scalarCases = {
+  text: object(
+    { type: literal('text', ''), label, default: optional(text('default')), maxLength: optional(number('maxLength')), maxMarks: optional(number('maxMarks')) },
+    '',
+  ),
+  number: object(
+    {
+      type: literal('number', ''),
+      label,
+      default: optional(number('default')),
+      min: optional(number('min')),
+      max: optional(number('max')),
+      step: optional(number('step')),
+    },
+    '',
+  ),
+  boolean: object({ type: literal('boolean', ''), label, default: optional(is(isBool, 'default must be true or false')) }, ''),
+  color: object({ type: literal('color', ''), label, default: optional(text('default')) }, ''),
+  select: object({ type: literal('select', ''), label, options: texts('options'), default: optional(text('default')) }, ''),
+  url: object(
+    { type: literal('url', ''), label, default: optional(text('default')), maxLength: optional(number('maxLength')), maxBytes: optional(number('maxBytes')) },
+    '',
+  ),
+  date: object({ type: literal('date', ''), label, default: optional(text('default')), min: optional(text('min')), max: optional(text('max')) }, ''),
+  datetime: object({ type: literal('datetime', ''), label, default: optional(text('default')), min: optional(text('min')), max: optional(text('max')) }, ''),
+};
+const FIELD_TYPES = 'type must be text, number, boolean, color, select, url, date, datetime, image or list';
+const listItemFieldShape = variant('type', { ...scalarCases, image: object({ type: literal('image', ''), label }, '') }, FIELD_TYPES);
+assertSame<Same<Infer<typeof listItemFieldShape>, ListItemFieldDef>>();
+const fieldDefShape = variant(
+  'type',
+  {
+    ...scalarCases,
+    image: object(
+      { type: literal('image', ''), label, portraitBox: optional(object({ w: number('w'), h: number('h') }, 'portraitBox must be an object')) },
+      '',
+    ),
+    list: object(
+      {
+        type: literal('list', ''),
+        label,
+        item: record(listItemFieldShape, (k) => `item "${k}"`, 'item must be an object'),
+        maxItems: optional(number('maxItems')),
+        default: optional(listOf('default row', is(isObj, 'is not an object'))),
+      },
+      '',
+    ),
+  },
+  FIELD_TYPES,
+);
+assertSame<Same<Infer<typeof fieldDefShape>, FieldDef>>();
+
+const liveSourceFields = {
+  source: oneOf(LIVE_SOURCES, `source must be one of ${LIVE_SOURCES.join(', ')}`),
+  fields: textMap('field'),
+  place: optional(text('place')),
+  units: optional(object({ temperature: optional(text('temperature')), wind: optional(text('wind')) }, 'units must be an object')),
+};
+const liveSourceShape = object(liveSourceFields, 'must be an object');
+const liveSourcesShape = object(
+  { sources: record(object({ ...liveSourceFields, label }, 'must be an object'), (k) => `source "${k}"`, 'sources must be an object') },
+  'must be an object',
+);
+/** One source, or several by name: told apart by `sources`, as the rules tell them. */
+const liveDataShape = custom<LiveData>((v) => (isObj(v) && Object.hasOwn(v, 'sources') ? liveSourcesShape.read(v) : liveSourceShape.read(v)));
+
+const templateManifestFields = object(
+  {
+    id: text('id'),
+    version: text('version'),
+    name: text('name'),
+    description: optional(text('description')),
+    fields: record(fieldDefShape, (k) => `field "${k}"`, 'fields is required'),
+    duration: object({ defaultMs: number('defaultMs'), minMs: number('minMs'), maxMs: number('maxMs') }, 'duration must be an object'),
+    orientations: is(
+      (v): v is Orientation[] => Array.isArray(v) && Array.from(v).every((o) => o === 'landscape' || o === 'portrait'),
+      'orientations must list landscape and/or portrait',
+    ),
+    uses: is(
+      (v): v is Capability[] => Array.isArray(v) && Array.from(v).every((u) => u === 'canvas' || u === 'webgl' || u === 'audio'),
+      'uses may list only canvas, webgl and audio',
+    ),
+    background: text('background'),
+    protocol: optional(number('protocol')),
+    live: optional(liveDataShape),
+  },
+  'manifest is not an object',
+);
+assertSame<Same<Infer<typeof templateManifestFields>, TemplateManifest>>();
+
+/** `template.json`, as a template's manifest is declared (#156). */
+export const templateManifestShape = checked(templateManifestRules, templateManifestFields);
+/** Check a template's manifest. Returns problems; empty means it is valid. */
+export const validateTemplateManifest = (m: unknown): string[] => problemsOf(templateManifestShape, m);
 
 /** What is wrong with a template's `live` declaration, given its fields: one source, or several by name. */
 function liveProblems(live: unknown, fields: Obj): string[] {
@@ -377,15 +600,33 @@ function tableBindingProblems(name: string, def: FieldDef, path: unknown, t: unk
   const props = Object.keys(def.item);
   for (const [prop, column] of Object.entries(t.columns)) {
     if (!Object.hasOwn(def.item, prop)) out.push(`${where}: "${prop}" is not a property of its items (${props.join(', ')})`);
+    else if (def.item[prop]!.type === 'image') out.push(`${where}: "${prop}" is an image and cannot be mapped from a table column`);
     else if (!isText(column)) out.push(`${where}: the column for "${prop}" must be a column name`);
   }
   for (const [prop, d] of Object.entries(def.item))
-    if (d.default === undefined && !Object.hasOwn(t.columns, prop)) out.push(`${where} needs a column for "${prop}"`);
+    if (d.type !== 'image' && d.default === undefined && !Object.hasOwn(t.columns, prop)) out.push(`${where} needs a column for "${prop}"`);
   if (t.filter !== undefined && !(isObj(t.filter) && isText(t.filter.column) && isStr(t.filter.equals)))
     out.push(`${where}: filter needs a column and the text it equals`);
   if (t.sort !== undefined && !(isObj(t.sort) && isText(t.sort.column) && (t.sort.descending === undefined || typeof t.sort.descending === 'boolean')))
     out.push(`${where}: sort needs a column, and descending true or false`);
   return out;
+}
+
+/**
+ * The look kit's toggle for a field (docs/template-spec.md, Toggles): `photo` is switched by `showPhoto`.
+ */
+export const toggleOf = (name: string) => `show${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+
+/**
+ * Whether the spot switched the field off with its toggle, a boolean field set (or defaulting) to
+ * false (#252): then the template removes the element, and an image there needs no asset. A bound
+ * toggle may turn on with the next snapshot, so it never counts as off.
+ */
+function switchedOff(fields: Obj, data: Obj, bindings: Obj, name: string): boolean {
+  const toggle = toggleOf(name);
+  const def = own(fields, toggle);
+  if (own(def, 'type') !== 'boolean' || own(bindings, toggle) !== undefined) return false;
+  return (own(data, toggle) ?? own(def, 'default')) === false;
 }
 
 /**
@@ -413,27 +654,27 @@ export function validateSpotData(fields: unknown, data: unknown, assets: unknown
     if (table !== undefined && def && !fieldDefProblems(name, def).length)
       errors.push(...tableBindingProblems(name, def as FieldDef, own(binding, 'path'), table));
   }
-  for (const [name, raw] of Object.entries(fields)) {
-    if (fieldDefProblems(name, raw).length) {
-      errors.push(`field "${name}" has no valid definition`);
-      continue;
-    }
-    const def = raw as FieldDef;
-    if (def.type === 'image') {
-      if (!isText(own(a, name))) errors.push(`image field "${name}" has no asset`);
-      continue;
-    }
-    const v = own(d, name) ?? ('default' in def ? def.default : undefined);
-    // A bound field still needs a static value: it is what shows before the first snapshot arrives.
-    if (v === undefined) errors.push(`field "${name}" is missing${own(b, name) ? ' (a bound field needs a fallback value)' : ''}`);
-    else if (def.type === 'list') errors.push(...listProblems(name, def, v));
-    else {
-      const e = scalarProblem(name, def, v);
-      if (e) errors.push(e);
-    }
-  }
+  for (const name of Object.keys(fields)) errors.push(...validateSpotField(fields, d, a, b, name));
   for (const name of Object.keys(d)) if (!own(fields, name)) errors.push(`unknown field "${name}"`);
   return errors;
+}
+
+/**
+ * The problems `validateSpotData` finds with one field's value, checked against all of the spot's
+ * fields, data, assets and bindings (an image with its toggle), so an editor can show each by its
+ * field and agree with the publish. The bindings' own problems are not in it.
+ */
+export function validateSpotField(fields: Obj, data: Obj, assets: Obj, bindings: Obj, name: string): string[] {
+  const raw = own(fields, name);
+  if (fieldDefProblems(name, raw).length) return [`field "${name}" has no valid definition`];
+  const def = raw as FieldDef;
+  if (def.type === 'image') return isText(own(assets, name)) || switchedOff(fields, data, bindings, name) ? [] : [`image field "${name}" has no asset`];
+  const v = own(data, name) ?? ('default' in def ? def.default : undefined);
+  // A bound field still needs a static value: it is what shows before the first snapshot arrives.
+  if (v === undefined) return [`field "${name}" is missing${own(bindings, name) ? ' (a bound field needs a fallback value)' : ''}`];
+  if (def.type === 'list') return listProblems(name, def, v);
+  const e = scalarProblem(name, def, v);
+  return e ? [e] : [];
 }
 
 // ------------------------------------------------------------------ bound values
@@ -468,7 +709,7 @@ export function validateBoundValue(fields: unknown, name: unknown, value: unknow
   const def = raw as FieldDef;
   if (def.type === 'image') return [`image field "${field}" cannot be bound to live data`];
   if (value === undefined || value === null) return [`field "${field}" has no value at the bound path`];
-  if (def.type === 'list') return listProblems(field, def, value);
+  if (def.type === 'list') return listProblems(field, def, value, true);
   const e = scalarProblem(field, def, value);
   return e ? [e] : [];
 }
@@ -577,6 +818,7 @@ export function tableItems(
     const item: Record<string, unknown> = {};
     let problem: string | undefined;
     for (const [prop, d] of Object.entries(def.item)) {
+      if (d.type === 'image') continue;
       const column = own(t.columns, prop);
       const cell = isStr(column) ? cells[at(column)] : undefined;
       // A cell that does not convert is checked as written, so the problem names what is wrong with it.
@@ -647,8 +889,8 @@ export function scheduleEntryProblems(e: unknown): string[] {
   return out;
 }
 
-/** What is wrong with a screen's display hours, as `validateManifest` checks them. Empty if they are valid. */
-export function displayHoursProblems(hours: unknown): string[] {
+/** The rules of a screen's display hours beyond their shape. */
+function displayHoursRules(hours: unknown): string[] {
   if (!isObj(hours)) return ['display hours must be an object'];
   const errors: string[] = [];
   if (!Array.isArray(hours.weekly)) errors.push('display hours have no weekly list');
@@ -703,8 +945,8 @@ function fontProblems(where: string, f: unknown): string[] {
   return errors;
 }
 
-/** Check a brand kit as the manifest carries it. Problems are not prefixed; the manifest adds `brand: `. */
-export function validateBrandKit(b: unknown): string[] {
+/** The rules of a brand kit, as the manifest carries it, beyond its shape. Problems are not prefixed; the manifest adds `brand: `. */
+function brandKitRules(b: unknown): string[] {
   if (!isObj(b)) return ['brand must be an object'];
   const errors: string[] = [];
   if (!isIdValue(b.id)) errors.push('id is not a valid id');
@@ -718,6 +960,48 @@ export function validateBrandKit(b: unknown): string[] {
   }
   return errors;
 }
+
+const brandFontShape = (which: string) =>
+  object(
+    {
+      id: text('id'),
+      family: text('family'),
+      files: listOf(
+        `${which} font file`,
+        object({ weight: number('weight'), style: oneOf(['normal', 'italic'], 'style must be normal or italic'), file: text('file') }, 'is not an object'),
+      ),
+    },
+    `${which} font must be an object`,
+  );
+const colour = (c: string) => text(`colour "${c}"`);
+const brandKitFields = object(
+  {
+    id: text('id'),
+    colors: object(
+      {
+        primary: colour('primary'),
+        onPrimary: colour('onPrimary'),
+        accent: colour('accent'),
+        onAccent: colour('onAccent'),
+        background: colour('background'),
+        surface: colour('surface'),
+        text: colour('text'),
+        muted: colour('muted'),
+      },
+      'colors must be an object',
+    ),
+    shape: oneOf(BRAND_SHAPES, 'shape must be square, soft or round'),
+    fonts: object({ display: optional(brandFontShape('display')), body: optional(brandFontShape('body')) }, 'fonts must be an object'),
+    logo: optional(object({ onDark: text('onDark'), onLight: optional(text('onLight')) }, 'logo must be an object')),
+  },
+  'brand must be an object',
+);
+assertSame<Same<Infer<typeof brandKitFields>, BrandKit>>();
+
+/** One screen's brand kit, as declared (#156). */
+export const brandKitShape = checked(brandKitRules, brandKitFields);
+/** Check a brand kit. Returns problems; empty means it is valid. */
+export const validateBrandKit = (b: unknown): string[] => problemsOf(brandKitShape, b);
 
 // ------------------------------------------------------------- screen manifest
 
@@ -741,11 +1025,11 @@ export function requiredFiles(manifest: ScreenManifest): Set<string> {
   return out;
 }
 
-/** Check a screen manifest. Returns problems; empty means a player can play it. */
-export function validateManifest(m: unknown): string[] {
+/** The rules a manifest a player plays must meet, beyond its shape: in the order and words they always had. */
+function manifestRules(m: unknown): string[] {
   if (!isObj(m)) return ['manifest is not an object'];
   const errors: string[] = [];
-  if (!SUPPORTED_MANIFEST_SCHEMAS.includes(m.schema as number))
+  if (!playsSchema(THIS_PLAYER, m.schema))
     errors.push(`manifest schema ${show(m.schema)} is not one this player can play (${SUPPORTED_MANIFEST_SCHEMAS.join(', ')})`);
   if (!isText(m.id)) errors.push('id is missing');
   if (!isInstant(m.generatedAt)) errors.push('generatedAt must be an ISO 8601 time');
@@ -888,10 +1172,152 @@ export function validateManifest(m: unknown): string[] {
     if (own(d, 'id') !== key) errors.push(`data source "${key}" is listed under a different id ("${show(own(d, 'id'))}")`);
     if (!isIdValue(key)) errors.push(`data source id "${key}" is not a valid id`);
     const r = own(d, 'refreshS');
-    if (!(isNum(r) && r >= MIN_REFRESH_S)) errors.push(`data source "${key}": refreshS must be at least ${MIN_REFRESH_S}`);
+    if (!(Number.isSafeInteger(r) && (r as number) >= MIN_REFRESH_S))
+      errors.push(`data source "${key}": refreshS must be whole seconds, at least ${MIN_REFRESH_S}`);
   }
   return errors;
 }
+
+const timeWindowShape = object({ from: text('from'), to: text('to') }, 'a window must be an object');
+const displayHoursShape = object(
+  {
+    weekly: listOf('weekly window', object({ from: text('from'), to: text('to'), days: is(wholeNumbers, 'days must be 0-6') }, 'a window must be an object')),
+    exceptions: optional(listOf('exception', object({ date: text('date'), on: listOf('window', timeWindowShape) }, 'an exception must be an object'))),
+  },
+  'display hours must be an object',
+);
+assertSame<Same<Infer<typeof displayHoursShape>, DisplayHours>>();
+
+/** A screen's display hours, as declared (#156). */
+export const validDisplayHoursShape = checked(displayHoursRules, displayHoursShape);
+/** What is wrong with a screen's display hours, as `validateManifest` checks them. Empty if they are valid. */
+export const displayHoursProblems = (hours: unknown): string[] => problemsOf(validDisplayHoursShape, hours);
+
+const spotBase = { id: text('id'), name: text('name'), durationMs: number('durationMs') };
+const fit = is((v): v is 'cover' | 'contain' => v === 'cover' || v === 'contain', 'fit must be cover or contain');
+const bindingShape = object(
+  {
+    source: text('source'),
+    path: text('path'),
+    table: optional(
+      object(
+        {
+          columns: textMap('column'),
+          filter: optional(object({ column: text('column'), equals: text('equals') }, 'filter must be an object')),
+          sort: optional(object({ column: text('column'), descending: optional(is(isBool, 'descending must be true or false')) }, 'sort must be an object')),
+        },
+        'table must be an object',
+      ),
+    ),
+  },
+  'a binding must be an object',
+);
+const spotShape = variant(
+  'kind',
+  {
+    template: object(
+      {
+        ...spotBase,
+        kind: literal('template', ''),
+        template: text('template'),
+        data: is(isObj, 'data must be an object'),
+        assets: textMap('asset'),
+        bindings: optional(record(bindingShape, (k) => `binding "${k}"`, 'bindings must be an object')),
+      },
+      '',
+    ),
+    image: object({ ...spotBase, kind: literal('image', ''), file: text('file'), fit }, ''),
+    video: object({ ...spotBase, kind: literal('video', ''), file: text('file'), fit }, ''),
+    url: object({ ...spotBase, kind: literal('url', ''), url: text('url') }, ''),
+  },
+  'kind must be template, image, video or url',
+);
+assertSame<Same<Infer<typeof spotShape>, Spot>>();
+
+const ms = <T extends 'fade' | 'crossfade'>(type: T) => object({ type: literal(type, ''), ms: number('ms') }, '');
+const playlistShape = object(
+  {
+    id: text('id'),
+    name: text('name'),
+    transition: variant(
+      'type',
+      { cut: object({ type: literal('cut', '') }, ''), fade: ms('fade'), crossfade: ms('crossfade') },
+      'transition must be cut, fade or crossfade',
+    ),
+    items: listOf('item', object({ spot: text('spot') }, 'is not an object')),
+  },
+  'is not an object',
+);
+assertSame<Same<Infer<typeof playlistShape>, Playlist>>();
+
+const scheduleEntryShape = object(
+  {
+    id: text('id'),
+    playlist: text('playlist'),
+    priority: number('priority'),
+    target: is((v): v is TargetLevel => v === 'org' || v === 'group' || v === 'screen', 'target must be org, group or screen'),
+    startDate: optional(text('startDate')),
+    endDate: optional(text('endDate')),
+    days: optional(is(wholeNumbers, 'days must be 0-6')),
+    from: optional(text('from')),
+    to: optional(text('to')),
+    startsAt: optional(text('startsAt')),
+    endsAt: optional(text('endsAt')),
+  },
+  'is not an object',
+);
+assertSame<Same<Infer<typeof scheduleEntryShape>, ScheduleEntry>>();
+
+/**
+ * A manifest as its type declares it, without the rules `validateManifest` adds (#156): a stored manifest is played when
+ * it reads, although this release's rules may refuse it (a schema it no longer plays, a tightened rule).
+ */
+export const manifestShape = object(
+  {
+    schema: number('schema'),
+    id: text('id'),
+    generatedAt: text('generatedAt'),
+    screen: object(
+      {
+        id: text('id'),
+        name: text('name'),
+        timezone: text('timezone'),
+        locale: optional(text('locale')),
+        orientation: is((v): v is Orientation => v === 'landscape' || v === 'portrait', 'orientation must be landscape or portrait'),
+        displayHours: optional(displayHoursShape),
+      },
+      'screen is missing',
+    ),
+    files: record(
+      object({ size: is(isCount, 'size must be a whole number'), type: text('type'), sample: optional(text('sample')) }, 'is not an object'),
+      (k) => `file ${k.slice(0, 12)}`,
+      'files must be an object',
+    ),
+    templates: record(
+      object({ manifest: templateManifestFields, html: text('html') }, 'is not an object'),
+      (k) => `template "${k}"`,
+      'templates must be an object',
+    ),
+    spots: record(spotShape, (k) => `spot "${k}"`, 'spots must be an object'),
+    playlists: record(playlistShape, (k) => `playlist "${k}"`, 'playlists must be an object'),
+    dataSources: record(
+      object({ id: text('id'), refreshS: number('refreshS') }, 'is not an object'),
+      (k) => `data source "${k}"`,
+      'dataSources must be an object',
+    ),
+    schedule: listOf('schedule entry', scheduleEntryShape),
+    defaultPlaylist: text('defaultPlaylist'),
+    brand: optional(brandKitFields),
+  },
+  'manifest is not an object',
+);
+assertSame<Same<Infer<typeof manifestShape>, ScreenManifest>>();
+
+/** A manifest a player can play: every rule, and then its shape, which leaves out any key the contract does not declare. */
+export const validManifestShape = checked(manifestRules, manifestShape);
+
+/** Check a screen manifest. Returns problems; empty means a player can play it. */
+export const validateManifest = (m: unknown): string[] => problemsOf(validManifestShape, m);
 
 // ------------------------------------------------------------------ live data
 
@@ -900,190 +1326,337 @@ export function snapshotBytes(data: unknown): number {
   return new TextEncoder().encode(JSON.stringify(data) ?? '').length;
 }
 
-/** Check a data snapshot, as `data/<id>.json` and a sync response carry it. */
-export function validateDataSnapshot(s: unknown): string[] {
-  if (!isObj(s)) return ['snapshot is not an object'];
-  const errors: string[] = [];
-  if (!isIdValue(s.id)) errors.push(`snapshot id "${show(s.id)}" is not a valid id`);
-  if (!isCount(s.version)) errors.push('snapshot version must be a whole number, 0 or more');
-  if (!isInstant(s.fetchedAt)) errors.push('snapshot fetchedAt must be an ISO 8601 time');
-  if (!isInstant(s.checkedAt)) errors.push('snapshot checkedAt must be an ISO 8601 time');
-  if (!Object.hasOwn(s, 'data')) errors.push('snapshot has no data');
-  else if (snapshotBytes(s.data) > MAX_SNAPSHOT_BYTES) errors.push(`snapshot data is over ${MAX_SNAPSHOT_BYTES} bytes as JSON`);
-  return errors;
-}
+/** A data snapshot, as `data/<id>.json` and a sync response carry it. */
+export const dataSnapshotShape = object(
+  {
+    id: is(isIdValue, (v) => `snapshot id "${show(v)}" is not a valid id`),
+    version: is(isCount, 'snapshot version must be a whole number, 0 or more'),
+    fetchedAt: is(isInstant, 'snapshot fetchedAt must be an ISO 8601 time'),
+    checkedAt: is(isInstant, 'snapshot checkedAt must be an ISO 8601 time'),
+    staleS: optional(is(isStaleS, `snapshot staleS must be a whole number from ${MIN_REFRESH_S} to ${SNAPSHOT_STALE_MS / 1000}`)),
+    data: custom((v) =>
+      v === undefined
+        ? refused(['snapshot has no data'])
+        : snapshotBytes(v) > MAX_SNAPSHOT_BYTES
+          ? refused([`snapshot data is over ${MAX_SNAPSHOT_BYTES} bytes as JSON`])
+          : accepted(v),
+    ),
+  },
+  'snapshot is not an object',
+);
+assertSame<Same<Infer<typeof dataSnapshotShape>, DataSnapshot>>();
+export const validateDataSnapshot = (s: unknown) => problemsOf(dataSnapshotShape, s);
 
 // ------------------------------------------------------------------ device API
 
+// Each message declared once (./shape.ts, #156): read in its fields' order, in the words these checks always used, it
+// gives back exactly the shape. `assertSame` holds each to its interface in shapes.ts at compile time.
+
 /** `POST /v1/device/pair/start`, as the server receives it. */
-export function validatePairStartRequest(r: unknown): string[] {
-  if (!isObj(r)) return ['request is not an object'];
-  if (r.kind !== undefined && !SCREEN_KINDS.some((k) => k === r.kind)) return [`kind must be one of ${SCREEN_KINDS.join(', ')}`];
-  return [];
-}
+export const pairStartRequestShape = object(
+  { kind: optional(is((v): v is ScreenKind => SCREEN_KINDS.some((k) => k === v), `kind must be one of ${SCREEN_KINDS.join(', ')}`)) },
+  'request is not an object',
+);
+assertSame<Same<Infer<typeof pairStartRequestShape>, PairStartRequest>>();
+export const validatePairStartRequest = (r: unknown) => problemsOf(pairStartRequestShape, r);
 
 /** `POST /v1/device/pair/start`, as the screen receives it. */
-export function validatePairStartResponse(r: unknown): string[] {
-  if (!isObj(r)) return ['response is not an object'];
-  const errors: string[] = [];
-  if (!isText(r.code)) errors.push('code is missing');
-  if (!isText(r.pollToken)) errors.push('pollToken is missing');
-  if (!isInstant(r.expiresAt)) errors.push('expiresAt must be an ISO 8601 time');
-  return errors;
-}
+export const pairStartResponseShape = object(
+  {
+    code: is(isText, 'code is missing'),
+    pollToken: is(isText, 'pollToken is missing'),
+    expiresAt: is(isInstant, 'expiresAt must be an ISO 8601 time'),
+  },
+  'response is not an object',
+);
+assertSame<Same<Infer<typeof pairStartResponseShape>, PairStartResponse>>();
+export const validatePairStartResponse = (r: unknown) => problemsOf(pairStartResponseShape, r);
 
 /** `POST /v1/device/pair/poll`, as the screen receives it. */
-export function validatePairPollResponse(r: unknown): string[] {
-  if (!isObj(r)) return ['response is not an object'];
-  if (r.status === 'waiting' || r.status === 'expired') return [];
-  if (r.status !== 'paired') return ['status must be waiting, expired or paired'];
-  const errors: string[] = [];
-  if (!isIdValue(r.screenId)) errors.push('screenId is not a valid id');
-  else if (!isStr(r.credential) || !r.credential.startsWith(`sfd_${r.screenId}.`) || r.credential.length <= `sfd_${r.screenId}.`.length) {
-    errors.push('credential must be sfd_<screenId>.<secret>');
-  }
-  return errors;
-}
+export const pairPollResponseShape = custom<PairPollResponse>((r) => {
+  if (!isObj(r)) return refused(['response is not an object']);
+  if (r.status === 'waiting' || r.status === 'expired') return accepted({ status: r.status });
+  if (r.status !== 'paired') return refused(['status must be waiting, expired or paired']);
+  if (!isIdValue(r.screenId)) return refused(['screenId is not a valid id']);
+  if (!isStr(r.credential) || !r.credential.startsWith(`sfd_${r.screenId}.`) || r.credential.length <= `sfd_${r.screenId}.`.length)
+    return refused(['credential must be sfd_<screenId>.<secret>']);
+  return accepted({ status: 'paired', screenId: r.screenId, credential: r.credential });
+});
+export const validatePairPollResponse = (r: unknown) => problemsOf(pairPollResponseShape, r);
 
-function overrideProblems(o: unknown): string[] {
-  if (!isObj(o)) return ['override must be an object'];
-  const errors: string[] = [];
-  if (o.state !== 'on' && o.state !== 'off') errors.push('override state must be on or off');
-  if (!isInstant(o.until)) errors.push('override until must be an ISO 8601 time');
-  return errors;
-}
+const displayOverrideShape = object(
+  {
+    state: is((v): v is DisplayOverride['state'] => v === 'on' || v === 'off', 'override state must be on or off'),
+    until: is(isInstant, 'override until must be an ISO 8601 time'),
+  },
+  'override must be an object',
+);
+assertSame<Same<Infer<typeof displayOverrideShape>, DisplayOverride>>();
 
 /** One command from the server, in a sync response or over the socket. */
-export function validateDeviceCommand(c: unknown): string[] {
-  if (!isObj(c)) return ['command is not an object'];
-  if (c.type === 'reload' || c.type === 'restart' || c.type === 'reboot') return [];
-  if (c.type === 'display') return c.override === null ? [] : overrideProblems(c.override);
+export const deviceCommandShape = custom<DeviceCommand>((c) => {
+  if (!isObj(c)) return refused(['command is not an object']);
+  if (c.type === 'reload' || c.type === 'restart' || c.type === 'reboot') return accepted({ type: c.type });
+  if (c.type === 'display') {
+    if (c.override === null) return accepted({ type: 'display', override: null });
+    const override = displayOverrideShape.read(c.override);
+    return override.ok ? accepted({ type: 'display', override: override.value }) : override;
+  }
   if (c.type === 'identify') {
     const errors: string[] = [];
     if (!isStr(c.name) || !c.name.trim() || c.name.length > 100) errors.push('identify needs the name to show, 1 to 100 characters');
     if (!Number.isInteger(c.seconds) || (c.seconds as number) < 1 || (c.seconds as number) > MAX_IDENTIFY_SECONDS)
       errors.push(`identify seconds must be a whole number from 1 to ${MAX_IDENTIFY_SECONDS}`);
-    return errors;
+    return errors.length ? refused(errors) : accepted({ type: 'identify', name: c.name as string, seconds: c.seconds as number });
   }
-  return ['command type must be reload, restart, display, identify or reboot'];
+  return refused(['command type must be reload, restart, display, identify or reboot']);
+});
+export const validateDeviceCommand = (c: unknown) => problemsOf(deviceCommandShape, c);
+
+/** A video mode as the supervisor writes it: `1920x1080@60`. */
+const OUTPUT_MODE = /^\d{1,5}x\d{1,5}@\d{1,3}$/;
+
+/** Whether `v` is a `DisplayOutput` a sync takes: the player checks the supervisor's reply with it, so a bad one never fails the sync. */
+export function isDisplayOutput(v: unknown): v is DisplayOutput {
+  return isObj(v) && isStr(v.mode) && OUTPUT_MODE.test(v.mode) && Number.isSafeInteger(v.resets) && Number(v.resets) >= 0;
 }
 
-function displayStatusProblems(d: unknown): string[] {
-  if (!isObj(d)) return ['display must be an object'];
-  const errors: string[] = [];
-  if (typeof d.on !== 'boolean') errors.push('display on must be true or false');
-  if (d.methods !== undefined && !(isObj(d.methods) && Object.values(d.methods).every(isStr))) errors.push('display methods must map names to text');
-  if (d.override !== undefined) errors.push(...prefix('display', overrideProblems(d.override)));
-  return errors;
-}
+const displayOutputShape = custom<DisplayOutput>((o) => {
+  if (!isObj(o) || !isStr(o.mode) || !OUTPUT_MODE.test(o.mode)) return refused(['display output mode must be <width>x<height>@<Hz>']);
+  if (!Number.isSafeInteger(o.resets) || Number(o.resets) < 0) return refused(['display output resets must be a whole number from 0']);
+  return accepted({ mode: o.mode, resets: o.resets as number });
+});
+
+const displayStatusShape = object(
+  {
+    on: is(isBool, 'display on must be true or false'),
+    methods: optional(is((v): v is Record<string, string> => isObj(v) && Object.values(v).every(isStr), 'display methods must map names to text')),
+    override: optional(within('display', displayOverrideShape)),
+    output: optional(displayOutputShape),
+  },
+  'display must be an object',
+);
+assertSame<Same<Infer<typeof displayStatusShape>, DisplayStatus>>();
 
 /** The start of an hour in UTC, as play counts are keyed: `2026-11-17T13:00Z`. */
 const HOUR = /^\d{4}-\d{2}-\d{2}T\d{2}:00(?::00(?:\.000)?)?Z$/;
 
-function playCountProblems(p: unknown): string[] {
-  if (!isObj(p)) return ['is not an object'];
-  const errors: string[] = [];
-  if (!isStr(p.hour) || !HOUR.test(p.hour) || Number.isNaN(Date.parse(p.hour))) errors.push('hour must be the start of a UTC hour, e.g. 2026-11-17T13:00Z');
-  if (!isIdValue(p.spot)) errors.push('spot is not a valid id');
-  if (!isCount(p.plays)) errors.push('plays must be a whole number, 0 or more');
-  if (!isNum(p.ms) || p.ms < 0) errors.push('ms must be 0 or more');
-  return errors;
-}
+const playCountShape = object(
+  {
+    hour: is((v): v is string => isStr(v) && HOUR.test(v) && !Number.isNaN(Date.parse(v)), 'hour must be the start of a UTC hour, e.g. 2026-11-17T13:00Z'),
+    spot: is(isIdValue, 'spot is not a valid id'),
+    plays: is(isCount, 'plays must be a whole number, 0 or more'),
+    ms: is((v): v is number => isNum(v) && v >= 0, 'ms must be 0 or more'),
+  },
+  'is not an object',
+);
+assertSame<Same<Infer<typeof playCountShape>, PlayCount>>();
 
 /**
  * A sync's map of source id to a count, checked entry by entry but reported as one problem at
  * most: a player before gh-45 sends every source it has seen, so one cause must not make a
  * problem per entry. The size of the work is bounded by `MAX_SYNC_REQUEST_BYTES`.
  */
-function sourceMapProblems(name: string, map: Obj, what: string): string[] {
-  const bad = Object.keys(map).filter((k) => !isIdValue(k) || !isCount(own(map, k)));
-  if (!bad.length) return [];
-  return [`${name}: "${show(bad[0])}" must be a source id with ${what}${bad.length > 1 ? ` (and ${bad.length - 1} more)` : ''}`];
-}
+const sourceMap = (name: string, notMap: string, what: string) =>
+  custom<Record<string, number>>((map) => {
+    if (!isObj(map)) return refused([notMap]);
+    const bad = Object.keys(map).filter((k) => !isIdValue(k) || !isCount(own(map, k)));
+    if (bad.length) return refused([`${name}: "${show(bad[0])}" must be a source id with ${what}${bad.length > 1 ? ` (and ${bad.length - 1} more)` : ''}`]);
+    return accepted(Object.fromEntries(Object.keys(map).map((k) => [k, own(map, k) as number])));
+  });
 
-const versions = (v: unknown) => Array.isArray(v) && v.every((n) => Number.isSafeInteger(n));
+/** A list of feed image hashes, at most `max`. */
+const blobList = (max: number) =>
+  custom<Sha256[]>((v) => {
+    if (!Array.isArray(v)) return refused(['blobs must be a list of sha256 hashes']);
+    if (v.length > max) return refused([`blobs holds at most ${max} hashes`]);
+    if (!Array.from(v).every(isSha256)) return refused(['blobs must contain sha256 hashes']);
+    return accepted([...v]);
+  });
+
+// ------------------------------------------------------------ player releases (#628)
+
+const isReleaseVersion = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 1;
+const isFailedReason = (v: unknown): v is FailedPlayerRelease['reason'] => FAILED_RELEASE_REASONS.some((r) => r === v);
+const isReleasePath = (v: unknown): v is string =>
+  typeof v === 'string' && v.length <= MAX_RELEASE_PATH_LENGTH && v.split('/').every((seg) => RELEASE_PATH_SEGMENT.test(seg) && seg !== '.' && seg !== '..');
+
+const failedReleaseShape = said(
+  `failedRelease needs a version (a whole number from 1) and a reason (${FAILED_RELEASE_REASONS.join(', ')})`,
+  object({ version: is(isReleaseVersion, ''), reason: is(isFailedReason, '') }, ''),
+);
+
+/** A release's files: at most MAX_RELEASE_FILES, each at a path of its own that is no directory of another's. */
+const releaseFiles = custom<PlayerReleaseFile[]>((v) => {
+  if (!Array.isArray(v)) return refused(['files must be a list']);
+  if (v.length > MAX_RELEASE_FILES) return refused([`files holds at most ${MAX_RELEASE_FILES} files`]);
+  const files: PlayerReleaseFile[] = [];
+  for (const f of v) {
+    const path = own(f, 'path');
+    const sha256 = own(f, 'sha256');
+    if (!isReleasePath(path))
+      return refused([`a file's path must be relative, of segments ${RELEASE_PATH_SEGMENT.source}, at most ${MAX_RELEASE_PATH_LENGTH} long`]);
+    if (path.split('/')[0] === RESERVED_RELEASE_PATH)
+      return refused([`file "${path}": ${RESERVED_RELEASE_PATH}/ is reserved for the content a player is sent`]);
+    if (!isSha256(sha256)) return refused([`file "${path}": sha256 must be a lowercase hex sha256`]);
+    files.push({ path, sha256 });
+  }
+  const paths = new Set(files.map((f) => f.path));
+  if (paths.size !== files.length) return refused(['files lists a path twice']);
+  for (const { path } of files) {
+    const parts = path.split('/');
+    for (let i = 1; i < parts.length; i++)
+      if (paths.has(parts.slice(0, i).join('/'))) return refused([`file "${parts.slice(0, i).join('/')}" is also a directory of "${path}"`]);
+  }
+  return accepted(files);
+});
+
+export const playerReleaseManifestShape = object(
+  {
+    format: is((v): v is typeof PLAYER_RELEASE_FORMAT => v === PLAYER_RELEASE_FORMAT, `format must be ${PLAYER_RELEASE_FORMAT}`),
+    minSupervisor: is(isReleaseVersion, 'minSupervisor must be a whole number from 1'),
+    version: is(isReleaseVersion, 'version must be a whole number from 1'),
+    sha256: is(isSha256, 'sha256 must be a lowercase hex sha256'),
+    size: is(
+      (v): v is number => Number.isSafeInteger(v) && (v as number) >= 1 && (v as number) <= MAX_RELEASE_BYTES,
+      `size must be a whole number from 1 to ${MAX_RELEASE_BYTES}`,
+    ),
+    files: releaseFiles,
+    manifestSchemas: is(versions, 'manifestSchemas must list the schemas it plays'),
+    protocols: is(versions, 'protocols must list the protocols it plays'),
+    createdAt: is(isInstant, 'createdAt must be an ISO 8601 time'),
+  },
+  'release manifest is not an object',
+);
+assertSame<Same<Infer<typeof playerReleaseManifestShape>, PlayerReleaseManifest>>();
+
+export const playerReleaseOfferShape = object(
+  {
+    manifestSchema: is(isReleaseVersion, 'manifestSchema must be a whole number from 1'),
+    channel: is((v): v is PlayerChannel => PLAYER_CHANNELS.some((c) => c === v), `channel must be one of ${PLAYER_CHANNELS.join(', ')}`),
+    release: custom<PlayerReleaseOffer['release']>((r) => {
+      if (r === null) return accepted(null);
+      const manifest = own(r, 'manifest');
+      const signature = own(r, 'signature');
+      if (!isText(manifest) || new TextEncoder().encode(manifest).length > MAX_RELEASE_MANIFEST_BYTES)
+        return refused([`release needs the manifest text, at most ${MAX_RELEASE_MANIFEST_BYTES} bytes, or is null`]);
+      if (typeof signature !== 'string' || !RELEASE_SIGNATURE.test(signature)) return refused(['release needs an Ed25519 signature in base64, 88 characters']);
+      return accepted({ manifest, signature });
+    }),
+  },
+  'offer is not an object',
+);
+assertSame<Same<Infer<typeof playerReleaseOfferShape>, PlayerReleaseOffer>>();
+
+export const supervisorAliveResponseShape = object({ failedRelease: optional(failedReleaseShape) }, 'reply is not an object');
+assertSame<Same<Infer<typeof supervisorAliveResponseShape>, SupervisorAliveResponse>>();
 
 /** `POST /v1/device/sync`, as the server receives it. */
-export function validateSyncRequest(r: unknown): string[] {
-  if (!isObj(r)) return ['request is not an object'];
+export const syncRequestShape = object(
+  {
+    seq: is(isCount, 'seq must be a whole number, 0 or more'),
+    epoch: is(isIdValue, 'epoch must be a valid id'),
+    player: said(
+      'player needs a version and the manifest schemas and protocols it supports',
+      object({ version: is(isText, ''), release: optional(is(isReleaseVersion, '')), manifestSchemas: is(versions, ''), protocols: is(versions, '') }, ''),
+    ),
+    manifest: said(
+      'manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids',
+      object(
+        {
+          active: optional(is(isManifestId, '')),
+          filesMissing: is(isCount, ''),
+          fallbackFrom: optional(is(isManifestId, '')),
+          lastGood: optional(is(isManifestId, '')),
+        },
+        '',
+      ),
+    ),
+    display: displayStatusShape,
+    deviceTime: is(isInstant, 'deviceTime must be an ISO 8601 time'),
+    clock: said('clock needs offsetMs and whether the screen trusts it', object({ offsetMs: is(isNum, ''), trusted: is(isBool, '') }, '')),
+    // The bound first: a list over it is refused whole, without a problem per entry (bounded work, gh-45).
+    playCounts: listOf('play count', playCountShape, { max: MAX_SYNC_PLAY_COUNTS, tooLong: `playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts` }),
+    snapshots: sourceMap('snapshots', 'snapshots must map source ids to versions', 'a version number'),
+    dataRejected: optional(sourceMap('dataRejected', 'dataRejected must map source ids to counts', 'a count')),
+    blobs: optional(blobList(MAX_SYNC_BLOBS)),
+    failedRelease: optional(failedReleaseShape),
+  },
+  'request is not an object',
+);
+assertSame<Same<Infer<typeof syncRequestShape>, SyncRequest>>();
+export const validateSyncRequest = (r: unknown) => problemsOf(syncRequestShape, r);
+
+const checkedShape = custom<Record<string, { version: number; checkedAt: string; staleS?: number }>>((c) => {
+  if (!isObj(c)) return refused(['checked must map source ids to a version and checkedAt']);
   const errors: string[] = [];
-  if (!isCount(r.seq)) errors.push('seq must be a whole number, 0 or more');
-  if (!isIdValue(r.epoch)) errors.push('epoch must be a valid id');
-  const p = r.player;
-  if (!isObj(p) || !isText(p.version) || !versions(p.manifestSchemas) || !versions(p.protocols)) {
-    errors.push('player needs a version and the manifest schemas and protocols it supports');
+  const entries: [string, { version: number; checkedAt: string; staleS?: number }][] = [];
+  for (const [k, v] of Object.entries(c)) {
+    const version = own(v, 'version');
+    const checkedAt = own(v, 'checkedAt');
+    const staleS = own(v, 'staleS');
+    if (!isIdValue(k) || !isCount(version) || !isInstant(checkedAt) || !(staleS === undefined || isStaleS(staleS)))
+      errors.push(`checked: "${k}" must be a source id with a version, checkedAt and, at most, a staleS`);
+    else entries.push([k, { version, checkedAt, ...(staleS === undefined ? {} : { staleS }) }]);
   }
-  const m = r.manifest;
-  const optionalId = (k: string) => own(m, k) === undefined || isManifestId(own(m, k));
-  if (!isObj(m) || !optionalId('active') || !optionalId('fallbackFrom') || !optionalId('lastGood') || !isCount(m.filesMissing))
-    errors.push('manifest needs filesMissing, and active, fallbackFrom and lastGood when there are any, as sha256 ids');
-  errors.push(...displayStatusProblems(r.display));
-  if (!isInstant(r.deviceTime)) errors.push('deviceTime must be an ISO 8601 time');
-  if (!isObj(r.clock) || !isNum(r.clock.offsetMs) || typeof r.clock.trusted !== 'boolean') errors.push('clock needs offsetMs and whether the screen trusts it');
-  // The bound first: a list over it is refused whole, without a problem per entry (bounded work, gh-45).
-  if (Array.isArray(r.playCounts) && r.playCounts.length > MAX_SYNC_PLAY_COUNTS) errors.push(`playCounts holds at most ${MAX_SYNC_PLAY_COUNTS} counts`);
-  else errors.push(...list('play count', r.playCounts, playCountProblems));
-  if (!isObj(r.snapshots)) errors.push('snapshots must map source ids to versions');
-  else errors.push(...sourceMapProblems('snapshots', r.snapshots, 'a version number'));
-  if (r.dataRejected !== undefined) {
-    if (!isObj(r.dataRejected)) errors.push('dataRejected must map source ids to counts');
-    else errors.push(...sourceMapProblems('dataRejected', r.dataRejected, 'a count'));
-  }
-  return errors;
-}
+  // fromEntries defines each key as its own, so a `__proto__` key could never set a prototype, whatever an id may be.
+  return errors.length ? refused(errors) : accepted(Object.fromEntries(entries));
+});
 
 /** `POST /v1/device/sync`, as the screen receives it. */
-export function validateSyncResponse(r: unknown): string[] {
-  if (!isObj(r)) return ['response is not an object'];
-  const errors: string[] = [];
-  if (!isInstant(r.serverTime)) errors.push('serverTime must be an ISO 8601 time');
-  if (!isNum(r.nextSyncS) || r.nextSyncS <= 0) errors.push('nextSyncS must be above 0');
-  if (!isIdValue(r.epoch)) errors.push('epoch must be a valid id');
-  if (!isCount(r.ackSeq)) errors.push('ackSeq must be a whole number, 0 or more');
-  if (r.desiredManifest !== undefined && !isText(r.desiredManifest)) errors.push('desiredManifest must be a manifest id when present');
-  errors.push(...list('snapshot', r.snapshots, validateDataSnapshot));
-  if (r.checked !== undefined) {
-    if (!isObj(r.checked)) errors.push('checked must map source ids to a version and checkedAt');
-    else
-      for (const [k, v] of Object.entries(r.checked))
-        if (!isIdValue(k) || !isCount(own(v, 'version')) || !isInstant(own(v, 'checkedAt')))
-          errors.push(`checked: "${k}" must be a source id with a version and checkedAt`);
-  }
-  if (!isText(r.socketTicket)) errors.push('socketTicket is missing');
-  errors.push(...list('command', r.commands, validateDeviceCommand));
-  return errors;
-}
+export const syncResponseShape = object(
+  {
+    serverTime: is(isInstant, 'serverTime must be an ISO 8601 time'),
+    nextSyncS: is((v): v is number => isNum(v) && v > 0, 'nextSyncS must be above 0'),
+    epoch: is(isIdValue, 'epoch must be a valid id'),
+    ackSeq: is(isCount, 'ackSeq must be a whole number, 0 or more'),
+    desiredManifest: optional(is(isText, 'desiredManifest must be a manifest id when present')),
+    snapshots: listOf('snapshot', dataSnapshotShape),
+    checked: optional(checkedShape),
+    blobs: optional(blobList(MAX_SYNC_RESPONSE_BLOBS)),
+    socketTicket: is(isText, 'socketTicket is missing'),
+    commands: listOf('command', deviceCommandShape),
+  },
+  'response is not an object',
+);
+assertSame<Same<Infer<typeof syncResponseShape>, SyncResponse>>();
+export const validateSyncResponse = (r: unknown) => problemsOf(syncResponseShape, r);
 
 /** A socket message from the server, as the screen receives it. */
-export function validateServerSocketMessage(msg: unknown): string[] {
-  if (!isObj(msg)) return ['message is not an object'];
+export const serverSocketMessageShape = custom<ServerSocketMessage>((msg) => {
+  if (!isObj(msg)) return refused(['message is not an object']);
   switch (msg.type) {
     case 'manifest':
-      return isText(msg.id) ? [] : ['manifest message needs an id'];
-    case 'command':
-      return validateDeviceCommand(msg.command);
+      return isText(msg.id) ? accepted({ type: 'manifest', id: msg.id }) : refused(['manifest message needs an id']);
+    case 'command': {
+      const command = deviceCommandShape.read(msg.command);
+      return command.ok ? accepted({ type: 'command', command: command.value }) : command;
+    }
     case 'revoked':
-      return [];
+      return accepted({ type: 'revoked' });
     default:
-      return ['message type must be manifest, command or revoked'];
+      return refused(['message type must be manifest, command or revoked']);
   }
-}
+});
+export const validateServerSocketMessage = (msg: unknown) => problemsOf(serverSocketMessageShape, msg);
 
 /** A socket message from a screen, as the server receives it. */
-export function validateDeviceSocketMessage(msg: unknown): string[] {
-  if (!isObj(msg)) return ['message is not an object'];
-  if (msg.type !== 'applied') return ['message type must be applied'];
+export const deviceSocketMessageShape = custom<DeviceSocketMessage>((msg) => {
+  if (!isObj(msg)) return refused(['message is not an object']);
+  if (msg.type !== 'applied') return refused(['message type must be applied']);
   const errors = isManifestId(msg.manifest) ? [] : ['applied message needs a sha256 manifest id'];
   if (msg.observedAt !== undefined && !isInstant(msg.observedAt)) errors.push('applied message observedAt must be an ISO 8601 time when present');
-  return errors;
-}
+  if (errors.length) return refused(errors);
+  return accepted({ type: 'applied', manifest: msg.manifest as string, ...(msg.observedAt !== undefined && { observedAt: msg.observedAt as string }) });
+});
+export const validateDeviceSocketMessage = (msg: unknown) => problemsOf(deviceSocketMessageShape, msg);
 
 // ------------------------------------------------------------- preview channel
 
-const isBlob = (v: unknown) => typeof Blob !== 'undefined' && v instanceof Blob;
+const isBlob = (v: unknown): v is Blob => typeof Blob !== 'undefined' && v instanceof Blob;
 
-/** A message from the CMS page, as the preview player receives it (after its origin check). */
-export function validatePreviewHostMessage(msg: unknown): string[] {
+/** The rules of a message from the CMS page beyond its shape. */
+function previewHostMessageRules(msg: unknown): string[] {
   if (!isObj(msg)) return ['message is not an object'];
   if (msg.sfPreview !== PREVIEW_PROTOCOL) return [`preview protocol ${show(msg.sfPreview)} is not ${PREVIEW_PROTOCOL}`];
   if (msg.type !== 'draft') return ['message type must be draft'];
@@ -1100,7 +1673,145 @@ export function validatePreviewHostMessage(msg: unknown): string[] {
   return errors;
 }
 
+/** A message from the CMS page, as the preview player receives it (after its origin check), as declared (#156). */
+export const previewHostMessageShape = checked(
+  previewHostMessageRules,
+  object(
+    {
+      sfPreview: number('sfPreview'),
+      type: literal('draft', 'message type must be draft'),
+      manifest: manifestShape,
+      files: optional(record(is(isBlob, 'is not a Blob'), (k) => `file "${k.slice(0, 12)}"`, 'files must be an object of hash to Blob')),
+      data: optional(listOf('snapshot', dataSnapshotShape)),
+    },
+    'message is not an object',
+  ),
+);
+assertSame<Same<Infer<typeof previewHostMessageShape>, PreviewHostMessage>>();
+/** Check a message from the CMS page. Returns problems; empty means it is valid. */
+export const validatePreviewHostMessage = (msg: unknown): string[] => problemsOf(previewHostMessageShape, msg);
+
 // ------------------------------------------------------------- template bundle
+
+const codePoint = (code: number) => (code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff) ? '�' : String.fromCodePoint(code));
+
+/** CSS whitespace: space, tab and the newlines (CR LF and CR are LF already). U+00A0 is not, though JS's `\s` is. */
+const cssSpace = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f';
+/** A name code point (CSS Syntax 3): an ASCII letter, digit, `_` or `-`, or any non-ASCII. An escape is one too. */
+const nameChar = (c: string) => /[\w-]/.test(c) || c.charCodeAt(0) >= 0x80;
+
+/**
+ * CSS as the browser reads it, for the checks to see what it fetches (#326): from a style's text as the HTML parser
+ * gives it (`bundleScripts`), CSS comments dropped outside strings and url() tokens, a backslash-newline dropped in a
+ * string, and each escape (`\2f `, `\/`) read as its character. An escaped quote is read as no quote at all, so it
+ * neither starts nor ends a string here, as it does not in CSS. A string ends at a newline, as in CSS, and in a string
+ * or an unquoted url() the control characters go (tab, newline and the rest of C0), as the URL parser drops them.
+ *
+ * A url() token is read as CSS Syntax 3 reads one: a name of exactly `url` (any case, escapes read), then `(`, then
+ * CSS whitespace only, and no quote. The name is kept as it is read, four characters at most, so nothing already read
+ * is read again: the whole reading is one pass (review of #438, round 3).
+ */
+export function readCss(text: string): string {
+  let out = '';
+  // In a string: its quote; in an unquoted url(): ')'.
+  let inside = '';
+  // The name being read, lowercased, cut at four characters: only whether it is `url` matters.
+  let name = '';
+  const named = (c: string) => {
+    name = name.length < 4 ? name + c.toLowerCase() : 'long';
+  };
+  const put = (c: string) => {
+    if (!(inside && c.charCodeAt(0) < 0x20)) out += c;
+  };
+  /** Whether, from `j` on, CSS whitespace and then a quote come: `url(` then opens a function, not a url token. */
+  const quoteAfter = (j: number) => {
+    while (cssSpace(text[j])) j += 1;
+    return text[j] === '"' || text[j] === "'";
+  };
+  for (let i = 0; i < text.length; ) {
+    const c = text[i]!;
+    if (!inside && c === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      i = end < 0 ? text.length : end + 2;
+      name = '';
+      continue;
+    }
+    if (c === '\\') {
+      const next = text[i + 1];
+      if (next === undefined) break;
+      if (next === '\n' || next === '\r' || next === '\f') {
+        // In a string, a line continuation: gone. Elsewhere, no escape: the backslash stays, and ends a name.
+        const quoted = inside && inside !== ')';
+        if (!quoted) {
+          out += c;
+          name = '';
+        }
+        i += quoted ? (next === '\r' && text[i + 2] === '\n' ? 3 : 2) : 1;
+        continue;
+      }
+      const hex = /^[0-9a-f]{1,6}/i.exec(text.slice(i + 1, i + 7));
+      const decoded = hex ? codePoint(Number.parseInt(hex[0], 16)) : next;
+      if (!inside) named(decoded);
+      put(decoded === '"' || decoded === "'" ? '�' : decoded);
+      i += 1 + (hex ? hex[0].length : 1);
+      // One whitespace after a hex escape is part of it.
+      if (hex && text[i] === '\r' && text[i + 1] === '\n') i += 2;
+      else if (hex && cssSpace(text[i])) i += 1;
+      continue;
+    }
+    if (!inside && (c === '"' || c === "'")) inside = c;
+    else if (!inside && c === '(' && name === 'url' && !quoteAfter(i + 1)) inside = ')';
+    else if (inside && (c === inside || (inside !== ')' && (c === '\n' || c === '\r' || c === '\f')))) inside = '';
+    if (!inside && nameChar(c)) named(c);
+    else name = '';
+    put(c);
+    i += 1;
+  }
+  return out;
+}
+
+/**
+ * The patterns the styles lint finds a network address with: a quoted string that starts with one, as read (`quoted`)
+ * and as written (`written`, where a quote after a backslash is escaped and starts no string: `"say \"//hi\""`), and
+ * a url() (`url`). `image-set("//x" 1x)` is fetched with no url() around it. A backslash counts as a slash: the URL
+ * parser reads "\" as "/" in an http(s) address (#326); two backslashes or slashes at a string's start are refused even
+ * where they are a path, as no template has a reason to write that. No two quantifiers in one can match the same
+ * characters side by side: each is linear, whatever a bundle holds (review of #438, round 4).
+ */
+export const STYLE_ADDRESS = {
+  quoted: /["']\s*(?:https?:)?[/\\]{2}/i,
+  written: /(?<!\\)["']\s*(?:https?:)?[/\\]{2}/i,
+  url: /url\(\s*(?:["']\s*)?(?:https?:)?[/\\]{2}/i,
+};
+
+const lineEnd = (c: string | undefined) => c === '\n' || c === '\r' || c === '\u2028' || c === '\u2029';
+
+/**
+ * An author's source with its comments taken out, so a note about `fetch` is not a call to it: `/* … *\/` closed, and
+ * `//` to the line's end where no colon is before it (`//` after a colon is a URL, and is kept). An unclosed `/*` is
+ * kept, with what follows. One pass, linear (review of #438, round 4): once no `*\/` is left, none is looked for again.
+ */
+export function withoutComments(text: string): string {
+  let out = '';
+  let closes = true;
+  for (let i = 0; i < text.length; ) {
+    if (closes && text[i] === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      if (end >= 0) {
+        i = end + 2;
+        continue;
+      }
+      closes = false;
+    }
+    if (text[i] === '/' && text[i + 1] === '/' && text[i - 1] !== ':') {
+      while (i < text.length && !lineEnd(text[i])) i += 1;
+      continue;
+    }
+    out += text[i];
+    i += 1;
+  }
+  return out;
+}
 
 /**
  * Lint a built template: the manifest, the forbidden CSS list, the size budget and network
@@ -1110,34 +1821,65 @@ export function validatePreviewHostMessage(msg: unknown): string[] {
  * sandbox with its no-network policy is what keeps a screen safe.
  */
 export function checkTemplateBundle(input: { manifest: unknown; html: string; sources: Record<string, string> }): TemplateCheckReport {
+  try {
+    return checkBundle(input);
+  } catch (err) {
+    // What the checks build is bounded by a few times the bundle, but a bundle far over the size budget can take that
+    // past the longest string the runtime makes: refused with why, never thrown at the server (review of #438, round 3).
+    const problem = `the bundle could not be checked: ${err instanceof Error ? err.message : String(err)}`;
+    return { ok: false, bundleBytes: input.html.length, checks: TEMPLATE_CHECKS.map((check) => ({ check, ok: false, problems: [problem] })), warnings: [] };
+  }
+}
+
+function checkBundle(input: { manifest: unknown; html: string; sources: Record<string, string> }): TemplateCheckReport {
   const { manifest, html, sources } = input;
   const bundleBytes = new TextEncoder().encode(html).byteLength;
   const matches = (rules: { pattern: RegExp; reason: string }[], text: string) => rules.filter((r) => r.pattern.test(text)).map((r) => r.reason);
 
   const manifestProblems = validateTemplateManifest(manifest);
   const protocol = (manifest as Partial<TemplateManifest> | null)?.protocol;
-  if (protocol !== undefined && !SUPPORTED_PROTOCOLS.includes(protocol)) manifestProblems.push(`protocol ${String(protocol)} is not supported`);
+  if (protocol !== undefined && !playsProtocol(THIS_PLAYER, protocol)) manifestProblems.push(`protocol ${String(protocol)} is not supported`);
 
   const network: string[] = [];
   // Protocol-relative too: a stylesheet style.css imports reaches the bundle without the source lint.
-  // In the bundle's styles, any quoted string that is a network address: `image-set("//x" 1x)` is
-  // fetched with no url() around it. Comments go first, a font licence notice's addresses with them.
-  const styles = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]!.replace(/\/\*[\s\S]*?\*\//g, '')).join('\n');
-  if (/\b(?:src|href)\s*=\s*["'](?:https?:)?\/\//i.test(html) || /url\(\s*["']?(?:https?:)?\/\//i.test(html) || /["']\s*(?:https?:)?\/\//i.test(styles))
+  const { quoted: quotedAddress, written: writtenAddress, url: urlAddress } = STYLE_ADDRESS;
+  // Read twice, from the HTML parser's tree (`bundleScripts`): as written, comments that quote an
+  // address left in sight, so a reading out of step with the browser's cannot hide one; and as the
+  // browser reads it (`readCss`): the parser's text of each <style> and style attribute, with CSS
+  // comments, line continuations and escapes undone.
+  const bundle = bundleScripts(html);
+  const blocks = bundle.styles.map((style) => style.written);
+  const asWritten = blocks
+    .map((text) =>
+      text.replace(
+        // An unclosed comment runs to the end, as in CSS: one match, not a scan to the end from each /* (review of #438).
+        /("(?:[^"\\\n\r\f]|\\[\s\S])*"?|'(?:[^'\\\n\r\f]|\\[\s\S])*'?)|\/\*[\s\S]*?(?:\*\/|$)/g,
+        (c, string?: string) => string ?? (writtenAddress.test(c) ? c : ''),
+      ),
+    )
+    .join('\n');
+  const asRead = [...bundle.styles.map((style) => style.text), ...bundle.styleAttributes].map(readCss);
+  if (
+    /\b(?:src|href)\s*=\s*["'](?:https?:)?\/\//i.test(html) ||
+    urlAddress.test(html) ||
+    writtenAddress.test(asWritten) ||
+    // A comment marker at an address's own slash, where the two readings part: refused as written.
+    /["']\s*(?:https?:[/\\]+|[/\\]{2,})\*/i.test(blocks.join('\n')) ||
+    asRead.some((text) => quotedAddress.test(text) || urlAddress.test(text))
+  )
     network.push('a template may not load anything from the network');
 
   // Comments are stripped first, so a note about `fetch` is not a call to it. `//` after a colon is a URL, and is kept.
-  const authored = Object.values(sources)
-    .map((text) => text.replace(/\/\*[\s\S]*?\*\/|(?<!:)\/\/.*$/gm, ''))
-    .join('\n');
+  const authored = Object.values(sources).map(withoutComments).join('\n');
   const source = Object.keys(sources).length ? matches(FORBIDDEN_TEMPLATE_CODE, authored) : ['no source files were given'];
 
   // What the player runs (`containedFrames` in packages/player-core), read as the browser reads it.
-  const scripts = bundleScripts(html).scripts.flatMap((s) => (s.problem ? [s.problem] : []));
+  const scripts = bundle.scripts.flatMap((s) => (s.problem ? [s.problem] : []));
 
   const checks: TemplateCheckReport['checks'] = [
     { check: 'manifest', ok: !manifestProblems.length, problems: manifestProblems },
-    { check: 'forbidden-css', ok: true, problems: matches(FORBIDDEN_CSS, html) },
+    // As written and as read, so an escaped letter (`@\69mport`) hides nothing (#326).
+    { check: 'forbidden-css', ok: true, problems: matches(FORBIDDEN_CSS, [html, ...asRead].join('\n')) },
     {
       check: 'size',
       ok: true,
@@ -1164,8 +1906,8 @@ function renderProblems(r: unknown): string[] {
   return errors;
 }
 
-/** A runtime check's report, as the server receives it from the check Worker. */
-export function validateTemplateRuntimeReport(r: unknown): string[] {
+/** The rules of a runtime check's report beyond its shape. */
+function templateRuntimeReportRules(r: unknown): string[] {
   if (!isObj(r)) return ['report is not an object'];
   const errors: string[] = [];
   if (typeof r.ok !== 'boolean') errors.push('ok must be true or false');
@@ -1176,3 +1918,34 @@ export function validateTemplateRuntimeReport(r: unknown): string[] {
   if (!isMs(own(r.cost, 'startMs')) || !isMs(own(r.cost, 'checkMs'))) errors.push('cost must have startMs and checkMs');
   return errors;
 }
+
+const time = (what: string) => is((v): v is number => isMs(v), `${what} must be a time in ms`);
+const renderShape = object(
+  {
+    orientation: oneOf(['landscape', 'portrait'], 'orientation must be landscape or portrait'),
+    viewport: object({ width: number('width'), height: number('height') }, 'viewport must be an object'),
+    readyMs: is((v): v is number | null => v === null || isMs(v), 'readyMs must be a time in ms or null'),
+    frames: custom<{ count: number; longestMs: number } | null>((v) =>
+      v === null ? accepted(null) : object({ count: number('count'), longestMs: time('longestMs') }, 'frames must be null or an object').read(v),
+    ),
+  },
+  'is not an object',
+);
+
+/** A runtime check's report, as the server receives it from the check Worker, as declared (#156). */
+export const templateRuntimeReportShape = checked(
+  templateRuntimeReportRules,
+  object(
+    {
+      ok: is(isBool, 'ok must be true or false'),
+      problems: texts('problems'),
+      runner: object({ image: text('image'), browser: text('browser') }, 'runner must be an object'),
+      renders: listOf('render', renderShape),
+      cost: object({ startMs: time('startMs'), checkMs: time('checkMs') }, 'cost must be an object'),
+    },
+    'report is not an object',
+  ),
+);
+assertSame<Same<Infer<typeof templateRuntimeReportShape>, TemplateRuntimeReport>>();
+/** Check a runtime check's report. Returns problems; empty means it is valid. */
+export const validateTemplateRuntimeReport = (r: unknown): string[] => problemsOf(templateRuntimeReportShape, r);

@@ -45,10 +45,10 @@ const GLYPHS: Record<Sky | 'moon' | 'night-partly', string> = {
 
 /** Parts a look does not draw, removed rather than hidden: no text is left for a screen reader or for the layout to make room for. */
 const UNUSED: Record<Look, string> = {
-  pop: '.seconds, .clock-rule, .weather-rule, .eyebrow, .live, .cond, .sky, .ap',
-  poster: '.seconds, .weather-rule, .glyph, .place, .live, .price-in, .lo, .ap',
+  pop: '.clock-rule, .weather-rule, .forecast-rule, .eyebrow, .cond, .sky, .ap',
+  poster: '.weather-rule, .glyph, .place, .price-in, .lo, .ap',
   night: '.clock-rule, .weather-rule, .forecast-rule, .eyebrow, .now .cond, .chip .glyph, .sky, .lo, .ap',
-  corporate: '.seconds, .clock-rule, .forecast-rule, .eyebrow, .live, .cond, .sky',
+  corporate: '.clock-rule, .forecast-rule, .eyebrow, .cond, .sky',
 };
 
 /** The date over or under the clock, in each look's words. */
@@ -76,11 +76,10 @@ defineTemplate({
   async prepare(ctx) {
     const { data, assets, root } = ctx;
     const look = LOOKS.find((l) => l === data.look)!;
-    const stage = document.querySelector<HTMLElement>('.stage')!;
     // Unpainted until play: a frame that paints the photo, on a layer of its own while it drifts,
     // has it decoded for the screen first, and the SDK's decode before ready then waits behind that
-    // one (photo-promo, #168; Announcement, #197). Every look's panel comes in from nothing (Poster's
-    // under its ink block), so no frame shows the change.
+    // one (photo-promo, #168; Announcement, #197). Every look's panel comes in from nothing, so no
+    // frame shows the change.
     const photo = document.querySelector<HTMLElement>('.photo')!;
     photo.style.visibility = 'hidden';
 
@@ -106,8 +105,6 @@ defineTemplate({
         showPrice: Boolean(data.price),
       },
     });
-    // A reset while the look's faces loaded has put the next init's document in place: leave it be.
-    if (!stage.isConnected) return;
 
     const drop = (sel: string) => {
       for (const el of document.querySelectorAll(sel)) el.remove();
@@ -135,7 +132,7 @@ defineTemplate({
     const line = {
       pop: `${words} · H\u00a0${hi}° L\u00a0${lo}°`,
       poster: [`High\u00a0${hi}°`, `low\u00a0${lo}°`, city].filter(Boolean).join(' · '),
-      night: `${words} · h${hi}\u00a0l${lo}`,
+      night: `${words} · H${hi}\u00a0L${lo}`,
       corporate: `${words} · High\u00a0${hi}° · Low\u00a0${lo}°`,
     }[look];
     document.querySelector('.wline')?.replaceChildren(line);
@@ -178,15 +175,8 @@ defineTemplate({
     if (caption && title) fitTitle(caption, title);
     inkCards();
   },
-  play({ root }) {
+  play() {
     document.querySelector<HTMLElement>('.photo')!.style.visibility = '';
-    // The colon blinks with the seconds and Night's bar fills with the minute: each animation put at
-    // the screen's time once, then left to the compositor. Held still (portrait), the bar shows the
-    // second the spot came on.
-    const t = clockNow().getTime();
-    root.style.setProperty('--if-second', String((t % 60_000) / 60_000));
-    for (const a of document.querySelector('.tick-bar')?.getAnimations() ?? []) a.currentTime = t % 60_000;
-    for (const el of document.querySelectorAll('.colon')) for (const a of el.getAnimations()) a.currentTime = t % 1000;
     // Wake on each second boundary; text only changes when the minute does.
     const tick = () => {
       show?.(clockNow());
@@ -245,7 +235,7 @@ function forecast(ctx: TemplateContext, look: Look, days: Element): void {
 /**
  * A figure (the clock, the temperature) at its look's size, or smaller where it would run past its
  * box. Measures subpixel child edges as well as `scrollWidth` and leaves a small margin when
- * shrinking so tighter Linux font metrics never clip against `.lk-mask`.
+ * shrinking so tighter Linux font metrics never clip against its box.
  */
 function shrink(el: HTMLElement): void {
   for (let i = 0; i < 6; i++) {

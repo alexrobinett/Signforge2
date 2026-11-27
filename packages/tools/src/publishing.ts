@@ -15,7 +15,9 @@
  * the default) and its choices; the compiler picks one (`chooseBrandKit`) and freezes it into the
  * manifest. Kits have no drafts: a publish takes each kit as it is then.
  */
-import { brandFont, compileScreen, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
+import type { SampleFields } from '@signforge/contract';
+import { brandFont, compileScreen, targetIdOf, type CompileInput, type CompileOptions, type TargetedEntry } from '@signforge/compiler';
+import { resolveGroups } from './memberships';
 import { assetFile, compileProbe, spotFromDraft, type DraftReads, type Probe, type SpotDraft } from '@signforge/compiler/draft';
 import {
   templateKey,
@@ -28,6 +30,7 @@ import {
   type Transition,
 } from '@signforge/contract';
 import {
+  brandStateOf,
   draftChanged,
   published,
   type Asset,
@@ -47,14 +50,20 @@ import {
 import { renditionView } from './assets';
 import { kitColors } from './brand';
 import { ended } from './schedule';
+import { z } from 'zod';
 import { ToolError } from './tool';
 
 type Orientation = Screen['orientation'];
 
 export interface OrgGraph {
   screens: Screen[];
-  /** Screen id to the ids of its groups. */
+  /** Each screen's groups, list and smart, as read (`resolveGroups`, #186). */
   groupsOf: Map<string, string[]>;
+  /** The org's smart groups' rules, and its screens' labels (none read without a rule), as read: what a smart group's takeover is held to. */
+  rules: { id: string; selectorJson: string }[];
+  labels: { screenId: string; key: string; value: string }[];
+  /** Every group, by id with its name, as read: what a publish records each one reached (#187). */
+  groups: { id: string; name: string }[];
   /** Template versions spots may play (approved or retired), and draft ones, by version id. */
   templateVersions: Map<string, { key: string; manifest: TemplateManifest; html: string; size: number; status: TemplateVersion['status'] }>;
   assets: Map<string, { asset: Asset; renditions: AssetRendition[] }>;
@@ -70,6 +79,8 @@ export interface OrgGraph {
   brandAssignments: BrandAssignment[];
   /** The org's publish revision as read with the rest: a publish commits only if it is still this. */
   publishRevision: number;
+  /** The settings' version as read: a default a publish sets commits only if no one set one since (#243). */
+  settingsVersion: number;
   /** The org's time zone for new screens, if it has one: the probe screen's. */
   timezone: string | null;
 }
@@ -78,9 +89,11 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
   // The publish revision first, before any content: a publish that commits after this read moves
   // it on, so whatever it changed cannot be in what is read below without failing the guard.
   const settings = await org.settings.get();
-  const [screens, members, versions, assets, renditions, dataSources, spots, [playlists, items], entries] = await Promise.all([
+  const [screens, { members, rules, labels, groups }, versions, assets, renditions, dataSources, spots, [playlists, items], entries] = await Promise.all([
     org.screens.list(),
-    org.screenGroups.allMembers(),
+    // A smart group's members are the screens its rule matches as labelled now (#186): the labels are read only when
+    // the org has one, so an org without costs no query more.
+    org.screenGroups.membership().then(async (m) => ({ ...m, labels: m.rules.length ? await org.screens.labels.list() : [] })),
     org.templates.versions.list(),
     org.assets.list(),
     org.assets.renditions.list(),
@@ -92,8 +105,7 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     org.scheduleEntries.list(),
   ]);
   const [brandKits, brandAssignments] = await Promise.all([org.brandKits.list(), org.brandKits.assignments.list()]);
-  const groupsOf = new Map<string, string[]>();
-  for (const m of members) groupsOf.set(m.screenId, [...(groupsOf.get(m.screenId) ?? []), m.groupId]);
+  const groupsOf = resolveGroups(screens, labels, rules, members);
   const templateVersions: OrgGraph['templateVersions'] = new Map();
   for (const v of versions) {
     const manifest = JSON.parse(v.manifestJson) as TemplateManifest;
@@ -105,6 +117,9 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
   return {
     screens,
     groupsOf,
+    rules,
+    labels,
+    groups,
     templateVersions,
     assets: new Map(assets.map((a) => [a.id, { asset: a, renditions: byAsset.get(a.id) ?? [] }])),
     // The feed URL stays on the server; a screen learns the id and refresh rate.
@@ -117,6 +132,8 @@ export async function loadOrg(org: OrgScope): Promise<OrgGraph> {
     brandKits: new Map(brandKits.map((k) => [k.id, k])),
     brandAssignments,
     publishRevision: settings?.publishRevision ?? 0,
+    // An org with no settings row is at version 1 (`settings.stage.set`).
+    settingsVersion: settings?.rowVersion ?? 1,
     timezone: settings?.timezone ?? null,
   };
 }
@@ -224,14 +241,17 @@ const toPlaylist = (p: PublishedPlaylist): Playlist => ({
   items: p.items.map((spot) => ({ spot })),
 });
 
+/** A row as the Screen schedule takes it: sorted by when it was published. */
 function toEntry(e: ScheduleEntryRow): TargetedEntry {
   const days = json<number[] | null>(e.daysJson, null);
+  const targetId = targetIdOf(e);
   return {
     id: e.id,
+    order: e.publishedAt ?? 0,
     playlist: e.playlistId,
     priority: e.priority,
     target: e.target,
-    ...(e.target === 'group' ? { targetId: e.groupId ?? undefined } : e.target === 'screen' ? { targetId: e.screenId ?? undefined } : {}),
+    ...(targetId === undefined ? {} : { targetId }),
     ...(e.startDate ? { startDate: e.startDate } : {}),
     ...(e.endDate ? { endDate: e.endDate } : {}),
     ...(days ? { days } : {}),
@@ -260,14 +280,11 @@ function screenInput(graph: OrgGraph, screen: Screen): { input: CompileInput; un
     const pub = published(row);
     return pub ? [toPlaylist(pub)] : [];
   });
-  // In publish order, oldest first: of two otherwise tied entries a screen plays the later (the contract's ScheduleEntry).
-  const schedule = graph.entries
-    .flatMap((row) => {
-      const pub = published(row);
-      return pub ? [pub] : [];
-    })
-    .sort((a, b) => (a.publishedAt ?? 0) - (b.publishedAt ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .map(toEntry);
+  // Ordered, and kept to what reaches the screen, by the compiler's Screen schedule.
+  const schedule = graph.entries.flatMap((row) => {
+    const pub = published(row);
+    return pub ? [toEntry(pub)] : [];
+  });
   const displayHours = screen.displayHoursJson ? JSON.parse(screen.displayHoursJson) : undefined;
   const { brand, unavailable: unavailableKits } = brandInput(graph, screen, files);
   return {
@@ -370,6 +387,7 @@ export async function promoteDrafts(
   opts: CompileOptions,
   pins?: ReadonlyMap<string, number>,
   end: ReadonlySet<string> = new Set(),
+  exact = false,
 ): Promise<{ graph: OrgGraph; writes: Write[]; removals: Write[]; drafts: DraftReport }> {
   const writes: Write[] = [];
   const removals: Write[] = [];
@@ -449,7 +467,8 @@ export async function promoteDrafts(
 
   const entries: ScheduleEntryRow[] = [];
   for (const row of graph.entries) {
-    if (ended(row, opts.now.getTime())) {
+    // An approved request takes away only what it pins (`exact`): an ended takeover it does not pin waits for another publish.
+    if (ended(row, opts.now.getTime()) && (!exact || pins?.has(pinKey('schedule_entry', row.id)))) {
       removals.push(...org.scheduleEntries.stage.remove(row).writes);
       drafts.removed.push({ kind: 'schedule_entry', id: row.id });
       continue;
@@ -505,6 +524,38 @@ export interface DraftPin {
 const pinKey = (kind: DraftKind, id: string) => `${kind}:${id}`;
 
 /**
+ * A person's word that a spot may go live with sample text (#360): the spot, the version they were
+ * shown, and the fields named to them. It covers that version and those fields only.
+ */
+export interface SampleAck {
+  spotId: string;
+  version: number;
+  fields: string[];
+}
+
+/** What a publish refused for sample text names (#360): each spot, at its version, and its fields still holding the sample. */
+const sampleRefusal = z.object({ spots: z.array(z.object({ id: z.string(), name: z.string(), version: z.number(), fields: z.array(z.string()) })) });
+
+/**
+ * A publish worked out as `publishOrg` works it out, writing nothing, for a person to see before they
+ * press (the agent drawer's publish card, #351; the approvals queue, #115): the spots it would refuse
+ * for their template's sample text are named, and it is worked out again acknowledging exactly those,
+ * as the person's press does. Any other refusal is thrown.
+ */
+export async function dryPublish(org: OrgScope, opts: CompileOptions, pins?: readonly DraftPin[], exact = false, loaded?: OrgGraph) {
+  // The org read once, for the first run and the one acknowledging sample text alike: nothing is written between them.
+  const graph = loaded ?? (await loadOrg(org));
+  const run = (allow: SampleAck[]) => publishOrg(org, opts, pins, [], exact, allow, [], graph);
+  try {
+    return { result: await run([]), samples: [] };
+  } catch (err) {
+    if (!(err instanceof ToolError) || err.code !== 'sample_text') throw err;
+    const { spots } = sampleRefusal.parse(err.details);
+    return { result: await run(spots.map((x) => ({ spotId: x.id, version: x.version, fields: x.fields }))), samples: spots };
+  }
+}
+
+/**
  * Promote drafts, then compile every screen from the published graph. A screen that cannot be
  * compiled is reported and the others still publish. Stages writes; the caller commits them with
  * its switch of each screen's desired manifest, in one batch. The writes put the publish in order
@@ -513,19 +564,49 @@ const pinKey = (kind: DraftKind, id: string) => `${kind}:${id}`;
  *
  * With `pins`, only those drafts are promoted, and only at the version pinned: one that changed or
  * was deleted since is refused (`conflict`, details `{ id, version }`, the version now, 0 if gone).
- * `end` names schedule entries this publish deletes, whatever the pins (`end_takeover`). A takeover
- * that has ended is in no screen's manifest. `revision` is the org's publish revision as read; the
+ * `end` names schedule entries this publish deletes, whatever the pins (`takeover`'s end). A takeover
+ * that has ended is in no screen's manifest, and goes with the publish; with `exact` (an approved
+ * request) only if it is pinned, as nothing else is touched. `revision` is the org's publish revision as read; the
  * publish moves it to the next. `read` is the org as read, and `graph` as it will be once the
  * writes commit, its drafts promoted. `removals` delete schedule entries: commit them with the
- * rest, and also when no draft was promoted and no screen changed, which makes no publish.
+ * rest, and also when no draft was promoted and no screen changed, which makes no publish. `added`:
+ * schedule entries the caller staged before these writes in its batch, read as if they were there.
+ * `loaded`: the org as the caller read it (`loadOrg`), for a dry run that needs it twice; else read here.
  */
 export async function publishOrg(
   org: OrgScope,
   opts: CompileOptions,
   pins?: readonly DraftPin[],
   end: readonly string[] = [],
-): Promise<{ writes: Write[]; removals: Write[]; drafts: DraftReport; screens: ScreenPublish[]; revision: number; read: OrgGraph; graph: OrgGraph }> {
-  const read = await loadOrg(org);
+  exact = false,
+  allowSample: readonly SampleAck[] = [],
+  added: readonly ScheduleEntryRow[] = [],
+  loaded?: OrgGraph,
+): Promise<{
+  writes: Write[];
+  removals: Write[];
+  /** A pin's guard that it is still the version pinned, for the ones not promoted: committed beside a write, never alone (`runPublish`). */
+  pinGuards: Write[];
+  /**
+   * What is kept beside each spot and playlist this publish covers (#116), cleared: every one it pins, or
+   * with no pins every one, changed or not, but those it held back. Commit them whatever else is, as `removals`.
+   */
+  keptCleared: Write[];
+  /** The org's brand state as this publish read it (`brandStateOf`): what its manifests were compiled with. */
+  brand: string;
+  drafts: DraftReport;
+  screens: ScreenPublish[];
+  revision: number;
+  read: OrgGraph;
+  graph: OrgGraph;
+  madeDefault: { id: string; name: string } | null;
+}> {
+  // Entries staged earlier in the same batch (`takeover`'s publish): read as if they were there, so the publish promotes them with the rest.
+  const base = loaded ?? (await loadOrg(org));
+  // Which drafts have one kept beside them (#116), read with the org and before anything is compiled: each one this publish
+  // clears is guarded below at the version this read has, so a draft written after it (and its kept draft) is never cleared.
+  const kept = await org.draftSnapshots.kept();
+  const read = added.length ? { ...base, entries: [...base.entries, ...added] } : base;
   const pinned = pins && new Map(pins.map((p) => [pinKey(p.kind, p.id), p.version]));
   if (pins) {
     const rows: Record<DraftKind, DraftRow[]> = { spot: read.spots, playlist: read.playlists, schedule_entry: read.entries };
@@ -539,8 +620,45 @@ export async function publishOrg(
       }
     }
   }
-  const { graph, writes: promotions, removals, drafts } = await promoteDrafts(org, read, opts, pinned, new Set(end));
+  const promoted = await promoteDrafts(org, read, opts, pinned, new Set(end), exact);
+  const { writes: promotions, removals, drafts } = promoted;
+  // A spot this would put live with its template's sample copy untouched (#360) refuses the publish,
+  // before any screen is compiled, unless a person was shown that version and those fields.
+  const sample = drafts.promoted.flatMap((p) => {
+    const row = p.kind === 'spot' ? read.spots.find((r) => r.id === p.id) : undefined;
+    const kept: SampleFields | null = row?.sampleFieldsJson ? JSON.parse(row.sampleFieldsJson) : null;
+    if (!row || !kept) return [];
+    const fields = [...kept.texts, ...Object.keys(kept.lists)];
+    const acked = allowSample.some((a) => a.spotId === row.id && a.version === row.rowVersion && fields.every((f) => a.fields.includes(f)));
+    return acked ? [] : [{ id: row.id, name: row.name, version: row.rowVersion, fields }];
+  });
+  if (sample.length)
+    throw new ToolError(
+      'sample_text',
+      `still holding the template's sample text: ${sample.map((s) => `spot ${s.name} (${s.id}): ${s.fields.join(', ')}`).join('; ')}. Replace it, or have a person publish it anyway`,
+      { spots: sample },
+    );
   const writes = [...org.publishes.stage.advance(read.publishRevision).writes, ...promotions];
+  // A pin that needs no promotion (live as it is) or is held is still pinned at its version: an edit
+  // of it that lands before the batch fails it, as one of a promoted pin does, whenever the batch writes anything.
+  const pinGuards: Write[] = [];
+  if (pins) {
+    const acted = new Set([...drafts.promoted, ...drafts.removed].map((d) => pinKey(d.kind, d.id)));
+    for (const p of pins) {
+      if (acted.has(pinKey(p.kind, p.id))) continue;
+      if (p.kind === 'spot') pinGuards.push(...org.spots.stage.unchanged(read.spots.find((r) => r.id === p.id)!).writes);
+      if (p.kind === 'playlist') pinGuards.push(...org.playlists.stage.unchanged(read.playlists.find((r) => r.id === p.id)!).writes);
+      if (p.kind === 'schedule_entry') pinGuards.push(...org.scheduleEntries.stage.unchanged(read.entries.find((r) => r.id === p.id)!).writes);
+    }
+  }
+  const brand = brandStateOf([...read.brandKits.values()], read.brandAssignments);
+  // With no default playlist no screen can be compiled, and a new org's first schedule entry would
+  // reach none (#243): one on every screen at all hours makes its playlist the default, in the same batch.
+  // Guarded by the settings' version as read: a default set by hand since (set_default_playlist moves
+  // no publish revision) fails the batch, and the publish runs again from a fresh read, which finds it.
+  const madeDefault = read.defaultPlaylist ? null : firstDefault(promoted.graph, drafts);
+  if (madeDefault) writes.push(...(await org.settings.stage.set({ defaultPlaylistId: madeDefault.id }, read.settingsVersion)).writes);
+  const graph = madeDefault ? { ...promoted.graph, defaultPlaylist: madeDefault.id } : promoted.graph;
   // A takeover whose published version has ended plays nowhere again, though its draft may run on.
   const now = opts.now.getTime();
   const compiled = { ...graph, entries: graph.entries.filter((r) => (published(r)?.endsAt ?? Number.POSITIVE_INFINITY) > now) };
@@ -564,5 +682,101 @@ export async function publishOrg(
     const problems = [...reasons, ...kitReasons, ...result.problems];
     screens.push(result.manifest ? { screenId: screen.id, current, manifest: result.manifest, problems } : { screenId: screen.id, current, problems });
   }
-  return { writes, removals, drafts, screens, revision: read.publishRevision, read, graph };
+  // A draft it covers is no longer an agent's proposal, though it needed no promotion (published as it is, or put back as
+  // published): every one it pins, or with no pins every one, but those it held back; only those in this publish's read with
+  // one kept, so a publish that changes nothing still writes nothing. Each is held to the version read: by its promotion, by
+  // its pin's guard, or else by a guard of its own here, so an edit landing before the batch (an agent's new proposal, or a
+  // person's draft kept anew) fails it and the publish runs again from a fresh read (review of #410).
+  const held = new Set(drafts.held.map((h) => pinKey(h.kind, h.id)));
+  const guarded = new Set([...drafts.promoted.map((d) => pinKey(d.kind, d.id)), ...(pinned?.keys() ?? [])]);
+  const keptCleared = kept.flatMap((k) => {
+    const key = pinKey(k.kind, k.id);
+    if ((pinned && !pinned.has(key)) || held.has(key)) return [];
+    const spot = k.kind === 'spot' ? read.spots.find((r) => r.id === k.id) : undefined;
+    const playlist = k.kind === 'playlist' ? read.playlists.find((r) => r.id === k.id) : undefined;
+    if (!spot && !playlist) return [];
+    const guard = guarded.has(key) ? [] : spot ? org.spots.stage.unchanged(spot).writes : playlist ? org.playlists.stage.unchanged(playlist).writes : [];
+    return [...guard, ...org.draftSnapshots.stage.clear(k.kind, k.id).writes];
+  });
+  return { writes, removals, pinGuards, keptCleared, brand, drafts, screens, revision: read.publishRevision, read, graph, madeDefault };
+}
+
+/** Whether an entry plays on every screen at all hours, always: what a default playlist does. */
+function everywhereAlways(e: ScheduleEntryRow): boolean {
+  const days: unknown = e.daysJson ? JSON.parse(e.daysJson) : null;
+  const everyDay = days === null || (Array.isArray(days) && new Set(days).size === 7);
+  return e.target === 'org' && everyDay && !e.fromTime && !e.toTime && !e.startDate && !e.endDate && e.startsAt === null && e.endsAt === null;
+}
+
+/**
+ * The default an org with none gets from a publish: the playlist of the regular schedule entries it
+ * made live that play on every screen at all hours, if they all play one, published. Owner decision
+ * on #243: a takeover or a narrower entry never sets it (the CMS asks for one instead); nor do
+ * several such playlists, which would be a guess.
+ */
+function firstDefault(graph: OrgGraph, drafts: DraftReport): { id: string; name: string } | null {
+  const made = new Set(drafts.promoted.filter((d) => d.kind === 'schedule_entry').map((d) => d.id));
+  const playlists = new Set(graph.entries.filter((e) => made.has(e.id) && everywhereAlways(e)).map((e) => e.playlistId));
+  const [only] = playlists;
+  if (playlists.size !== 1 || only === undefined) return null;
+  const row = graph.playlists.find((p) => p.id === only);
+  const live = row && published(row);
+  return live ? { id: only, name: live.name } : null;
+}
+
+/** Whom one group reached at a publish (#187): its screens as resolved then, a smart group's by its rule. */
+export interface GroupReach {
+  groupId: string;
+  name: string;
+  rule: boolean;
+  screenIds: string[];
+}
+
+/** `publishes.targets_json` as stored: each screen id once, each group's members as indexes into them. */
+interface TargetsRecord {
+  screens: string[];
+  groups: { id: string; name: string; rule: boolean; members: number[] }[];
+}
+
+/** Every group's members in `graph`, as a publish records them (`publishes.targets_json`), groups and screens by id. */
+export function recordTargets(graph: Pick<OrgGraph, 'groups' | 'groupsOf' | 'rules'>): string {
+  const screens = [...graph.groupsOf.keys()].toSorted();
+  const at = new Map(screens.map((id, i) => [id, i]));
+  const ruled = new Set(graph.rules.map((r) => r.id));
+  const record: TargetsRecord = {
+    screens,
+    groups: graph.groups
+      .toSorted((a, b) => (a.id < b.id ? -1 : 1))
+      .map((g) => ({
+        id: g.id,
+        name: g.name,
+        rule: ruled.has(g.id),
+        members: screens.flatMap((id) => (graph.groupsOf.get(id)?.includes(g.id) ? [at.get(id)!] : [])),
+      })),
+  };
+  return JSON.stringify(record);
+}
+
+/** A stored record (`recordTargets`) read back, each group with its screens' ids, by name. */
+export function readTargets(json: string): GroupReach[] {
+  const record: TargetsRecord = JSON.parse(json);
+  return record.groups
+    .map((g) => ({ groupId: g.id, name: g.name, rule: g.rule, screenIds: g.members.map((i) => record.screens[i]!) }))
+    .toSorted((a, b) => a.name.localeCompare(b.name) || (a.groupId < b.groupId ? -1 : 1));
+}
+
+/**
+ * Each group's joins and leaves in `graph` against a publish's record of it, of the screens in `moving` only (#187): a
+ * move no screen plays differently is not news. A group deleted since is left by all it had. Names as `graph` has them.
+ */
+export function groupMoves(before: readonly GroupReach[], graph: Pick<OrgGraph, 'groups' | 'groupsOf'>, moving: ReadonlySet<string>) {
+  const names = new Map([...before.map((g) => [g.groupId, g.name] as const), ...graph.groups.map((g) => [g.id, g.name] as const)]);
+  const ids = [...new Set([...graph.groups.map((g) => g.id), ...before.map((g) => g.groupId)])];
+  return ids.flatMap((id) => {
+    const members = new Set([...graph.groupsOf].flatMap(([screen, gs]) => (gs.includes(id) ? [screen] : [])));
+    const had = new Set(before.find((x) => x.groupId === id)?.screenIds);
+    const joined = [...members].filter((x) => !had.has(x) && moving.has(x)).toSorted();
+    const left = [...had].filter((x) => !members.has(x) && moving.has(x)).toSorted();
+    return joined.length || left.length ? [{ groupId: id, name: names.get(id) ?? id, joined, left }] : [];
+  });
 }

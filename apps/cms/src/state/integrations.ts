@@ -10,7 +10,7 @@ import { connectionKeys } from '~/queries/integrations';
 import { dataSourceKeys } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
-/** A new calendar's look-ahead, as `create_data_source` defaults it. */
+/** A new calendar's look-ahead, as `save_data_source` defaults it. */
 const DEFAULT_HORIZON_DAYS = 30;
 
 /** What the add form makes: feeds by address. Weather is made from a place, in the spot editor (#79). */
@@ -69,7 +69,19 @@ export interface IntegrationsSlice {
   askToDisconnect: (connection: ConnectionView | null) => void;
   /** Disconnects the connection being confirmed. */
   disconnect: (orgId: string) => Promise<void>;
+  /**
+   * A dialog closed (its `onCloseAutoFocus`): focus goes back to what opened it while that can take it;
+   * else, from a confirm over the Sources dialog, to that dialog (its deleted row's button is gone, or
+   * disabled while the delete runs); else to the page's main region (a fixed source's alert is gone).
+   * These dialogs have no trigger for Radix to return to.
+   */
+  focusBack: (dialog: OpenedDialog, e: Event) => void;
 }
+
+type OpenedDialog = 'sources' | 'delete' | 'disconnect';
+
+/** The Sources dialog's element id: where focus goes from a confirm over it once its opener is gone. */
+export const SOURCES_DIALOG = 'sources-dialog';
 
 const initialNewSource: NewSource = { name: '', feedUrl: '', horizonDays: DEFAULT_HORIZON_DAYS };
 
@@ -110,10 +122,27 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
     }
   }
 
+  /** What had focus as each dialog opened: outside state, nothing renders it. */
+  const openers = new Map<OpenedDialog, Element | null>();
+  const opened = (dialog: OpenedDialog, open: boolean) => {
+    if (open) openers.set(dialog, document.activeElement);
+  };
+
   return {
     integrations: initial,
 
-    openSources: (dialog, open = {}) => integrations(() => ({ ...initial, dialog, adding: open.adding ?? false, editing: open.editing ?? null })),
+    focusBack(dialog, e) {
+      e.preventDefault();
+      const el = openers.get(dialog);
+      const usable = el instanceof HTMLElement && el.isConnected && el !== document.body && !el.matches(':disabled');
+      const sources = dialog !== 'sources' && get().integrations.dialog !== null ? document.getElementById(SOURCES_DIALOG) : null;
+      (usable ? el : (sources ?? document.getElementById('main')))?.focus();
+    },
+
+    openSources: (dialog, open = {}) => {
+      opened('sources', dialog !== null);
+      integrations(() => ({ ...initial, dialog, adding: open.adding ?? false, editing: open.editing ?? null }));
+    },
 
     openAddSource: (adding) => integrations((s) => ({ ...s, adding, editing: null, newSource: initialNewSource, error: null })),
 
@@ -123,7 +152,7 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
       attempt(async () => {
         const { name, feedUrl, horizonDays } = get().integrations.newSource;
         const url = feedUrl.trim();
-        await callTool('create_data_source', {
+        await callTool('save_data_source', {
           // Never the address itself: a private calendar's is a secret, and the name is shown.
           name: name.trim() || (URL.canParse(url) ? new URL(url).hostname : 'Feed'),
           format,
@@ -142,7 +171,7 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
     changeSourceUrl: (orgId, source) =>
       attempt(
         async () => {
-          await callTool('update_data_source', { dataSourceId: source.id, feedUrl: get().integrations.feedUrl.trim(), ifVersion: source.version });
+          await callTool('save_data_source', { dataSourceId: source.id, feedUrl: get().integrations.feedUrl.trim(), ifVersion: source.version });
           await refresh(orgId);
           integrations((s) => ({ ...s, editing: null, feedUrl: '', pending: false }));
         },
@@ -153,7 +182,7 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
       integrations((s) => ({ ...s, settingPhotos: { id: source.id, photos } }));
       await attempt(
         async () => {
-          await callTool('update_data_source', { dataSourceId: source.id, photos, ifVersion: source.version });
+          await callTool('save_data_source', { dataSourceId: source.id, photos, ifVersion: source.version });
           await refresh(orgId);
           integrations((s) => ({ ...s, pending: false }));
         },
@@ -162,14 +191,17 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
       integrations((s) => ({ ...s, settingPhotos: null }));
     },
 
-    askToDeleteSource: (deleting) => integrations((s) => ({ ...s, deleting, error: null })),
+    askToDeleteSource: (deleting) => {
+      opened('delete', deleting !== null);
+      integrations((s) => ({ ...s, deleting, error: null }));
+    },
 
     async deleteSource(orgId) {
       const source = get().integrations.deleting;
       if (!source) return;
       await attempt(
         async () => {
-          await callTool('delete_data_source', { dataSourceId: source.id });
+          await callTool('delete', { type: 'data_source', id: source.id });
           await refresh(orgId);
           integrations((s) => ({ ...s, deleting: null, pending: false }));
         },
@@ -186,7 +218,10 @@ export const createIntegrationsSlice: SliceCreator<IntegrationsSlice> = (set, ge
       }
     },
 
-    askToDisconnect: (disconnecting) => integrations((s) => ({ ...s, disconnecting, connectError: null })),
+    askToDisconnect: (disconnecting) => {
+      opened('disconnect', disconnecting !== null);
+      integrations((s) => ({ ...s, disconnecting, connectError: null }));
+    },
 
     async disconnect(orgId) {
       const connection = get().integrations.disconnecting;

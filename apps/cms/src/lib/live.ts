@@ -50,6 +50,22 @@ function shellOrg(matches: Matches): string | undefined {
  */
 export const orgOnScreen = (router: AnyRouter) => shellOrg(router.state.matches);
 
+/** Whether the shell lists `publish` for the member, as `useCanPublish` reads it, for a store action. */
+export const publishesOnScreen = (router: AnyRouter) => {
+  const shell: unknown = router.state.matches.find((m) => m.routeId === '/_app')?.loaderData;
+  if (typeof shell !== 'object' || shell === null || !('tools' in shell) || !Array.isArray(shell.tools)) return false;
+  return shell.tools.some((t: unknown) => typeof t === 'object' && t !== null && 'name' in t && t.name === 'publish');
+};
+
+/**
+ * Whether the page's address asks for New spot (`/spots?new=true`, #403). Going to the spot it made then replaces that
+ * entry, so Back lands on Spots, not on a New spot asked for again (review of #562).
+ */
+export const newSpotAsked = (router: AnyRouter) => {
+  const search: unknown = router.state.location.search;
+  return typeof search === 'object' && search !== null && 'new' in search && search.new === true;
+};
+
 /** The same, for a component that may render outside the app shell (the invitation page). */
 export const useOrgOnScreen = () => useRouterState({ select: (s) => shellOrg(s.matches) });
 
@@ -58,3 +74,6 @@ export const useCanManage = () => useRole() !== 'viewer';
 
 /** Whether the member may publish here: the tools the shell lists for them include it (an editor loses it when only owners publish). */
 export const useCanPublish = () => app.useLoaderData().tools.some((t) => t.name === 'publish');
+
+/** Whether the member may approve or decline publish requests (#115): the shell's tools include it, as publishing's do. */
+export const useCanApprove = () => app.useLoaderData().tools.some((t) => t.name === 'approve_publish_request');

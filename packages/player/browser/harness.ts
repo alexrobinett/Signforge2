@@ -3,8 +3,9 @@
  * Storage and no service worker) and fixture server per test, and readers for the player's
  * live state (`window.__sf`) and its template frames.
  */
-import { afterAll, afterEach, beforeAll, inject } from 'vitest';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { crc32, deflateSync } from 'node:zlib';
+import { afterAll, afterEach, beforeAll, expect, inject } from 'vitest';
+import { chromium, type Browser, type BrowserContext, type Frame, type Page } from 'playwright';
 import { buildContent, type FixtureSpot } from './content';
 import { FixtureServer } from './fixture-server';
 
@@ -38,6 +39,8 @@ export interface PlayerState {
   clock: { offsetMs: number; trusted: boolean };
   /** The last 50 prepares: start of loading to ready. */
   prepares: { spot: string; ms: number }[];
+  /** Syncs the player has finished with. */
+  syncs: number;
 }
 
 export interface Player {
@@ -50,7 +53,8 @@ export interface Player {
   until(predicate: (s: PlayerState) => boolean, timeoutMs?: number): Promise<PlayerState>;
   /** The label, the listed item titles and the play flag of the template on screen, or undefined if none is. */
   /** `sample`: the size of the sample the template got beside its asset `file`, or ''. */
-  onScreen(): Promise<{ label: string; items: string; playing: boolean; sample: string } | undefined>;
+  /** `fallback`: the bound fields `init` named as playing their fallback (#225), comma-separated. */
+  onScreen(): Promise<{ label: string; items: string; playing: boolean; sample: string; fallback: string } | undefined>;
 }
 
 export interface Harness {
@@ -66,8 +70,11 @@ export interface Harness {
   openPlayer(
     setup?: (server: FixtureServer) => void,
     query?: Record<string, string> | ((server: FixtureServer) => Record<string, string>),
-    /** Run the page on Playwright's clock from this instant (`page.clock`): time flows, and a test can jump it. */
-    opts?: { clockAt?: Date },
+    /**
+     * `clockAt`: run the page on Playwright's clock from this instant (`page.clock`): time flows, and a test can jump it.
+     * `before`: set the page up before the player opens, for routes it must find in place.
+     */
+    opts?: { clockAt?: Date; before?: (page: Page) => Promise<unknown> },
   ): Promise<Player>;
   /** A blank page in a fresh context, for hosting a template without the player. */
   blankPage(): Promise<Page>;
@@ -133,6 +140,7 @@ export function useHarness({ siteIsolation = false } = {}): Harness {
       page.on('console', (m) => lines.push(`${m.type()}: ${m.text()}`));
       page.on('pageerror', (e) => lines.push(`pageerror: ${e.message}`));
       if (opts.clockAt) await page.clock.install({ time: opts.clockAt });
+      await opts.before?.(page);
       // The supervisor points at the fixture server, so a real one on this machine is never touched.
       const q = new URLSearchParams({ poll: '1', supervisor: `${server.url}/supervisor`, ...(typeof query === 'function' ? query(server) : query) });
       await page.goto(`${server.url}/?${q}`);
@@ -160,6 +168,7 @@ export function useHarness({ siteIsolation = false } = {}): Harness {
             clock,
             pairing,
             prepares,
+            syncs,
           } = s;
           return {
             manifestId,
@@ -180,6 +189,7 @@ export function useHarness({ siteIsolation = false } = {}): Harness {
             pairing,
             clock: { offsetMs: clock.offsetMs, trusted: clock.trusted },
             prepares: prepares.map(({ spot, ms }) => ({ spot, ms })),
+            syncs,
           };
         });
       const until = async (predicate: (s: PlayerState) => boolean, timeoutMs = 10_000) => {
@@ -193,30 +203,86 @@ export function useHarness({ siteIsolation = false } = {}): Harness {
         throw new Error(`player state never matched within ${timeoutMs} ms; last: ${JSON.stringify(last)}\nconsole:\n${lines.join('\n')}`);
       };
       const onScreen = async () => {
-        for (const frame of page.frames()) {
-          if (frame === page.mainFrame()) continue;
-          const el = await frame.frameElement().catch(() => undefined);
-          const shown = await el?.evaluate((e) => {
-            // A template frame sits in a wrapper frame, which sits in the slot.
-            const el = e as HTMLElement;
-            const slot = (el.ownerDocument.defaultView?.frameElement ?? el).closest<HTMLElement>('.slot');
-            return !!slot && slot.style.zIndex === '2' && getComputedStyle(slot).opacity === '1';
-          });
-          if (!shown) continue;
-          if (!(await frame.evaluate(() => !!document.getElementById('label')).catch(() => false))) continue;
-          return frame.evaluate(() => ({
-            label: document.getElementById('label')?.textContent ?? '',
-            items: document.getElementById('box')?.textContent ?? '',
-            playing: document.body.dataset.playing === '1',
-            sample: document.body.dataset.sample ?? '',
-          }));
-        }
-        return undefined;
+        const frame = await visibleFrame(page, 'label');
+        if (!frame) return undefined;
+        return frame.evaluate(() => ({
+          label: document.getElementById('label')?.textContent ?? '',
+          items: document.getElementById('box')?.textContent ?? '',
+          playing: document.body.dataset.playing === '1',
+          sample: document.body.dataset.sample ?? '',
+          fallback: document.body.dataset.fallback ?? '',
+        }));
       };
       return { page, server, console: lines, state, until, onScreen };
     },
   };
 }
 
+/** The currently visible template frame containing `#<hasId>`, if any. */
+export async function visibleFrame(page: Page, hasId: string): Promise<Frame | undefined> {
+  for (const frame of page.frames()) {
+    if (frame === page.mainFrame()) continue;
+    const el = await frame.frameElement().catch(() => undefined);
+    const shown = await el?.evaluate((e) => {
+      // A template frame sits in a wrapper frame, which sits in the slot.
+      const el = e as HTMLElement;
+      const slot = (el.ownerDocument.defaultView?.frameElement ?? el).closest<HTMLElement>('.slot');
+      return !!slot && slot.style.zIndex === '2' && getComputedStyle(slot).opacity === '1';
+    });
+    if (!shown) continue;
+    if (await frame.evaluate((id) => !!document.getElementById(id), hasId).catch(() => false)) return frame;
+  }
+  return undefined;
+}
+
+/** Minimal valid greyscale PNG of size `w`x`h` with pixel value `shade`, so fixtures have distinct hashes and sizes. */
+export function png(w: number, h: number, shade = 128): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const out = Buffer.alloc(body.length + 8);
+    out.writeUInt32BE(data.length);
+    body.copy(out, 4);
+    out.writeUInt32BE(crc32(body), body.length + 4);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(w);
+  header.writeUInt32BE(h, 4);
+  header.set([8, 0, 0, 0, 0], 8);
+  const rows = Buffer.concat(Array.from({ length: h }, () => Buffer.from([0, ...Array(w).fill(shade)])));
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(rows)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
 /** The ids of the spots played, in order. */
 export const spotsPlayed = (s: PlayerState) => s.log.map((l) => l.spot);
+
+/** What a frame can reach from inside: its origin, then each of the player, its page and its storage, or `blocked`. */
+export async function reachOf(frame: Frame): Promise<Record<string, string>> {
+  return frame.evaluate(() => {
+    const tries: Record<string, () => unknown> = {
+      origin: () => origin,
+      top: () => top!.document.title,
+      parent: () => parent.document.title,
+      caches: () => (typeof caches === 'undefined' ? 'none' : caches.keys()),
+      storage: () => localStorage.length,
+    };
+    return Object.fromEntries(
+      Object.entries(tries).map(([k, f]) => {
+        try {
+          const v = f();
+          return [k, v instanceof Promise ? 'promise' : String(v)];
+        } catch {
+          return [k, 'blocked'];
+        }
+      }),
+    );
+  });
+}
+
+/** A frame with an opaque origin that reaches nothing of the player's: a template's (containment.test.ts), the spare's. */
+export const NO_REACH = { origin: 'null', top: 'blocked', parent: 'blocked', caches: expect.stringMatching(/blocked|none/), storage: 'blocked' };

@@ -27,6 +27,7 @@ import {
   TARGET_KINDS,
   targetLabel,
   viaText,
+  CMS_AGENT,
   whatText,
   WHENS,
   WHO_OPTIONS,
@@ -47,31 +48,32 @@ function text(v: unknown, max: number): string | undefined {
   return s && s.length <= max ? s : undefined;
 }
 
+// `q: undefined` drops an old link's `?q=`: the search is never read from a URL.
+const auditSearch = (s: Record<string, unknown>): AuditFilters & { q?: undefined } => {
+  const target = text(s.target, 40);
+  // One target needs its kind: an id alone would say "Only x" over the whole log.
+  // Every key, undefined when dropped: the router lays a route's search over the raw params, so a key left out keeps its raw value.
+  return {
+    who: text(s.who, 200),
+    what: text(s.what, 64),
+    target,
+    targetId: target && text(s.targetId, 200),
+    when: isWhen(s.when) ? s.when : undefined,
+    q: undefined,
+  };
+};
+
 export const Route = createFileRoute('/_app/audit')({
-  // `q: undefined` drops an old link's `?q=`: the search is never read from a URL.
-  validateSearch: (s: Record<string, unknown>): AuditFilters & { q?: undefined } => {
-    const target = text(s.target, 40);
-    // One target needs its kind: an id alone would say "Only x" over the whole log.
-    // Every key, undefined when dropped: the router lays a route's search over the raw params, so a key left out keeps its raw value.
-    return {
-      who: text(s.who, 200),
-      what: text(s.what, 64),
-      target,
-      targetId: target && text(s.targetId, 200),
-      when: isWhen(s.when) ? s.when : undefined,
-      q: undefined,
-    };
-  },
+  validateSearch: auditSearch,
   server: { handlers: backToPage },
-  loaderDeps: ({ search }) => search,
-  // The first page is read again on every load, as after a change elsewhere, never from the cache.
-  // Unsearched: the search is the store's, which a loader can't read; empty in a server render.
-  loader: async ({ context: { queryClient }, parentMatchPromise, deps }) => {
+  // Entering reads the first page here, never from the cache, so the skeleton shows while it comes (#376); a
+  // filter changed on the page is read by its query, deferred. Unsearched: the search is the store's.
+  loader: async ({ context: { queryClient }, parentMatchPromise, location }) => {
     const orgId = (await parentMatchPromise).loaderData?.organization?.id;
     const [settings, people] = await Promise.all([
       getOrgSettings(),
       getMembers(),
-      orgId && queryClient.infiniteQuery({ ...auditQuery(orgId, deps, ''), staleTime: 0 }),
+      orgId && queryClient.infiniteQuery({ ...auditQuery(orgId, auditSearch(location.search), ''), staleTime: 0 }),
     ]);
     return { settings, members: people.members, at: Date.now() };
   },
@@ -83,12 +85,17 @@ const app = getRouteApi('/_app');
 
 function AuditLogPage() {
   const { settings, members, at } = Route.useLoaderData();
-  const search = Route.useSearch();
+  const shownSearch = Route.useSearch();
+  // Deferred, as the text search below: a changed filter keeps the rows it replaces, and the focus, until its own arrive.
+  // Export reads the filters and search shown, never the deferred ones the rows still show.
+  const search = useDeferredValue(shownSearch);
+  const updating = search !== shownSearch;
   const orgId = useOrgId();
   const me = app.useLoaderData().user.id;
   const now = useNow(at);
   // Deferred: a new search shows the rows it replaces until its own arrive, not the page's fallback.
-  const query = useDeferredValue(useAppStore((s) => s.audit.query));
+  const shownQuery = useAppStore((s) => s.audit.query);
+  const query = useDeferredValue(shownQuery);
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError, error, refetch } = useSuspenseInfiniteQuery(
     auditQuery(orgId, search, query),
   );
@@ -109,7 +116,11 @@ function AuditLogPage() {
       <div className="min-w-0 flex-1 space-y-4">
         <PageHeader title="Audit log" description={`Every change by a person, agent or screen.${kept} Times in ${timezone}.`}>
           <EditorFields>
-            <Button variant="outline" disabled={exporting} onClick={() => void exportAuditLog(auditInput(search, query, Date.now()), (e) => csvRow(e, names))}>
+            <Button
+              variant="outline"
+              disabled={exporting}
+              onClick={() => void exportAuditLog(auditInput(shownSearch, shownQuery, Date.now()), (e) => csvRow(e, names))}
+            >
               {exporting ? <LoaderCircleIcon className="animate-spin" aria-hidden /> : <DownloadIcon aria-hidden />} Export CSV
             </Button>
           </EditorFields>
@@ -122,7 +133,7 @@ function AuditLogPage() {
 
         {search.targetId && (
           <p className="text-sm">
-            Only {targetLabel(search.target ?? '')} <span className="font-mono text-[13px]">{search.targetId}</span>.{' '}
+            Only {targetLabel(search.target ?? '')} <span className="font-mono text-meta">{search.targetId}</span>.{' '}
             <Link from="/audit" to="/audit" search={({ targetId: _, ...rest }) => rest} className="font-medium text-primary underline-offset-4 hover:underline">
               Show every {targetLabel(search.target ?? '').toLowerCase()}
             </Link>
@@ -130,8 +141,8 @@ function AuditLogPage() {
         )}
 
         {entries.length ? (
-          <div className="overflow-x-auto rounded-xl border bg-card">
-            <table className="w-full border-collapse text-[15px] sm:min-w-[44rem]">
+          <div aria-busy={updating || undefined} className={cn('overflow-x-auto rounded-xl border bg-card', updating && 'opacity-60')}>
+            <table className="w-full border-collapse text-md sm:min-w-[44rem]">
               <thead className="bg-muted/60 text-left text-sm text-muted-foreground">
                 <tr>
                   <th scope="col" className="w-24 px-3 py-2 font-semibold">
@@ -174,7 +185,7 @@ function AuditLogPage() {
             </Button>
           </div>
         )}
-        <div className="flex flex-wrap items-center justify-between gap-3 text-[15px]">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-md">
           <span id={countId} tabIndex={-1} role="status" className="text-muted-foreground outline-none">
             Showing {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
             {entries.length > 0 && !hasNextPage ? ', all there are' : ''}
@@ -195,20 +206,26 @@ function AuditLogPage() {
   );
 }
 
-/** Agents and screens apart from people, as on the board; a person and the system in the text colour. */
+/** Agents and screens apart from people, as on the board, the built-in agent too; a person and the system in the text colour. */
 const ACTOR_COLOR: Record<AuditEntry['actor']['kind'], string> = { user: '', system: '', agent: 'text-actor-agent', device: 'text-actor-device' };
+const actorColor = (e: AuditEntry) => (e.actor.clientId === CMS_AGENT ? 'text-actor-agent' : ACTOR_COLOR[e.actor.kind]);
 
 function EntryRow({ entry: e, who, time }: { entry: AuditEntry; who: string; time: string }) {
   const detail = detailText(e);
   return (
     <tr className={cn('border-t align-top', e.detail.refused !== undefined && 'bg-accent/50')}>
-      <td className="px-3 py-2 font-mono text-[13px] whitespace-nowrap text-muted-foreground">
+      <td className="px-3 py-2 text-meta whitespace-nowrap text-muted-foreground tabular-nums">
         <time dateTime={new Date(e.at).toISOString()}>{time}</time>
       </td>
-      <td className={cn('px-3 py-2 font-semibold whitespace-nowrap', ACTOR_COLOR[e.actor.kind])}>{who}</td>
+      <td className={cn('px-3 py-2 font-semibold whitespace-nowrap', actorColor(e))}>{who}</td>
       <td className="px-3 py-2">
         {whatText(e)}
-        {detail && <span className="mt-0.5 block font-mono text-[13px] break-all text-muted-foreground">{detail}</span>}
+        {/* In <bdi>: what a tool was given (an agent's reason for its publish request) cannot reorder the row around it. */}
+        {detail && (
+          <span className="mt-0.5 block text-meta break-all text-muted-foreground">
+            <bdi>{detail}</bdi>
+          </span>
+        )}
         {/* Phones have no room for the last two columns: they read under what was done. */}
         <span className="mt-0.5 block text-sm break-all text-muted-foreground sm:hidden">
           {e.target && (
@@ -240,7 +257,7 @@ function TargetLink({ target, className }: { target: { kind: string; id: string 
       from="/audit"
       to="/audit"
       search={(s) => ({ ...s, target: target.kind, targetId: target.id })}
-      className={cn('font-mono text-[13px] break-all text-primary underline-offset-4 hover:underline', className)}
+      className={cn('font-mono text-meta break-all text-primary underline-offset-4 hover:underline', className)}
       aria-label={`Only ${targetLabel(target.kind).toLowerCase()} ${target.id}`}
     >
       {target.id}

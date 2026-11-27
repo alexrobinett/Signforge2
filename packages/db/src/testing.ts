@@ -5,8 +5,12 @@
  * one line. `seedTwoOrgs(db)` fills a migrated D1 with two orgs holding one of everything, plus
  * one base template, so an isolation test can call org B's scope with org A's ids and expect nothing.
  */
+import { asc, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { SQLiteTable } from 'drizzle-orm/sqlite-core';
+import { MANIFEST_SCHEMA, PLAYER_RELEASE_FORMAT, type PlayerChannel, type PlayerReleaseManifest } from '@signforge/contract';
+import { AGENT_GRANT_IDLE_MS } from './agent-grants';
+import { platform } from './platform';
 import { scoped, type NewRow, type RowPatch } from './scoped';
 import * as schema from './schema';
 import { commit, type Staged, type Write } from './writes';
@@ -91,6 +95,25 @@ export function testScope(db: D1Database, orgId: string) {
       authorizations: { ...o.connections.authorizations, insert: insert<typeof schema.connectionAuthorizations>(o.connections.authorizations.stage.insert) },
     },
     brandKits: { ...o.brandKits, ...direct<typeof schema.brandKits>(o.brandKits) },
+    feedPhotos: {
+      ...o.feedPhotos,
+      /** A `feed_images` row as given, made at `createdAt` (default 0) and stamped with this org: a photo set up in one line. */
+      put: async (row: Omit<typeof schema.feedImages.$inferInsert, 'orgId' | 'updatedAt' | 'createdAt'> & { createdAt?: number }) => {
+        await drizzle(db)
+          .insert(schema.feedImages)
+          .values({ createdAt: 0, ...row, orgId })
+          .run();
+      },
+      /** Many photos stored at once, as `put` makes each: one statement, its rows as one JSON value (a test of a busy org's thousands). */
+      putMany: async (rows: readonly { url: string; sourceId: string; fileSha256: string; thumbSha256: string; nextCheckAt: number; createdAt: number }[]) => {
+        await drizzle(db).run(sql`INSERT INTO ${schema.feedImages} (org_id, url, source_id, file_sha256, thumb_sha256, next_check_at, created_at, updated_at)
+          SELECT ${orgId}, r.value ->> 'url', r.value ->> 'sourceId', r.value ->> 'fileSha256', r.value ->> 'thumbSha256', r.value ->> 'nextCheckAt', r.value ->> 'createdAt', r.value ->> 'createdAt'
+          FROM json_each(${JSON.stringify(rows)}) AS r`);
+      },
+      /** The org's queued blob deletes, by hash. */
+      deletes: () =>
+        drizzle(db).select().from(schema.feedImageDeletes).where(eq(schema.feedImageDeletes.orgId, orgId)).orderBy(asc(schema.feedImageDeletes.sha256)).all(),
+    },
   };
 }
 
@@ -134,7 +157,40 @@ export interface SeededOrg {
   brandKit: string;
   /** Start of the hour the seeded play count is in. */
   hour: number;
+  /** An agent grant (M4-04) by a user of its own (`grantee`, not a member), for a client the provider registered. */
+  agentGrant: string;
+  grantee: string;
+  /** A pending request by the agent grant to publish the template spot at its version (M4-09). */
+  publishRequest: string;
 }
+
+/**
+ * A seeded org's row for each kind of id a tool input can name (`screenId` → `screen`), and Better Auth's rows as
+ * `seedTeam` names them. Not the files (`manifest`, `bundle`, `sources`): each test that maps ids names those its way.
+ */
+export const ORG_ROW_IDS: Record<string, (o: SeededOrg) => string> = {
+  screen: (o) => o.screen,
+  group: (o) => o.group,
+  credential: (o) => o.credential,
+  template: (o) => o.template,
+  templateVersion: (o) => o.templateVersion,
+  spot: (o) => o.templateSpot,
+  playlist: (o) => o.playlist,
+  scheduleEntry: (o) => o.scheduleEntry,
+  asset: (o) => o.asset,
+  brandKit: (o) => o.brandKit,
+  logoOnDarkAsset: (o) => o.asset,
+  logoOnLightAsset: (o) => o.asset,
+  dataSource: (o) => o.dataSource,
+  alertDelivery: (o) => o.alertDelivery,
+  connection: (o) => o.connection,
+  publish: (o) => o.publish,
+  // An agent grant (M4-07's tools): `grantId`.
+  grant: (o) => o.agentGrant,
+  publishRequest: (o) => o.publishRequest,
+  member: (o) => `${o.orgId}-member`,
+  invitation: (o) => `${o.orgId}-invitation`,
+};
 
 export interface Seeded {
   a: SeededOrg;
@@ -151,6 +207,35 @@ export async function seedOrganization(db: D1Database, orgId: string) {
     .values({ id: orgId, name: orgId, slug: orgId, createdAt: new Date().toISOString() })
     .onConflictDoNothing()
     .run();
+}
+
+/** Better Auth's rows for an org's team, as its organization endpoints write them: an owner and a pending invitation. */
+export async function seedTeam(db: D1Database, orgId: string) {
+  const d = drizzle(db);
+  const now = new Date().toISOString();
+  const later = new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString();
+  const userId = `${orgId}-owner`;
+  await d
+    .insert(schema.user)
+    .values({ id: userId, name: `${orgId} owner`, email: `${userId}@signforge.test`, emailVerified: 1, createdAt: now, updatedAt: now })
+    .run();
+  const member = `${orgId}-member`;
+  await d.insert(schema.member).values({ id: member, organizationId: orgId, userId, role: 'owner', createdAt: now }).run();
+  const invitation = `${orgId}-invitation`;
+  await d
+    .insert(schema.invitation)
+    .values({
+      id: invitation,
+      organizationId: orgId,
+      email: `${orgId}-invitee@signforge.test`,
+      role: 'viewer',
+      status: 'pending',
+      expiresAt: later,
+      createdAt: now,
+      inviterId: userId,
+    })
+    .run();
+  return { userId, member, invitation };
 }
 
 /**
@@ -282,6 +367,51 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
   await o.commit((await o.brandKits.assignments.stage.set({ target: 'org' }, kit.id)).writes);
   await o.playCounts.add(screen.id, [{ hour: SEED_HOUR, spotId: templateSpot.id, plays: 3, ms: 30_000 }]);
 
+  // An agent's grant, as consent writes one, and its client as the provider registers it. Its user is no
+  // member here: the repository keeps grants by org, whatever the membership (agentGrantForToken checks it).
+  const grantee = id('grantee');
+  const at = new Date(SEED_HOUR).toISOString();
+  const d = drizzle(db);
+  await d
+    .insert(schema.user)
+    .values({ id: grantee, name: `${orgId} grantee`, email: `${grantee}@signforge.test`, emailVerified: 1, createdAt: at, updatedAt: at })
+    .run();
+  await d
+    .insert(schema.oauthClient)
+    .values({
+      id: id('oauth-client'),
+      clientId: id('client'),
+      name: 'Seeded agent',
+      redirectUris: '["http://127.0.0.1/callback"]',
+      createdAt: at,
+      updatedAt: at,
+    })
+    .run();
+  const agentGrant = o.agentGrants.stage.insert({
+    userId: grantee,
+    clientId: id('client'),
+    clientName: 'Seeded agent',
+    scopesJson: '["content:read","content:draft"]',
+    expiresAt: SEED_HOUR + AGENT_GRANT_IDLE_MS,
+  });
+  await o.commit(agentGrant.writes);
+  // The seeded agent's request to publish the template spot as it is (M4-09), pending: it expires
+  // a century after the seeded hour, so it is pending whenever the tests run.
+  const publishRequest = o.publishRequests.stage.insert(
+    {
+      requestedByKind: 'agent',
+      requestedBy: agentGrant.row.id,
+      clientId: agentGrant.row.clientId,
+      draftsJson: JSON.stringify([{ kind: 'spot', id: templateSpot.id, version: templateSpot.rowVersion }]),
+      reason: 'Seeded request',
+      brandState: await o.brandKits.state(),
+      expiresAt: SEED_HOUR + 100 * 365 * 24 * 3_600_000,
+    },
+    SEED_HOUR,
+    10,
+  );
+  await o.commit(publishRequest.writes);
+
   return {
     orgId,
     scope: o,
@@ -299,6 +429,9 @@ export async function seedOrg(db: D1Database, orgId: string, baseTemplateVersion
     publish: publish.id,
     dataSource: dataSource.id,
     alertDelivery: delivery.row.id,
+    agentGrant: agentGrant.row.id,
+    grantee,
+    publishRequest: publishRequest.row.id,
     connection: connection.id,
     auditEntry: auditEntry.id,
     brandKit: kit.id,
@@ -330,4 +463,75 @@ export async function seedBaseTemplate(db: D1Database) {
 export async function seedTwoOrgs(db: D1Database): Promise<Seeded> {
   const base = await seedBaseTemplate(db);
   return { a: await seedOrg(db, 'org-a'), b: await seedOrg(db, 'org-b', base.templateVersion), base };
+}
+
+/** A deleted asset's files queued in `orgId` at `at`, as `delete` of an asset queues them, for the storage sweep's tests (#235). */
+export async function queueDeletedFiles(db: D1Database, orgId: string, shas: string[], at: number) {
+  const org = scoped(db, orgId);
+  await org.commit(org.storage.stage.queue(shas, at).writes);
+}
+
+/** The storage sweep's tombstone for an org's file: it deleted the object at `at` (#432). For a writer's test. */
+export async function tombstoneFile(db: D1Database, orgId: string, sha256: string, at: number) {
+  await drizzle(db)
+    .insert(schema.blobDeletes)
+    .values({ orgId, sha256, queuedAt: 0, deletedAt: at })
+    .onConflictDoUpdate({ target: [schema.blobDeletes.orgId, schema.blobDeletes.sha256], set: { deletedAt: at } })
+    .run();
+}
+
+/** Runs one SQL statement on `db` with its bound values: for fixtures no repository writes. */
+export const runSql = (db: D1Database, query: string, ...binds: unknown[]) =>
+  db
+    .prepare(query)
+    .bind(...binds)
+    .run();
+
+/** The storage sweep's claim on an org's file until `until` (0: run out), as its claim batch writes it: for a writer's test. */
+export async function claimFileForSweep(db: D1Database, orgId: string, sha256: string, until: number) {
+  const claim = { claimOwner: 'sweep', claimUntil: until };
+  await drizzle(db)
+    .insert(schema.blobDeletes)
+    .values({ orgId, sha256, queuedAt: 0, ...claim })
+    .onConflictDoUpdate({ target: [schema.blobDeletes.orgId, schema.blobDeletes.sha256], set: claim })
+    .run();
+}
+
+/**
+ * The contract's test-only Ed25519 private key, PKCS#8 (packages/contract/test/player-release/test-only.key.pem): it
+ * signs nothing real, and no screen ships its public key.
+ */
+const TEST_RELEASE_KEY = 'MC4CAQAwBQYDK2VwBCIEIFH84Y5Y6uVV8df80vKj+ir8HXCGHrX0vYBKrc+SGfSP';
+
+/** A release manifest's text with `over` on top, signed as CI signs one (#628): Ed25519 over its UTF-8 bytes, base64. */
+export async function signedRelease(over: Partial<PlayerReleaseManifest> = {}): Promise<{ manifest: string; signature: string }> {
+  const manifest = JSON.stringify({
+    format: PLAYER_RELEASE_FORMAT,
+    minSupervisor: 1,
+    version: 1,
+    sha256: 'a'.repeat(64),
+    size: 1024,
+    files: [{ path: 'index.html', sha256: 'b'.repeat(64) }],
+    manifestSchemas: [MANIFEST_SCHEMA],
+    protocols: [1, 2],
+    createdAt: '2026-11-26T12:00:00.000Z',
+    ...over,
+  } satisfies PlayerReleaseManifest);
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    Uint8Array.from(atob(TEST_RELEASE_KEY), (c) => c.charCodeAt(0)),
+    { name: 'Ed25519' },
+    false,
+    ['sign'],
+  );
+  const signature = new Uint8Array(await crypto.subtle.sign('Ed25519', key, new TextEncoder().encode(manifest)));
+  return { manifest, signature: btoa(String.fromCharCode(...signature)) };
+}
+
+/** A release CI registered on `channel`, through `platform(db).playerReleases.register`, as the release workflow will. */
+export async function registerRelease(db: D1Database, over: Partial<PlayerReleaseManifest>, channel: PlayerChannel) {
+  const { manifest, signature } = await signedRelease(over);
+  const row = await platform(db).playerReleases.register(manifest, signature, channel);
+  if (!row) throw new Error(`release ${over.version ?? 1} or its tarball is registered already`);
+  return row;
 }

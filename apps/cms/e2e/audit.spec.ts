@@ -8,22 +8,20 @@ const ADDRESS = '192.0.2.41';
 const SCREEN_ADDRESS = '192.0.2.42';
 
 test('a change shows in the audit log, filters to it, pages and exports, with the pairing code redacted', async ({ page, request }) => {
-  test.setTimeout(120_000);
   await signInAs(page, `e2e-audit-${Date.now()}@example.com`, ADDRESS);
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Clinic', ADDRESS);
 
   // A change in the CMS: the org's time zone.
   await page.goto('/settings/general');
   await hydrated(page);
   await page.getByLabel('Time zone').selectOption('Europe/London');
-  await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(page.getByText(/^Saved \d/)).toBeVisible();
 
   // A screen paired, whose code the log keeps redacted, and renamed 55 times: more than a page.
   const start = await request.post(`http://127.0.0.1:${API_PORT}/v1/device/pair/start`, { headers: { 'cf-connecting-ip': SCREEN_ADDRESS } });
   const { code } = (await start.json()) as { code: string };
   const { screen } = (await tool(page, 'claim_screen', { code, name: 'Lobby', timezone: 'UTC', orientation: 'landscape' })) as { screen: { id: string } };
-  for (let i = 1; i <= 55; i++) await tool(page, 'rename_screen', { screenId: screen.id, name: `Lobby ${i}` });
+  for (let i = 1; i <= 55; i++) await tool(page, 'update_screen', { screenId: screen.id, name: `Lobby ${i}` });
 
   /** Narrow the log to the screen from its first row's target link. */
   const onlyTheScreen = async () => {
@@ -128,16 +126,43 @@ test('a change shows in the audit log, filters to it, pages and exports, with th
   expect(other.status(), await other.text()).toBe(200);
   await page.getByRole('button', { name: 'Load older' }).click();
   await expect(page.getByRole('alert')).toContainText(
-    'Could not load older entries: This tab is on Northside Market; you switched to Other Co in another tab. Reload.',
+    'Could not load older entries: This tab is on Northside Clinic; you switched to Other Co in another tab. Reload.',
   );
   await expect(rows).toHaveCount(50);
+});
+
+test("the What filter's create and change find a content save's rows, which list no option of their own (#507)", async ({ page }) => {
+  const address = '192.0.2.43';
+  await signInAs(page, `e2e-audit-saves-${Date.now()}@example.com`, address);
+  await createOrg(page, 'Eastside Bakery', address);
+  const { playlist } = (await tool(page, 'save_playlist', { name: 'Breakfast', idempotencyKey: 'e2e-audit-saves' })) as {
+    playlist: { id: string; version: number };
+  };
+  await tool(page, 'save_playlist', { playlistId: playlist.id, name: 'Breakfast menu', ifVersion: playlist.version });
+
+  await page.goto('/audit');
+  await hydrated(page);
+  const rows = page.locator('tbody tr');
+  const what = page.getByLabel('What', { exact: true });
+  await expect(what.locator('option[value="save_playlist"]')).toHaveCount(0);
+  await what.selectOption('create_playlist');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Created');
+  await expect(rows.first()).toContainText('name: Breakfast');
+  await what.selectOption('update_playlist');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Draft changed');
+  await expect(rows.first()).toContainText('name: Breakfast menu');
+  await shots(page, '52-audit-log-save-filter');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shots(page, '53-audit-log-save-filter-phone');
 });
 
 test("the audit log's filters, search and Export CSV are disabled in the server's HTML, until the page has hydrated (#140)", async ({ page }) => {
   // The page hydrates after the app (body[data-hydrated]): a filter chosen in between was set back
   // by React, the browser's own submit put the search in the URL, and Export CSV made no file.
   await signInAs(page, `e2e-audit-server-${Date.now()}@example.com`, '192.0.2.49');
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Clinic', '192.0.2.49');
   const names = ['Who', 'What', 'Target', 'When', 'Search', 'Export CSV'];
   expect(await disabledOnServer(page, '/audit', names)).toEqual(Object.fromEntries(names.map((n) => [n, [true]])));
   expect(await disabledOnServer(page, '/audit?when=day', ['Clear filters'])).toEqual({ 'Clear filters': [true] });
@@ -150,7 +175,7 @@ test("the audit log's filters, search and Export CSV are disabled in the server'
 test("searching the audit log for an invitee's email keeps it out of the page's URL and every request's (#140)", async ({ page }) => {
   // A search can be an email or a name: in a URL it reaches history, a Referer and the Worker's request logs.
   await signInAs(page, `e2e-audit-search-${Date.now()}@example.com`, '192.0.2.50');
-  await createOrg(page, 'Northside Market');
+  await createOrg(page, 'Northside Clinic', '192.0.2.50');
   const invitee = `e2e-audit-invitee-${Date.now()}@example.com`;
   await page.goto('/settings/members');
   await hydrated(page);

@@ -3,54 +3,68 @@
  * other loads the next spot out of sight, so a swap only happens between two finished frames.
  */
 import {
-  SUPPORTED_PROTOCOLS,
+  playsProtocol,
+  THIS_PLAYER,
+  isNewsImage,
+  rowAsset,
   sampleAsset,
   type FrameClock,
   type FrameFont,
   type FrameTheme,
-  type HostMessage,
   type Orientation,
   type ScreenManifest,
   type Spot,
-  type TemplateMessage,
+  type TemplateManifest,
 } from '@signforge/contract';
-import { containedFrames, READY_TIMEOUT_MS, resolveSpotData, screenLocale, TEMPLATE_SANDBOX } from '@signforge/player-core';
+import { alive, READY_TIMEOUT_MS, resolveSpotData, screenLocale } from '@signforge/player-core';
+import { openFrameHost, type FrameHost } from '@signforge/player-core/frame-host';
+import { parseBundle, type Frames } from './bundles';
 import { clock, now } from './clock';
 import { liveData, reportRejected } from './data';
-import { getFile } from './source';
-
-type WrapperWindow = Window & { relay: (to: Window, m: HostMessage) => void };
+import { getFile, SOURCE } from './source';
+import { dropFrames, storedFrames, storeFrames } from './store';
 
 /** Corrected time and the offset the SDK's `now()` adds to the frame's own clock (src/clock.ts). */
 const frameClock = (): FrameClock => ({ now: now(), offsetMs: clock.offsetMs });
 
-/** Throw if the load was cancelled while it waited. */
-function alive(signal: AbortSignal): void {
-  if (signal.aborted) throw new Error('cancelled');
-}
-
 const orientationOf = (w: number, h: number): Orientation => (w >= h ? 'landscape' : 'portrait');
+
+/**
+ * How a template fits the screen as it is now. On an orientation it does not support it is
+ * letterboxed at the shape it does support, over the background it declares (`background`).
+ */
+function fitTo(t: TemplateManifest): { orientation: Orientation; viewport: { width: number; height: number }; background?: string } {
+  const sw = innerWidth,
+    sh = innerHeight;
+  const screenIs = orientationOf(sw, sh);
+  const orientation = t.orientations.includes(screenIs) ? screenIs : t.orientations[0]!;
+  if (orientation === screenIs) return { orientation, viewport: { width: sw, height: sh } };
+  const ratio = orientation === 'landscape' ? 16 / 9 : 9 / 16;
+  const width = Math.min(sw, sh * ratio);
+  return { orientation, viewport: { width, height: width / ratio }, background: t.background };
+}
 
 type TemplateSpot = Extract<Spot, { kind: 'template' }>;
 
 /** A slot's template frame, and what its next `init` sends. */
 interface LiveFrame {
-  frame: HTMLIFrameElement;
-  wrapperFrame: HTMLIFrameElement;
-  /** The wrapper frame's window: the template's `parent`. */
-  wrapper: WrapperWindow;
+  /** The template's frames and the protocol with it (player-core's Frame host). */
+  host: FrameHost;
   protocol: number;
   /** The bundle's hash: an update to another bundle is a fresh load. */
   html: string;
+  template: TemplateManifest;
   spot: TemplateSpot;
   manifest: ScreenManifest;
+  data: Record<string, unknown>;
+  /** The bound fields `data` holds on their fallback (`resolveSpotData`): `init` names them, protocol 2 (#225). */
+  fallback: string[];
+  locale: string;
   assets: Record<string, Blob>;
   /** The screen's brand kit as the frame takes it; protocol 2 only. */
   theme?: FrameTheme;
   orientation: Orientation;
   viewport: { width: number; height: number };
-  /** Settles on the frame's next `ready` or `error`. */
-  waiter?: { resolve: () => void; reject: (err: Error) => void };
 }
 
 /**
@@ -70,6 +84,77 @@ async function spotAssets(spot: TemplateSpot, manifest: ScreenManifest): Promise
     }),
   );
   return assets;
+}
+
+/**
+ * Resolve any list-row image blobs (`NewsImage` in list fields whose `item` declares an `image`
+ * property) into `init.assets` under `rowAsset(field, i, prop)` and `rowAsset(..., 'thumb')`.
+ * Missing blobs never fail the spot: the row's image property is omitted from `data` and neither
+ * asset key is added, so the story plays cleanly as a story with no image.
+ */
+async function resolveRowImages(
+  fields: TemplateManifest['fields'],
+  data: Record<string, unknown>,
+): Promise<{ data: Record<string, unknown>; assets: Record<string, Blob> }> {
+  const listFields: { name: string; imageProps: string[] }[] = [];
+  for (const [name, def] of Object.entries(fields)) {
+    if (def.type !== 'list') continue;
+    const imageProps = Object.entries(def.item).flatMap(([k, d]) => (d.type === 'image' ? [k] : []));
+    if (imageProps.length) listFields.push({ name, imageProps });
+  }
+  if (!listFields.length) return { data, assets: {} };
+
+  const shas = new Set<string>();
+  for (const { name, imageProps } of listFields) {
+    const rows = data[name];
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (typeof row !== 'object' || row === null || Array.isArray(row)) continue;
+      for (const prop of imageProps) {
+        if (!Object.hasOwn(row, prop)) continue;
+        const img: unknown = Reflect.get(row, prop);
+        if (!isNewsImage(img)) continue;
+        shas.add(img.file);
+        shas.add(img.thumb);
+      }
+    }
+  }
+  if (!shas.size) return { data, assets: {} };
+
+  const loaded = new Map<string, Blob>();
+  await Promise.all(
+    [...shas].map(async (sha) => {
+      const blob = await getFile(sha).catch(() => undefined);
+      if (blob) loaded.set(sha, blob);
+    }),
+  );
+
+  const nextData: Record<string, unknown> = { ...data };
+  const assets: Record<string, Blob> = {};
+  for (const { name, imageProps } of listFields) {
+    const rows = data[name];
+    if (!Array.isArray(rows)) continue;
+    nextData[name] = rows.map((row: unknown, i) => {
+      if (typeof row !== 'object' || row === null || Array.isArray(row)) return row;
+      let cloned: Record<string, unknown> | undefined;
+      for (const prop of imageProps) {
+        if (!Object.hasOwn(row, prop)) continue;
+        const img: unknown = Reflect.get(row, prop);
+        if (!isNewsImage(img)) continue;
+        const fileBlob = loaded.get(img.file);
+        const thumbBlob = loaded.get(img.thumb);
+        if (fileBlob && thumbBlob) {
+          assets[rowAsset(name, i, prop)] = fileBlob;
+          assets[rowAsset(name, i, prop, 'thumb')] = thumbBlob;
+        } else {
+          cloned ??= Object.fromEntries(Object.entries(row));
+          delete cloned[prop];
+        }
+      }
+      return cloned ?? row;
+    });
+  }
+  return { data: nextData, assets };
 }
 
 /** The last manifest's theme: every template spot of a manifest shares it, so its files are read once. */
@@ -92,21 +177,131 @@ function brandTheme(manifest: ScreenManifest): Promise<FrameTheme | undefined> {
 }
 
 /**
- * `containedFrames` for each bundle of the manifest last prepared, by bundle hash. Reading a bundle
- * with the HTML parser takes about 12 ms on a Pi 4 (90 ms the first time): once per bundle, not per play.
+ * `containedFrames` for each bundle of the manifest last prepared, by bundle hash, parsed in a worker
+ * (`parseBundle`, #561). Reading a 400 kB bundle again cost about 150 ms of a prepare on a Pi 4
+ * (spike/pi-perf/RESULTS.md, #213): once per bundle, not per play. By hash, so a new bundle is a new
+ * entry, never another's. Held as promises, so a prepare and `warmBundles` reading one bundle at once
+ * share the read. `unreadable`: the bundles `warmBundles` failed to read for this manifest, which it
+ * then leaves to the prepare that needs one rather than trying again at every play.
  */
-let framesCache: { manifest: string; frames: Map<string, ReturnType<typeof containedFrames>> } | undefined;
+let framesCache: { manifest: string; frames: Map<string, Promise<Frames>>; unreadable: Set<string> } | undefined;
 
-async function framesFor(manifest: ScreenManifest, sha: string): Promise<ReturnType<typeof containedFrames>> {
+/** `framesCache`, made `manifest`'s if it is another's: what both use is kept. */
+function cacheOf(manifest: ScreenManifest): NonNullable<typeof framesCache> {
   if (framesCache?.manifest !== manifest.id) {
     const bundles = new Set(Object.values(manifest.templates).map((t) => t.html));
     const kept = [...(framesCache?.frames ?? [])].filter(([k]) => bundles.has(k));
-    framesCache = { manifest: manifest.id, frames: new Map(kept) };
+    framesCache = { manifest: manifest.id, frames: new Map(kept), unreadable: new Set() };
   }
-  const cache = framesCache;
+  return framesCache;
+}
+
+function framesFor(manifest: ScreenManifest, sha: string): Promise<Frames> {
+  const cache = cacheOf(manifest);
   let frames = cache.frames.get(sha);
-  if (!frames) cache.frames.set(sha, (frames = containedFrames(await (await getFile(sha)).text())));
+  if (!frames) {
+    // A screen keeps what it contained for its next page load (#232); a preview stores nothing. Kept frames that
+    // cannot be read (Cache Storage refused, or full) are made again: the same frames, made slower.
+    const kept = SOURCE === 'device' ? storedFrames(sha).catch(() => undefined) : Promise.resolve(undefined);
+    const read = kept.then((frames) => {
+      if (frames) {
+        fromKept.add(sha);
+        return frames;
+      }
+      return getFile(sha)
+        .then(parseBundle)
+        .then((made) => {
+          // Only where the read-ahead runs to keep them.
+          if (SOURCE === 'device' && typeof requestIdleCallback === 'function') unkept.set(sha, made);
+          return made;
+        });
+    });
+    cache.frames.set(sha, (frames = read));
+    // A read that failed is not kept: the next prepare tries again. From the cache as it is then,
+    // which a manifest prepared meanwhile has replaced, carrying this read over.
+    read.catch(() => {
+      if (framesCache?.frames.get(sha) === read) framesCache.frames.delete(sha);
+    });
+  }
   return frames;
+}
+
+/**
+ * Frames this page contained and has not kept yet (#232). The read-ahead keeps them, one an idle callback while a spot
+ * plays: writing a 400 kB bundle's frames during the prepare that made them added about 20 ms to it on a Pi.
+ */
+const unkept = new Map<string, Frames>();
+
+/** Bundles whose frames this page read back from what it kept: a prepare from them that fails drops them. */
+const fromKept = new Set<string>();
+
+/**
+ * Stop keeping frames: what waits to be kept, and the read-ahead that would keep it. A revoked screen calls this before
+ * it wipes its storage, so nothing is kept after the wipe.
+ */
+export function stopKeepingFrames(): void {
+  unkept.clear();
+  warming = undefined;
+}
+
+/** The read-ahead running, if one is: the manifest it reads for, and the run, so one that a later run replaced stops. */
+let warming: { manifest: string; run: object } | undefined;
+
+/**
+ * Read the bundles of `manifest` not read yet, one at a time when the page is idle, those of the
+ * spots in `first` first: while a spot plays, so a template's first prepare does not pay for it
+ * (#232). On a Pi 4 a 400 kB bundle's first read and parse took 75 to 210 ms of its first prepare,
+ * of 450 to 610 in all; the template plays in its own process. Each starts when the page is idle and
+ * parses in the bundle worker (`parseBundle`). Before reading, it keeps what the page has contained (`unkept`). `manifest` is the one playing, so the cache is
+ * made its own here, whatever kind of spot came first; it stops once another manifest has been
+ * prepared. Not in a browser without `requestIdleCallback` (Safari): the budget it serves is the
+ * Pi's, and a timer could start a parse in the middle of a prepare.
+ */
+export function warmBundles(manifest: ScreenManifest, first: readonly string[]): void {
+  // Each play asks again: one read-ahead a manifest at a time. Another manifest's in between ends this
+  // one's run, so a manifest that flaps back (A, B, A) within one idle wait starts one run, not two.
+  if (typeof requestIdleCallback !== 'function' || warming?.manifest === manifest.id) return;
+  const run = {};
+  warming = { manifest: manifest.id, run };
+  cacheOf(manifest);
+  const firstBundles = first.flatMap((id) => {
+    const spot = manifest.spots[id];
+    const html = spot?.kind === 'template' && manifest.templates[spot.template]?.html;
+    return html ? [html] : [];
+  });
+  // Each once: a file that cannot be read is left to the prepare that needs it, at this play and the next.
+  const left = new Set([...firstBundles, ...Object.values(manifest.templates).map((t) => t.html)]);
+  const done = () => {
+    if (warming?.run === run) warming = undefined;
+  };
+  // Another manifest prepared while this waited: reading for this one would put its cache back.
+  const ours = () => warming?.run === run && framesCache?.manifest === manifest.id;
+  const next = () => {
+    if (unkept.size && warming?.run === run) {
+      requestIdleCallback(() => {
+        // A revoke may have wiped the storage meanwhile, and ended the run.
+        const keep = warming?.run === run && unkept.entries().next().value;
+        if (!keep) return done();
+        unkept.delete(keep[0]);
+        void storeFrames(...keep)
+          .catch(() => undefined)
+          .then(next);
+      });
+      return;
+    }
+    const cache = framesCache;
+    const sha = ours() && cache ? [...left].find((s) => !cache.frames.has(s) && !cache.unreadable.has(s)) : undefined;
+    if (!sha || !cache) return done();
+    left.delete(sha);
+    requestIdleCallback(() => {
+      if (!ours()) return done();
+      void framesFor(manifest, sha).then(next, () => {
+        cache.unreadable.add(sha);
+        next();
+      });
+    });
+  };
+  next();
 }
 
 async function loadTheme({ brand }: ScreenManifest): Promise<FrameTheme | undefined> {
@@ -136,44 +331,152 @@ export class Slot {
   private urls: string[] = [];
   private abort?: AbortController;
   private video?: HTMLVideoElement;
+  /** Settles when the spot's load is done, whatever its outcome. */
+  private loading: Promise<void> = Promise.resolve();
+  /**
+   * Settles when the load and every refit queued are done; rejects if the last refit failed.
+   * `play` waits for it, so a spot is never played drawn for a size it no longer has.
+   */
+  private fitted: Promise<void> = Promise.resolve();
+  /** A refit is queued and has not started: later resizes join it. */
+  private refitQueued = false;
+  /** The frame was sent `play` since its load: a refit plays it again. */
+  private started = false;
 
-  constructor() {
+  /**
+   * `died` hears that the spot loaded here died after its load, and the slot is blank: a refit
+   * failed, or the template navigated away. A failure while loading rejects `prepare` instead.
+   */
+  constructor(private readonly died: (why: string) => void) {
     this.el.className = 'slot';
     document.body.appendChild(this.el);
+    addEventListener('resize', () => this.refit());
   }
 
-  /** Load a spot and resolve once it can be shown complete. Rejects on error or timeout. */
-  async prepare(spot: Spot, manifest: ScreenManifest): Promise<void> {
+  /**
+   * Load a spot and resolve once it can be shown complete. Rejects on error or timeout, and a
+   * timeout cancels the load, so it always settles. `report: false` (a protocol 1 refit, the
+   * same play loaded again) leaves out the data refused, which its first load counted.
+   */
+  async prepare(spot: Spot, manifest: ScreenManifest, report = true): Promise<void> {
     this.clear();
     this.spot = spot;
-    this.abort = new AbortController();
+    const abort = (this.abort = new AbortController());
     const work =
       spot.kind === 'template'
-        ? this.template(spot, manifest, this.abort.signal)
+        ? this.template(spot, manifest, this.abort.signal, report)
         : spot.kind === 'image'
           ? this.image(spot, this.abort.signal)
           : spot.kind === 'video'
             ? this.playVideo(spot, this.abort.signal)
             : this.url(spot, this.abort.signal);
-    // If the timeout wins, the load is cancelled and rejects later; that is expected, not an error.
+    // If the timeout wins, the load is cancelled and rejects; that is expected, not an error.
     work.catch(() => undefined);
+    this.loading = work.catch(() => undefined);
+    // A refit queued for the spot this replaced still runs, after this load: see `refit`.
+    this.fitted = Promise.all([this.fitted.catch(() => undefined), this.loading]).then(() => undefined);
     let timer = 0;
     const timeout = new Promise<never>((_, reject) => {
-      timer = window.setTimeout(() => reject(new Error(`not ready within ${READY_TIMEOUT_MS} ms`)), READY_TIMEOUT_MS);
+      timer = window.setTimeout(() => {
+        // Rejected before the abort settles `work`, so the race always reports the timeout.
+        reject(new Error(`not ready within ${READY_TIMEOUT_MS} ms`));
+        abort.abort();
+      }, READY_TIMEOUT_MS);
     });
     try {
       await Promise.race([work, timeout]);
+    } catch (err) {
+      // From frames kept on a page load before: they may be well formed and still wrong, so they go, and the next
+      // prepare contains the bundle again. A prepare cancelled for another says nothing about them.
+      const sha = spot.kind === 'template' ? manifest.templates[spot.template]?.html : undefined;
+      if (sha && fromKept.has(sha) && !(err instanceof Error && err.message === 'cancelled')) {
+        fromKept.delete(sha);
+        framesCache?.frames.delete(sha);
+        void dropFrames(sha).catch(() => undefined);
+      }
+      throw err;
     } finally {
       clearTimeout(timer);
     }
   }
 
   /**
-   * Start the prepared spot. Resolves once it plays: at once for a template (it reported ready),
-   * an image or a URL spot, and when its `play()` does for a video. Rejects if the video's is refused.
+   * Start the prepared spot, after any refit queued for it. Resolves once it plays: then for a
+   * template, an image or a URL spot, and when its `play()` does for a video. Rejects if the
+   * video's is refused, or if the refit failed.
    */
   play(): Promise<void> {
-    return this.startPlayback();
+    return this.fitted.then(() => {
+      this.started = true;
+      return this.startPlayback();
+    });
+  }
+
+  /**
+   * Fit a template spot to the viewport again, after a resize or a rotation. Its frames take the
+   * new size, and the template is initialised again for it (`reset`, then `init`; protocol 1
+   * reloads its frame), as playing if it was. Image, video and URL spots fill the slot, so they
+   * need nothing. A refit waits for the load and the refit before it, and later resizes join the
+   * one waiting, so a burst of resizes costs at most two inits, and the last one has the last size.
+   * A refit that fails blanks the slot and reports it (`died`), as a template that navigates away
+   * does: the frame has been reset by then, and shows its markup without data.
+   */
+  private refit(): void {
+    if (this.refitQueued) return;
+    this.refitQueued = true;
+    const run = this.fitted
+      .catch(() => undefined)
+      .then(async () => {
+        this.refitQueued = false;
+        // A spot loaded since this was queued is fitted after its load, which may have read the old size.
+        for (let l = this.loading; ; l = this.loading) {
+          await l;
+          if (l === this.loading) break;
+        }
+        return this.fitAgain();
+      });
+    this.fitted = run;
+    run.catch(() => undefined);
+  }
+
+  private async fitAgain(): Promise<void> {
+    const live = this.live;
+    if (!live || !this.abort || this.abort.signal.aborted) return;
+    // `live.spot` follows a preview update; this is the spot the refit is for.
+    const spot = live.spot;
+    const fit = fitTo(live.template);
+    if (fit.orientation === live.orientation && fit.viewport.width === live.viewport.width && fit.viewport.height === live.viewport.height) return;
+    const replay = this.started;
+    try {
+      if (live.protocol < 2) {
+        await this.prepare(spot, live.manifest, false);
+      } else {
+        live.host.resize(fit.viewport);
+        this.background(fit);
+        live.orientation = fit.orientation;
+        live.viewport = fit.viewport;
+        await live.host.reset();
+      }
+    } catch (err) {
+      // Cleared, or given another spot or a new draft meanwhile: nothing of this refit is on screen.
+      if (this.spot !== spot) throw err;
+      const why = `refit failed: ${err instanceof Error ? err.message : String(err)}`;
+      console.warn(`[sf] ${spot.id}: ${why}`);
+      this.abort?.abort();
+      this.el.replaceChildren();
+      this.died(`${spot.id}: ${why}`);
+      throw err;
+    }
+    if (replay) {
+      this.started = true;
+      await this.startPlayback();
+    }
+  }
+
+  /** Behind a letterboxed template, the background it declares. */
+  private background(fit: ReturnType<typeof fitTo>): void {
+    if (fit.background) this.el.style.setProperty('--slot-bg', fit.background);
+    else this.el.style.removeProperty('--slot-bg');
   }
 
   clear(): void {
@@ -193,6 +496,7 @@ export class Slot {
     this.urls = [];
     this.spot = undefined;
     this.live = undefined;
+    this.started = false;
     this.startPlayback = () => Promise.resolve();
   }
 
@@ -205,136 +509,80 @@ export class Slot {
   /** Set while a template spot is loaded. */
   private live?: LiveFrame;
 
-  private post(m: HostMessage): void {
-    const live = this.live;
-    if (live?.frame.contentWindow) live.wrapper.relay(live.frame.contentWindow, m);
-  }
-
-  /** Wait for the frame's next `ready`; `send` starts what leads to it. */
-  private nextReady(send: () => void, signal: AbortSignal): Promise<void> {
-    const live = this.live!;
-    live.waiter?.reject(new Error('superseded'));
-    return new Promise<void>((resolve, reject) => {
-      live.waiter = { resolve, reject };
-      signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
-      send();
-    });
-  }
-
-  private async template(spot: TemplateSpot, manifest: ScreenManifest, signal: AbortSignal): Promise<void> {
+  private async template(spot: TemplateSpot, manifest: ScreenManifest, signal: AbortSignal, report: boolean): Promise<void> {
     const t = manifest.templates[spot.template];
     if (!t) throw new Error(`template ${spot.template} is not in the manifest`);
     // Speak the protocol the bundle was built against: published bundles never change.
     const protocol = t.manifest.protocol ?? 1;
-    if (!SUPPORTED_PROTOCOLS.includes(protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
-    const { wrapper: wrapperHtml, template: templateHtml } = await framesFor(manifest, t.html);
-    const assets = await spotAssets(spot, manifest);
-    // Protocol 1 bundles predate the theme.
-    const theme = protocol >= 2 ? await brandTheme(manifest) : undefined;
+    if (!playsProtocol(THIS_PLAYER, protocol)) throw new Error(`template ${spot.template} speaks frame protocol ${protocol}, which this player does not`);
+    const locale = screenLocale(manifest);
+    const { data: resolvedData, rejected, fallback } = resolveSpotData(spot, t.manifest.fields, liveData, now(), clock.trusted, locale);
+    if (report) reportRejected(rejected);
+    const [{ wrapper: wrapperHtml, template: templateHtml }, baseAssets, rowImages, theme] = await Promise.all([
+      framesFor(manifest, t.html),
+      spotAssets(spot, manifest),
+      resolveRowImages(t.manifest.fields, resolvedData),
+      // Protocol 1 bundles predate the theme.
+      protocol >= 2 ? brandTheme(manifest) : Promise.resolve(undefined),
+    ]);
+    const assets = { ...baseAssets, ...rowImages.assets };
+    const data = rowImages.data;
     alive(signal);
 
-    // Fit the template to the screen. On an orientation it does not support it is letterboxed
-    // at the shape it does support, over the background it declares.
-    const sw = innerWidth,
-      sh = innerHeight;
-    const screenIs = orientationOf(sw, sh);
-    const orientation = t.manifest.orientations.includes(screenIs) ? screenIs : t.manifest.orientations[0]!;
-    let w = sw,
-      h = sh;
-    if (orientation !== screenIs) {
-      const ratio = orientation === 'landscape' ? 16 / 9 : 9 / 16;
-      w = Math.min(sw, sh * ratio);
-      h = w / ratio;
-      this.el.style.setProperty('--slot-bg', t.manifest.background);
-    }
-
-    // The template runs in a wrapper frame the player writes and the template cannot touch. The
-    // wrapper's policy is the template's too: a srcdoc document inherits its parent's, before any
-    // markup of its own runs, and no document can drop a policy it was given. The wrapper's
-    // policy, not the template's, also decides where the template's frame may navigate: nowhere
-    // (`frame-src` falls back to `default-src 'none'`). A template that tries is replaced by an
-    // error page, without a request. It runs only the bundle's own scripts, each of which first
-    // takes WebRTC away from its realm (`containedFrames` in packages/player-core). See "Template containment" in docs/architecture.md.
-    const wrapperFrame = document.createElement('iframe');
-    // A frame needs a title for assistive technology (WCAG 4.1.2); the editor's preview is read by one.
-    wrapperFrame.title = spot.name;
-    wrapperFrame.style.width = `${w}px`;
-    wrapperFrame.style.height = `${h}px`;
-    wrapperFrame.srcdoc = wrapperHtml;
-    const wrapped = new Promise<void>((resolve) => wrapperFrame.addEventListener('load', () => resolve(), { once: true, signal }));
-    this.el.appendChild(wrapperFrame);
-    await wrapped;
-    alive(signal);
-    const wrapper = wrapperFrame.contentWindow as WrapperWindow;
-    const frame = wrapper.document.createElement('iframe');
-    // Scripts only: an opaque origin, so no access to the player, the wrapper or their storage;
-    // no popups, forms, or navigating any frame but its own.
-    frame.setAttribute('sandbox', TEMPLATE_SANDBOX);
-    frame.title = spot.name;
-    frame.srcdoc = templateHtml;
-
-    const live: LiveFrame = (this.live = {
-      frame,
-      wrapperFrame,
-      wrapper,
+    const fit = fitTo(t.manifest);
+    this.background(fit);
+    // The frames, their containment and the handshake are the Frame host's (player-core). Set once
+    // the wrapper has loaded, before the template's frame is added: what each `init` sends.
+    let live: LiveFrame | undefined;
+    const host = await openFrameHost({
+      container: this.el,
+      frames: { wrapper: wrapperHtml, template: templateHtml },
+      protocol,
+      title: spot.name,
+      size: fit.viewport,
+      // Read at each `loaded`: after an update (`reset`), the new spot's.
+      init: () => ({
+        data: live!.data,
+        assets: live!.assets,
+        durationMs: live!.spot.durationMs,
+        orientation: live!.orientation,
+        viewport: live!.viewport,
+        timezone: live!.manifest.screen.timezone,
+        locale: live!.locale,
+        clock: frameClock(),
+        ...(live!.theme ? { theme: live!.theme } : {}),
+        // Protocol 2, as `theme` is: a protocol 1 bundle's SDK predates the list.
+        ...(live!.protocol >= 2 ? { fallback: live!.fallback } : {}),
+      }),
+      label: spot.template,
+      signal,
+      // Once loaded: blank the slot and report it (`died`), so playback moves on. Aborted, so a resize
+      // before the slot is cleared cannot refit it and report a second death.
+      onNavigatedAway: () => {
+        this.abort?.abort();
+        this.died(`${live!.spot.id}: template navigated away`);
+      },
+    });
+    live = this.live = {
+      host,
       protocol,
       html: t.html,
+      template: t.manifest,
       spot,
       manifest,
+      data,
+      fallback,
+      locale,
       assets,
       theme,
-      orientation,
-      viewport: { width: w, height: h },
-    });
-    // A second load is a navigation, which the policy turned into an error page. Fail the spot; if
-    // it is already playing, blank it until the next spot.
-    let loads = 0;
-    frame.addEventListener(
-      'load',
-      () => {
-        if (++loads < 2) return;
-        console.warn(`[sf] template ${spot.template} navigated away; removed`);
-        wrapperFrame.remove();
-        live.waiter?.reject(new Error('template navigated away'));
-      },
-      { signal },
-    );
-    // One listener for the frame's life. It reads `live`, so after an update (`reset`) the frame's
-    // next `loaded` gets the new spot's init. The template's `parent` is the wrapper, so its
-    // messages arrive there.
-    wrapper.addEventListener(
-      'message',
-      (e: MessageEvent<TemplateMessage>) => {
-        if (e.source !== frame.contentWindow || e.data?.sf !== protocol) return;
-        if (e.data.type === 'loaded') {
-          const locale = screenLocale(live.manifest);
-          const { data, rejected } = resolveSpotData(live.spot, t.manifest.fields, liveData, now(), locale);
-          reportRejected(rejected);
-          this.post({
-            sf: protocol,
-            type: 'init',
-            data,
-            assets: live.assets,
-            durationMs: live.spot.durationMs,
-            orientation: live.orientation,
-            viewport: live.viewport,
-            timezone: live.manifest.screen.timezone,
-            locale,
-            clock: frameClock(),
-            ...(live.theme ? { theme: live.theme } : {}),
-          });
-        } else if (e.data.type === 'ready') live.waiter?.resolve();
-        else if (e.data.type === 'error') live.waiter?.reject(new Error(`template error: ${e.data.message}`));
-      },
-      { signal },
-    );
+      orientation: fit.orientation,
+      viewport: fit.viewport,
+    };
     this.startPlayback = () => {
-      this.post({ sf: protocol, type: 'play' });
+      host.play();
       return Promise.resolve();
     };
-    const ready = this.nextReady(() => wrapper.document.body.appendChild(frame), signal);
-    await ready;
-    alive(signal);
+    await host.start();
   }
 
   /**
@@ -352,25 +600,26 @@ export class Slot {
       return;
     }
     const signal = this.abort.signal;
-    const assets = await spotAssets(spot, manifest);
-    const theme = await brandTheme(manifest);
-    alive(signal);
-    Object.assign(live, { spot, manifest, assets, theme });
-    // The frames are reused, so a rename in the editor must reach their titles too.
-    live.frame.title = live.wrapperFrame.title = spot.name;
-    this.spot = spot;
-    let timer = 0;
-    try {
-      await Promise.race([
-        this.nextReady(() => this.post({ sf: live.protocol, type: 'reset' }), signal),
-        new Promise<never>((_, reject) => {
-          timer = window.setTimeout(() => reject(new Error(`not ready within ${READY_TIMEOUT_MS} ms`)), READY_TIMEOUT_MS);
-        }),
+    const work = (async () => {
+      const locale = screenLocale(manifest);
+      const { data: resolvedData, rejected, fallback } = resolveSpotData(spot, t.manifest.fields, liveData, now(), clock.trusted, locale);
+      reportRejected(rejected);
+      const [baseAssets, rowImages, theme] = await Promise.all([
+        spotAssets(spot, manifest),
+        resolveRowImages(t.manifest.fields, resolvedData),
+        brandTheme(manifest),
       ]);
-    } finally {
-      clearTimeout(timer);
-    }
-    alive(signal);
+      alive(signal);
+      Object.assign(live, { spot, manifest, data: rowImages.data, fallback, locale, assets: { ...baseAssets, ...rowImages.assets }, theme });
+      // The frames are reused, so a rename in the editor must reach their titles too.
+      live.host.setTitle(spot.name);
+      this.spot = spot;
+      await live.host.reset();
+    })();
+    // Queued as a load: a refit waits for it, and one it supersedes gives way quietly (see `fitAgain`).
+    this.loading = work.catch(() => undefined);
+    this.fitted = Promise.all([this.fitted.catch(() => undefined), this.loading]).then(() => undefined);
+    await work;
     await this.play();
   }
 
@@ -417,7 +666,11 @@ export class Slot {
     frame.setAttribute('sandbox', 'allow-scripts allow-same-origin');
     frame.title = spot.name;
     frame.style.cssText = 'width:100%;height:100%';
-    const loaded = new Promise<void>((resolve) => frame.addEventListener('load', () => resolve(), { once: true, signal }));
+    // Rejects on abort, so a page that never loads settles once skipped: `play` waits for it (`fitted`).
+    const loaded = new Promise<void>((resolve, reject) => {
+      frame.addEventListener('load', () => resolve(), { once: true, signal });
+      signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+    });
     frame.src = target.href;
     this.el.appendChild(frame);
     await loaded;

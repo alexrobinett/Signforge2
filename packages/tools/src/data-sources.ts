@@ -7,64 +7,24 @@
  * `json-table` source is a table, whose rows a spot maps onto a list field (`read_table` shows
  * one before it is added).
  */
-import { BINDING_PATH, type DataSnapshot } from '@signforge/contract';
+import type { DataSnapshot } from '@signforge/contract';
 import { type DataSourceRow, newId, type OrgScope, published } from '@signforge/db';
-import { FEED_URL_PROBLEMS, feedUrlProblem } from '@signforge/feeds';
-import { z } from 'zod';
-import { id, idempotencyKey, ifVersion, name } from './fields';
-import { page, pageInput } from './paging';
-import { defineTool, notFound, ToolError } from './tool';
-import { type dataSourceOutput, outputs, sourceFormat, TABLE_FORMATS } from './outputs';
+import { staleAge } from '@signforge/player-core';
+import type { z } from 'zod';
+import { page } from './paging';
+import { defineTool, invalidFields, notFound, ToolError, type ToolContext } from './tool';
+import { type dataSourceOutput, outputs, type sourceFormat } from './outputs';
+import { inputs, jsonTableOnly, MIN_REFRESH_S, ROWS_PATH_ONLY_JSON_TABLE, RSS_REFRESH_S, type saveDataSourceInput } from './inputs';
 
 /** Per org (docs/backend-plan.md, Data sources, Limits). */
 const MAX_DATA_SOURCES = 10;
-const MIN_REFRESH_S = 300;
-const MAX_REFRESH_S = 86_400;
 
-const feedUrl = z
-  .string()
-  .max(2048)
-  .superRefine((url, ctx) => {
-    const problem = feedUrlProblem(url);
-    if (problem) ctx.addIssue({ code: 'custom', message: FEED_URL_PROBLEMS[problem] });
-  })
-  .describe('The feed: https, on the default port, naming a public host. Stored encrypted and never shown again');
-const refreshS = z
-  .number()
-  .int()
-  .min(MIN_REFRESH_S, `refresh no faster than every ${MIN_REFRESH_S} seconds`)
-  .max(MAX_REFRESH_S)
-  .describe(`How often to poll the feed, in seconds, ${MIN_REFRESH_S} to ${MAX_REFRESH_S}`);
-const horizonDays = z
-  .number()
-  .int()
-  .min(1)
-  .max(366)
-  .describe('Calendars only: how many days ahead events reach (default 30). A holiday board wants months, a meeting room days');
-const rowsPath = z
-  .string()
-  .max(200)
-  .regex(BINDING_PATH, 'must be a dot path such as data.items')
-  .describe('json-table only: the dot path to the list of objects, such as data.items. Absent: the document is the list');
-const ROWS_PATH_ONLY_JSON_TABLE = 'rowsPath is for json-table sources only';
-const photos = z
-  .boolean()
-  .describe("rss only: whether screens get the stories' photos, which the server fetches, checks and stores (default true). False: headlines only");
 const PHOTOS_ONLY_RSS = 'photos is for rss sources only';
-const resource = z
-  .string()
-  .trim()
-  .min(1)
-  .max(1024)
-  .describe('Provider sources only: what to read at the provider, such as a calendar id or a sheet range. Stored encrypted and never shown again');
 const PROVIDER_FIELDS = 'a provider source takes connectionId and resource, and no feedUrl; any other format takes feedUrl only';
 
-/** What a new source reads: a provider source a resource through its connection, a feed its URL; refused if it is given the other's fields. */
-function locatorOf(v: { format: string; feedUrl?: string; connectionId?: string; resource?: string }): string {
-  const locator = v.format === 'provider' ? !v.feedUrl && v.connectionId && v.resource : !v.connectionId && !v.resource && v.feedUrl;
-  if (!locator) throw new ToolError('invalid_input', PROVIDER_FIELDS);
-  return locator;
-}
+/** What a new source reads: a provider source a resource through its connection, a feed its URL; none if it is given the other's fields. */
+const locatorOf = (v: { format: string; feedUrl?: string; connectionId?: string; resource?: string }) =>
+  (v.format === 'provider' ? !v.feedUrl && v.connectionId && v.resource : !v.connectionId && !v.resource && v.feedUrl) || undefined;
 
 const viewOf = (d: DataSourceRow): z.infer<typeof dataSourceOutput> => ({
   id: d.id,
@@ -74,8 +34,10 @@ const viewOf = (d: DataSourceRow): z.infer<typeof dataSourceOutput> => ({
   refreshS: d.refreshS,
   horizonDays: d.horizonDays,
   rowsPath: d.rowsPath,
-  photos: d.photos,
-  nextPollAt: d.nextPollAt,
+  // An rss source's switch; no other format has photos, whatever an older row stored (#345).
+  photos: d.format === 'rss' && d.photos,
+  // 0 is the poller's "due now", not a time (#543).
+  nextPollAt: d.nextPollAt === 0 ? null : d.nextPollAt,
   failures: d.failures,
   lastError: d.lastError,
   version: d.rowVersion,
@@ -100,11 +62,8 @@ function sourcesBound(json: string | null | undefined): string[] {
 }
 
 const calendarOnly = (f: string, days: number | null | undefined) => days == null || f === 'ical';
-const jsonTableOnly = (f: string, path: string | null | undefined) => path == null || f === 'json-table';
 const rssOnly = (f: string, on: boolean | undefined) => on === undefined || f === 'rss';
 const HORIZON_ONLY_ICAL = 'horizonDays is for ical sources only';
-
-const target = (input: { dataSourceId: string }) => ({ kind: 'data_source', id: input.dataSourceId });
 
 const listDataSources = defineTool({
   name: 'list_data_sources',
@@ -113,7 +72,7 @@ const listDataSources = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ ...pageInput }),
+  input: inputs.list_data_sources,
   output: outputs.list_data_sources,
   example: {},
   handler: async ({ org, input }) => {
@@ -145,7 +104,7 @@ const getDataSource = defineTool({
   scope: 'content:read',
   minRole: 'viewer',
   mutates: false,
-  input: z.object({ dataSourceId: id('data source') }),
+  input: inputs.get_data_source,
   output: outputs.get_data_source,
   example: { dataSourceId: 'weather' },
   handler: async ({ org, input }) => {
@@ -157,6 +116,7 @@ const getDataSource = defineTool({
           version: snap.fetchedAt,
           fetchedAt: new Date(snap.fetchedAt).toISOString(),
           checkedAt: new Date(snap.checkedAt).toISOString(),
+          ...staleAge(snap),
           data: JSON.parse(snap.dataJson),
         }
       : null;
@@ -164,98 +124,129 @@ const getDataSource = defineTool({
   },
 });
 
-const createDataSource = defineTool({
-  name: 'create_data_source',
-  description: `Add a feed the server polls for spots to bind to. At most ${MAX_DATA_SOURCES} per organization. The first poll runs within a minute. Pass an idempotencyKey so a retry cannot add it twice. Returns { dataSource }.`,
+type DataSourceFormat = z.infer<typeof sourceFormat>;
+
+/** Why a source of `format` refuses fields only another format takes. */
+function formatRefusal(input: z.infer<typeof saveDataSourceInput>, format: DataSourceFormat): ToolError | undefined {
+  if (!calendarOnly(format, input.horizonDays)) return invalidFields(HORIZON_ONLY_ICAL, 'horizonDays');
+  if (!jsonTableOnly(format, input.rowsPath)) return invalidFields(ROWS_PATH_ONLY_JSON_TABLE, 'rowsPath');
+  if (!rssOnly(format, input.photos)) return invalidFields(PHOTOS_ONLY_RSS, 'photos');
+  return undefined;
+}
+
+/** The fields a new source of `format` gets wrong for what it reads: those missing for it, and those of the other kind given. */
+const locatorPaths = (input: z.infer<typeof saveDataSourceInput>, format: DataSourceFormat) =>
+  format === 'provider'
+    ? [...(input.feedUrl !== undefined ? ['feedUrl'] : []), ...(['connectionId', 'resource'] as const).filter((k) => input[k] === undefined)]
+    : [...(input.feedUrl === undefined ? ['feedUrl'] : []), ...(['connectionId', 'resource'] as const).filter((k) => input[k] !== undefined)];
+
+/** A new source as save_data_source adds it, its name, format and what it reads; or why not. */
+function newSourceOf(input: z.infer<typeof saveDataSourceInput>): { refused: ToolError } | { name: string; format: DataSourceFormat; locator: string } {
+  if (input.ifVersion !== undefined) return { refused: invalidFields('a new data source has no version yet: ifVersion is for a change', 'ifVersion') };
+  const { name, format } = input;
+  if (name === undefined || format === undefined)
+    return {
+      refused: invalidFields(
+        'a new data source needs a name and a format; give dataSourceId to change one',
+        ...(['name', 'format'] as const).filter((k) => input[k] === undefined),
+      ),
+    };
+  const refused = formatRefusal(input, format);
+  if (refused) return { refused };
+  const locator = locatorOf({ ...input, format });
+  if (!locator) return { refused: invalidFields(PROVIDER_FIELDS, ...locatorPaths(input, format)) };
+  return { name, format, locator };
+}
+
+/**
+ * Why save_data_source refuses this input, on what it gives alone and, for a change, the source's format: the agent
+ * drawer's card asks it too, so it never offers a press that can only be refused (#507).
+ */
+export function sourceRefusal(input: z.infer<typeof saveDataSourceInput>, current?: DataSourceFormat): ToolError | undefined {
+  if (input.dataSourceId === undefined) {
+    const made = newSourceOf(input);
+    return 'refused' in made ? made.refused : undefined;
+  }
+  const fixed = (['id', 'format', 'connectionId'] as const).filter((k) => input[k] !== undefined);
+  if (fixed.length)
+    return invalidFields(`a data source's ${fixed.join(', ')} ${fixed.length > 1 ? 'are' : 'is'} fixed once made: add another source for another`, ...fixed);
+  if (current === undefined) return undefined;
+  const refused = formatRefusal(input, current);
+  if (refused) return refused;
+  if (current === 'provider' && input.feedUrl !== undefined) return invalidFields(PROVIDER_FIELDS, 'feedUrl');
+  if (current !== 'provider' && input.resource !== undefined) return invalidFields(PROVIDER_FIELDS, 'resource');
+  return undefined;
+}
+
+const saveDataSource = defineTool({
+  name: 'save_data_source',
+  description: `Add a feed the server polls for spots to bind to, or change one. Without dataSourceId it adds one: a name, a format, and a feedUrl (a provider source: a connectionId and its resource); at most ${MAX_DATA_SOURCES} per organization. The first poll runs within a minute; it polls every refreshS seconds after, by default every ${RSS_REFRESH_S} for rss and ${MIN_REFRESH_S} for the rest. Pass an idempotencyKey so a retry cannot add it twice. With dataSourceId it changes what you give: its name, feed URL (a provider source: its resource), refresh, calendar look-ahead, a json-table's rows path (null clears either) or whether a news feed's photos are shown; a new URL or resource is polled afresh within a minute. A source's format and connection are fixed once made. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { dataSource }.`,
   scope: 'content:draft',
   minRole: 'editor',
   mutates: true,
   idempotent: true,
   needs: ['feedUrls'],
-  input: z
-    .object({
-      id: id('data source').optional().describe('The id spots bind with, such as weather; made for you if absent'),
-      name: name('data source'),
-      format: sourceFormat,
-      feedUrl: feedUrl.optional().describe('Feeds: the URL, https, on the default port, naming a public host. Stored encrypted and never shown again'),
-      connectionId: id('connection').optional().describe('Provider sources only: the connection to read through'),
-      resource: resource.optional(),
-      refreshS: refreshS.default(MIN_REFRESH_S),
-      horizonDays: horizonDays.optional(),
-      rowsPath: rowsPath.optional(),
-      photos: photos.optional(),
-      idempotencyKey,
-    })
-    .refine((v) => calendarOnly(v.format, v.horizonDays), { message: HORIZON_ONLY_ICAL, path: ['horizonDays'] })
-    .refine((v) => jsonTableOnly(v.format, v.rowsPath), { message: ROWS_PATH_ONLY_JSON_TABLE, path: ['rowsPath'] })
-    .refine((v) => rssOnly(v.format, v.photos), { message: PHOTOS_ONLY_RSS, path: ['photos'] }),
-  output: outputs.create_data_source,
+  input: inputs.save_data_source,
+  output: outputs.save_data_source,
   example: {
     id: 'weather',
     name: 'Weather, Atlanta',
     format: 'json',
     feedUrl: 'https://api.open-meteo.com/v1/forecast?latitude=33.75&longitude=-84.39&current=temperature_2m',
   },
-  target: (_input, output) => ({ kind: 'data_source', id: output.dataSource.id }),
-  handler: async ({ org, input, write, services: { feedUrls } }) => {
-    const existing = await org.dataSources.list();
-    if (existing.length >= MAX_DATA_SOURCES) throw new ToolError('conflict', `an organization has at most ${MAX_DATA_SOURCES} data sources`);
-    if (input.id && existing.some((d) => d.id === input.id)) throw new ToolError('conflict', `data source ${input.id} exists`);
-    // The URL (or resource) is sealed to the row's id, so the id is chosen first.
-    const sourceId = input.id ?? newId('src');
-    const urlEncrypted = await feedUrls.seal({ orgId: org.orgId, id: sourceId }, locatorOf(input));
-    const row = write(
-      await org.dataSources.stage.insert({
-        id: sourceId,
-        name: input.name,
-        format: input.format,
-        urlEncrypted,
-        connectionId: input.connectionId ?? null,
-        refreshS: input.refreshS,
-        horizonDays: input.horizonDays ?? null,
-        rowsPath: input.rowsPath ?? null,
-        photos: input.photos ?? true,
-      }),
-    );
-    return { dataSource: viewOf(row) };
+  target: (input, output) => {
+    const sourceId = input.dataSourceId ?? output?.dataSource.id;
+    return sourceId === undefined ? undefined : { kind: 'data_source', id: sourceId };
   },
-});
-
-const updateDataSource = defineTool({
-  name: 'update_data_source',
-  description:
-    "Change a data source: its name, feed URL (a provider source: its resource), refresh, calendar look-ahead, a json-table's rows path (null clears either) or whether a news feed's photos are shown. A new URL or resource is polled afresh within a minute. Only what is given changes. Pass the version you read as ifVersion so a change made since is not overwritten. Returns { dataSource }.",
-  scope: 'content:draft',
-  minRole: 'editor',
-  mutates: true,
-  needs: ['feedUrls'],
-  input: z.object({
-    dataSourceId: id('data source'),
-    name: name('data source').optional(),
-    feedUrl: feedUrl.optional(),
-    resource: resource.optional(),
-    refreshS: refreshS.optional(),
-    horizonDays: horizonDays.nullable().optional(),
-    rowsPath: rowsPath.nullable().optional(),
-    photos: photos.optional(),
-    ifVersion,
-  }),
-  output: outputs.update_data_source,
-  example: { dataSourceId: 'weather', refreshS: 600 },
-  target,
-  handler: async ({ org, input, write, services: { feedUrls } }) => {
-    const row = await requireSource(org, input.dataSourceId);
-    if (!calendarOnly(row.format, input.horizonDays)) throw new ToolError('invalid_input', HORIZON_ONLY_ICAL);
-    if (!jsonTableOnly(row.format, input.rowsPath)) throw new ToolError('invalid_input', ROWS_PATH_ONLY_JSON_TABLE);
-    if (!rssOnly(row.format, input.photos)) throw new ToolError('invalid_input', PHOTOS_ONLY_RSS);
-    if ((row.format === 'provider' && input.feedUrl) || (row.format !== 'provider' && input.resource)) throw new ToolError('invalid_input', PROVIDER_FIELDS);
+  handler: async ({ org, input, write, publishRight, services: { feedUrls } }) => {
+    const { dataSourceId } = input;
+    if (dataSourceId === undefined) {
+      const made = newSourceOf(input);
+      if ('refused' in made) throw made.refused;
+      const { name, format, locator } = made;
+      // A provider source reads whatever its resource names through a person's connection, and get_data_source shows what it
+      // read: it is added only with the right to publish, by a person or an agent (#122; for people too, owner decision on #424).
+      if (format === 'provider')
+        publishRight("Reading a new resource through a person's connection needs the right to publish: ask someone who may publish to add it");
+      const existing = await org.dataSources.list();
+      if (existing.length >= MAX_DATA_SOURCES)
+        throw new ToolError('conflict', `an organization has at most ${MAX_DATA_SOURCES} data sources`, { max: MAX_DATA_SOURCES });
+      if (input.id && existing.some((d) => d.id === input.id)) throw new ToolError('conflict', `data source ${input.id} exists`);
+      // The URL (or resource) is sealed to the row's id, so the id is chosen first.
+      const sourceId = input.id ?? newId('src');
+      const urlEncrypted = await feedUrls.seal({ orgId: org.orgId, id: sourceId }, locator);
+      const row = write(
+        await org.dataSources.stage.insert({
+          id: sourceId,
+          name,
+          format,
+          urlEncrypted,
+          connectionId: input.connectionId ?? null,
+          refreshS: input.refreshS ?? (format === 'rss' ? RSS_REFRESH_S : MIN_REFRESH_S),
+          horizonDays: input.horizonDays ?? null,
+          rowsPath: input.rowsPath ?? null,
+          photos: format === 'rss' && (input.photos ?? true),
+        }),
+      );
+      return { dataSource: viewOf(row) };
+    }
+    const fixed = sourceRefusal(input);
+    if (fixed) throw fixed;
+    const row = await requireSource(org, dataSourceId);
+    // The poller takes a source's change to screens with no publish, whatever spot shows it now or later (one published
+    // meanwhile, a rolled-back screen still syncing it): anything but its name changes only with the right to publish, held
+    // to the commit, for an agent (#122, reviews of #419) and a person alike (owner decision on #424). A name reaches no screen.
+    if (reachesScreens(input))
+      publishRight('Changing a data source needs the right to publish: screens follow its changes with no publish. Its name alone may change');
+    const refused = sourceRefusal(input, row.format);
+    if (refused) throw refused;
     // A new feed, or new rows in it, starts clean: the old one's validators and failures say nothing about it.
-    // Photos switched on or off are read afresh too: the feed may answer 304 to a poll that would now add or drop them.
+    // Feed photos' own read-afresh rule (packages/db `feed-photos.ts`) resets the rest when `photos` or the URL changes.
     const locator = input.feedUrl ?? input.resource;
-    const clean = { etag: null, lastModified: null, photoUrlsJson: null, failures: 0, lastError: null, nextPollAt: 0 };
+    const clean = { etag: null, lastModified: null, failures: 0, lastError: null, nextPollAt: 0 };
     const fresh = {
       ...(locator ? { urlEncrypted: await feedUrls.seal({ orgId: org.orgId, id: row.id }, locator), ...clean } : {}),
-      ...(input.rowsPath !== undefined || (input.photos !== undefined && input.photos !== row.photos) ? clean : {}),
+      ...(input.rowsPath !== undefined ? clean : {}),
     };
     const updated = write(
       await org.dataSources.stage.update(
@@ -277,6 +268,10 @@ const updateDataSource = defineTool({
  */
 export const madeBySpotEditor = (dataSourceId: string) => /^weather-\d+-[cf]-(?:mph|kmh)-[0-9a-f]{6}$/.test(dataSourceId);
 
+/** Whether a change changes more than a source's name: anything else, a field added later included, reaches screens. */
+export const reachesScreens = (input: Record<string, unknown>) =>
+  Object.entries(input).some(([k, v]) => v !== undefined && !['dataSourceId', 'name', 'ifVersion', 'idempotencyKey'].includes(k));
+
 /** Spots whose draft or published version binds a field to `dataSourceId`. */
 async function spotsBinding(org: OrgScope, dataSourceId: string): Promise<string[]> {
   return (await org.spots.list())
@@ -284,25 +279,13 @@ async function spotsBinding(org: OrgScope, dataSourceId: string): Promise<string
     .map((s) => s.id);
 }
 
-const deleteDataSource = defineTool({
-  name: 'delete_data_source',
-  description:
-    'Delete a data source and its snapshot. Refused with a conflict while a spot, as drafted or as published, binds to it; unbind those spots first. Returns { deleted: dataSourceId }.',
-  scope: 'content:draft',
-  minRole: 'editor',
-  mutates: true,
-  input: z.object({ dataSourceId: id('data source') }),
-  output: outputs.delete_data_source,
-  example: { dataSourceId: 'weather' },
-  target,
-  handler: async ({ org, input, write }) => {
-    await requireSource(org, input.dataSourceId);
-    const spotIds = await spotsBinding(org, input.dataSourceId);
-    if (spotIds.length) throw new ToolError('conflict', `data source ${input.dataSourceId} is bound by ${spotIds.length} spots`, { spotIds });
-    write(org.dataSources.stage.delete(input.dataSourceId));
-    return { deleted: input.dataSourceId };
-  },
-});
+/** Delete a data source and its snapshot (the `delete` tool, ./delete.ts): refused with a conflict while a spot, drafted or published, binds it. */
+export async function deleteDataSource({ org, write }: Pick<ToolContext<unknown>, 'org' | 'write'>, dataSourceId: string) {
+  await requireSource(org, dataSourceId);
+  const spotIds = await spotsBinding(org, dataSourceId);
+  if (spotIds.length) throw new ToolError('conflict', `data source ${dataSourceId} is bound by ${spotIds.length} spots`, { spotIds });
+  write(org.dataSources.stage.delete(dataSourceId));
+}
 
 const findPlaces = defineTool({
   name: 'find_places',
@@ -313,7 +296,7 @@ const findPlaces = defineTool({
   mutates: false,
   // Unlimited, one member could use up the geocoder's free allowance for every org.
   needs: ['rateLimit', 'places'],
-  input: z.object({ query: z.string().trim().min(2, 'type at least 2 letters of the place').max(100).describe('A place name, such as Atlanta') }),
+  input: inputs.find_places,
   output: outputs.find_places,
   example: { query: 'Atlanta' },
   handler: async ({ input, services: { places, rateLimit } }) => {
@@ -331,13 +314,7 @@ const readTable = defineTool({
   mutates: false,
   // Unlimited, one member could make the API fetch any URL as fast as it answers.
   needs: ['rateLimit', 'tables'],
-  input: z
-    .object({
-      feedUrl,
-      format: z.enum(TABLE_FORMATS).describe('csv: a header row, then a row per item; json-table: a list of objects'),
-      rowsPath: rowsPath.optional(),
-    })
-    .refine((v) => jsonTableOnly(v.format, v.rowsPath), { message: ROWS_PATH_ONLY_JSON_TABLE, path: ['rowsPath'] }),
+  input: inputs.read_table,
   output: outputs.read_table,
   example: { feedUrl: 'https://example.com/menu.csv', format: 'csv' },
   handler: async ({ input, services: { tables, rateLimit } }) => {
@@ -346,4 +323,4 @@ const readTable = defineTool({
   },
 });
 
-export const dataSourceTools = [listDataSources, getDataSource, createDataSource, updateDataSource, deleteDataSource, findPlaces, readTable];
+export const dataSourceTools = [listDataSources, getDataSource, saveDataSource, findPlaces, readTable];

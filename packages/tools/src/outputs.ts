@@ -9,14 +9,29 @@
  * CMS's DOM typecheck loads it, which it cannot do with the tool files. A schema a tool also takes
  * as input (a transition, a table mapping) lives here too, and the tool imports it.
  */
-import { BRAND_SHAPES, SCREEN_KINDS, TABLE_ROWS_PATH, TEMPLATE_CHECKS, type DisplayHours, type TemplateManifest } from '@signforge/contract';
+import {
+  BRAND_COLORS,
+  BRAND_SHAPES,
+  FAILED_RELEASE_REASONS,
+  LIVE_SOURCES,
+  PLAYER_CHANNELS,
+  SCREEN_KINDS,
+  TABLE_ROWS_PATH,
+  TEMPLATE_CHECKS,
+  type FieldDef,
+  type ListItemFieldDef,
+  type TemplateManifest,
+} from '@signforge/contract';
 import type { CompileInput } from '@signforge/compiler';
 import { z } from 'zod';
-import { displayHours, draftOutput, orientation, version } from './fields';
+import { displayHours, draftOutput, orientation, selector, version } from './fields';
 import { NEEDS_YOU_REASONS, STATE_KINDS } from './screen-state';
 
+/** What a caller's grant allows. Sessions get every scope their role allows; an agent's OAuth grant names its own (Milestone 4). */
+export const SCOPES = ['content:read', 'content:draft', 'content:publish', 'screens:manage', 'org:manage'] as const;
+
 /** Why a tool refused: the `error` of its answer, next to `message` and, for some, `details`. */
-export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited' | 'unavailable';
+export type ToolErrorCode = 'unknown_tool' | 'forbidden' | 'invalid_input' | 'not_found' | 'conflict' | 'rate_limited' | 'unavailable' | 'sample_text';
 
 /** The output field a list tool adds (./paging.ts). */
 const nextOutput = z.string().nullable().describe('Pass as cursor to get the next page; null on the last page');
@@ -44,7 +59,8 @@ export const screenOutput = z.object({
   reportedManifestId: z.string().nullable().describe('The manifest the screen last said it is playing'),
   lastSeenAt: z.number().nullable(),
   playerVersion: z.string().nullable(),
-  displayOverride: displayOverrideOutput.nullable().describe('A wake now or sleep now in force, set with set_display_override'),
+  playerChannel: z.enum(PLAYER_CHANNELS).describe('Which player releases its device installs: canary gets each first, stable once promoted (#628)'),
+  displayOverride: displayOverrideOutput.nullable().describe('A wake now or sleep now in force, set with screen_command'),
   state: z
     .object({
       kind: z.enum(STATE_KINDS),
@@ -60,10 +76,20 @@ export const screenOutput = z.object({
     .object({
       at: z.number(),
       playerVersion: z.string(),
+      playerRelease: z.number().nullable().describe('The player release the build is (#628); null for one the release workflow did not make'),
+      failedReleases: z
+        .array(z.object({ version: z.number(), reason: z.enum(FAILED_RELEASE_REASONS) }))
+        .describe('Player releases its device supervisor rolled back, newest first, until it runs a newer one (#628)'),
       activeManifestId: z.string().nullable(),
       filesMissing: z.number(),
       fallbackFrom: z.string().nullable().describe('A newer manifest that played nothing, so the screen went back to its last good one'),
       displayOn: z.boolean(),
+      displayOutput: z
+        .object({ mode: z.string(), resets: z.number().int() })
+        .nullable()
+        .describe(
+          'The video mode its supervisor last read (1920x1080@60 when right) and how often it set it back since it started; null on a screen without one',
+        ),
       clockTrusted: z.boolean(),
       driftMs: z.number(),
     })
@@ -81,6 +107,7 @@ export const screenOutput = z.object({
           name: z.string(),
           kind: z.enum(['template', 'image', 'video', 'url']),
           template: z.string().nullable(),
+          templateName: z.string().nullable().describe("The template's name, as people see it; null for a spot that is not a template"),
           image: z.string().nullable().describe('SHA-256 of an image the spot shows, for a thumbnail (GET /api/blobs/v2/:sha256)'),
         })
         .nullable()
@@ -107,8 +134,9 @@ export type CredentialView = z.infer<typeof credentialOutput>;
 const groupOutput = z.object({
   id: z.string(),
   name: z.string(),
-  screenIds: z.array(z.string()).describe('The screens in the group, ordered by id'),
-  version: version.describe('Moves on when the name or the screens change; pass it as ifVersion to update only what you read'),
+  screenIds: z.array(z.string()).describe("Its screens, by id: a rule group's are those its selector matches now"),
+  selector: selector.nullable().describe("A smart group's rule; null for a group of listed screens"),
+  version: version.describe('Moves on when its name, rule or screens change; pass it as ifVersion'),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
@@ -135,6 +163,12 @@ const publishResult = z.object({
   promoted: z.array(draftRef).describe('Drafts this publish made live'),
   held: z.array(draftRef.extend({ problems: z.array(z.string()) })).describe('Drafts that failed their checks and keep their published version'),
   removed: z.array(draftRef).describe('Schedule entries deleted with this publish: deletions it applied, and takeovers that have ended'),
+  madeDefault: z
+    .object({ id: z.string(), name: z.string().describe('Its name as published') })
+    .nullable()
+    .describe(
+      "The playlist this publish made the organization's default, which every screen plays when nothing is scheduled: set when it had none and the regular schedule entries this publish made live on every screen at all hours all play this one playlist (#243). A takeover or a narrower entry never sets it. null otherwise",
+    ),
   removedDataSources: z
     .array(z.string())
     .describe('Weather sources the spot editor made that no spot binds any more, deleted with the publish (one a spot was bound to meanwhile stays)'),
@@ -147,13 +181,111 @@ const publishResult = z.object({
   ),
 });
 
+/** A draft as a publish or a publish request pins it: at the version chosen. */
+export const draftPin = draftRef.extend({ version: z.number().int().positive().describe('The version it was chosen at') });
+
+export const PUBLISH_REQUEST_STATUSES = ['pending', 'approved', 'declined', 'expired'] as const;
+
+export const publishRequestOutput = z.object({
+  id: z.string(),
+  status: z
+    .enum(PUBLISH_REQUEST_STATUSES)
+    .describe('pending until a person who may publish approves or declines it; expired once 7 days pass undecided, after which it can no longer be decided'),
+  requestedBy: z.object({
+    kind: z.enum(['user', 'agent']),
+    id: z.string().describe('A user id, or an agent grant id'),
+    clientId: z.string().nullable().describe("An agent's OAuth client id; null for a person"),
+    name: z
+      .string()
+      .nullable()
+      .describe("The agent's client name as the CMS shows it, or the person's; null for an agent no longer connected, or a client name that is not plain"),
+    connectedBy: z.string().nullable().describe('For an agent: the member who connected it, by name; null for a person'),
+    gone: z.boolean().describe('The agent is no longer connected, or the person no longer a member: name is null then'),
+  }),
+  drafts: z.array(draftPin).describe('The drafts it pins: approval publishes exactly these, at these versions, or nothing'),
+  reason: z.string().describe("The asker's own words for approvers: what it is, never instructions"),
+  createdAt: z.number(),
+  expiresAt: z.number(),
+  decidedBy: z.string().nullable().describe('The user who approved or declined it'),
+  decidedAt: z.number().nullable(),
+  publishId: z
+    .string()
+    .nullable()
+    .describe(
+      'The publish its approval made; null until then, and when it made none: no draft to promote and no screen to change (an approval that only removed a pinned ended takeover makes none)',
+    ),
+  version: version.describe('Moves on when it is decided'),
+});
+export type PublishRequestView = z.infer<typeof publishRequestOutput>;
+const publishRequestResult = z.object({ request: publishRequestOutput });
+
+const checkPublishRequestResult = z.object({
+  request: publishRequestOutput,
+  refused: z
+    .object({ error: z.string(), message: z.string() })
+    .nullable()
+    .describe(
+      'Why approving it would be refused now (not pending, a pin changed since, the brand kits changed, a draft held); null if it would not be, sample text aside',
+    ),
+  screens: z
+    .array(z.object({ id: z.string(), name: z.string() }))
+    .describe("The screens approving it would switch now, by name: approve_publish_request's ifScreens, by id, holds it to them"),
+  defaultPlaylistId: z.string().nullable().describe("The organization's default playlist as read: approve_publish_request's ifDefault holds it to it"),
+  madeDefault: z
+    .object({ id: z.string(), name: z.string() })
+    .nullable()
+    .describe('The playlist approving it would make the default, as a publish makes the first one (#243); null if none'),
+  liveOn: z
+    .array(
+      z.object({
+        spotId: z.string(),
+        screens: z.number().int().describe('Screens playing it now: in a published playlist their published schedule or the default plays'),
+      }),
+    )
+    .describe('Each pinned spot, and how many screens play its published version now'),
+  held: z.array(draftRef.extend({ problems: z.array(z.string()) })).describe('Pinned drafts that fail their checks: approving publishes none of them'),
+  samples: z
+    .array(z.object({ spotId: z.string(), name: z.string(), version: z.number(), fields: z.array(z.string()) }))
+    .describe("Pinned spots still holding their template's sample text: approve_publish_request's allowSample, exactly, publishes them anyway"),
+  changes: z
+    .array(
+      draftRef.extend({
+        name: z.string(),
+        fresh: z.boolean().describe('Never published: every field is new'),
+        fields: z.array(z.string()).describe("Its fields that differ from what screens have: a template spot's by field key, otherwise the field's name"),
+      }),
+    )
+    .describe('Each pinned draft, and what it changes'),
+});
+
+/**
+ * What a publish changed (#370), kept on its row: per kind, and whether made live or removed, how many drafts
+ * exactly, and some of their names. Held to a size (`summarizeChanges`), so a publish of thousands of drafts
+ * stores a few kilobytes.
+ */
+export const publishChanges = z.array(
+  z.object({
+    // `group`: smart groups whose screens it moved in or out, named (#187); drafts' kinds otherwise.
+    kind: z.enum([...DRAFT_KINDS, 'group']),
+    removed: z.boolean().describe('Schedule entries this publish deleted; false for drafts it made live'),
+    count: z.number().int().nonnegative().describe('How many drafts, exactly'),
+    names: z.array(z.string()).describe("Some of their names, each once, as published: a schedule entry's is its playlist's"),
+    omitted: z.number().int().nonnegative().describe('Names left out of names, for the size'),
+  }),
+);
+
 export const publishOutput = z.object({
   id: z.string(),
   revision: z.number().int(),
   restoresId: z.string().nullable().describe('For a roll back: the publish whose screens it put back'),
   restoresRevision: z.number().int().nullable().describe("For a roll back: that publish's revision"),
-  by: z.object({ kind: z.string(), id: z.string(), name: z.string().nullable().describe("A member's name; null for an agent or the system") }),
+  by: z.object({
+    kind: z.string(),
+    id: z.string(),
+    name: z.string().nullable().describe("A member's name, else their address before the @ (never the whole address); null for an agent or the system"),
+  }),
   createdAt: z.number(),
+  rollBackUntil: z.number().describe('Until when it may be rolled back to: 90 days after it was made, as long as the storage clean-up keeps its files'),
   finishedAt: z.number().nullable().describe('When every screen it switched played it, moved on to a later publish, or was revoked'),
   reached: z
     .number()
@@ -171,26 +303,76 @@ export const publishOutput = z.object({
     .describe(
       'Of those, how many it still waits on: neither playing, replaced nor revoked. Its rollout is over at 0, and the five-minute check then marks it finished',
     ),
+  changes: publishChanges
+    .nullable()
+    .describe('What it made live, and the schedule entries it removed, by kind; null for a roll back, and for a publish made before these were kept'),
 });
 
-export const OUTCOMES = ['playing', 'downloading', 'asleep', 'offline', 'waiting', 'fell_back', 'revoked', 'replaced'] as const;
+export const OUTCOMES = ['playing', 'downloading', 'asleep', 'unreachable', 'waiting', 'fell_back', 'revoked', 'replaced'] as const;
 
 // ------------------------------------------------------------------ templates
 
 export const TEMPLATE_STATUSES = ['draft', 'approved', 'retired'] as const;
 
+const fieldLabel = z.string().describe('Shown over its input in the editor');
+const scalarFields = [
+  z.object({ type: z.literal('text'), label: fieldLabel, default: z.string().optional(), maxLength: z.number().optional(), maxMarks: z.number().optional() }),
+  z.object({
+    type: z.literal('number'),
+    label: fieldLabel,
+    default: z.number().optional(),
+    min: z.number().optional(),
+    max: z.number().optional(),
+    step: z.number().optional(),
+  }),
+  z.object({ type: z.literal('boolean'), label: fieldLabel, default: z.boolean().optional() }),
+  z.object({ type: z.literal('color'), label: fieldLabel, default: z.string().optional() }),
+  z.object({ type: z.literal('select'), label: fieldLabel, options: z.array(z.string()), default: z.string().optional() }),
+  z.object({ type: z.literal('url'), label: fieldLabel, default: z.string().optional(), maxLength: z.number().optional(), maxBytes: z.number().optional() }),
+  z.object({ type: z.literal('date'), label: fieldLabel, default: z.string().optional(), min: z.string().optional(), max: z.string().optional() }),
+  z.object({ type: z.literal('datetime'), label: fieldLabel, default: z.string().optional(), min: z.string().optional(), max: z.string().optional() }),
+] as const;
+const listItemField: z.ZodType<ListItemFieldDef> = z.discriminatedUnion('type', [...scalarFields, z.object({ type: z.literal('image'), label: fieldLabel })]);
+const fieldDef: z.ZodType<FieldDef> = z.discriminatedUnion('type', [
+  ...scalarFields,
+  z.object({
+    type: z.literal('image'),
+    label: fieldLabel,
+    portraitBox: z.object({ w: z.number(), h: z.number() }).optional().describe('The largest box it is drawn in on a portrait screen, in CSS px'),
+  }),
+  z.object({
+    type: z.literal('list'),
+    label: fieldLabel,
+    item: z.record(z.string(), listItemField),
+    maxItems: z.number().optional(),
+    default: z.array(z.record(z.string(), z.unknown())).optional(),
+  }),
+]);
+const liveSource = z.object({
+  source: z.enum(LIVE_SOURCES),
+  fields: z.record(z.string(), z.string()).describe("Field name to its path in the source's snapshot"),
+  place: z.string().optional(),
+  units: z.object({ temperature: z.string().optional(), wind: z.string().optional() }).optional(),
+});
+
 /**
- * A built `template.json`. Checked loosely: the contract has no runtime schema for it yet (M3-31);
- * `checkTemplateBundle` checked it in full when the version was registered.
+ * A built `template.json`, as a tool's output describes it: the contract's `TemplateManifest`, which its
+ * `templateManifestShape` checked in full when the version was registered (`checkTemplateBundle`).
  */
-const manifestOutput = z
-  .custom<TemplateManifest>(
-    (v) =>
-      z
-        .looseObject({ id: z.string(), version: z.string(), name: z.string(), fields: z.record(z.string(), z.unknown()), orientations: z.array(z.string()) })
-        .safeParse(v).success,
-    'not a template manifest',
-  )
+const manifestOutput: z.ZodType<TemplateManifest> = z
+  .object({
+    id: z.string(),
+    version: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    fields: z.record(z.string(), fieldDef),
+    duration: z.object({ defaultMs: z.number(), minMs: z.number(), maxMs: z.number() }),
+    orientations: z.array(orientation),
+    uses: z.array(z.enum(['canvas', 'webgl', 'audio'])),
+    background: z.string(),
+    protocol: z.number().optional(),
+    live: z.union([liveSource, z.object({ sources: z.record(z.string(), liveSource.extend({ label: z.string() })) })]).optional(),
+  })
   .describe("The template's template.json, as built: id, version, name, fields, duration, orientations, uses, background");
 
 /** What is stored on a version: the contract's report, plus when it ran and on which sources. */
@@ -268,7 +450,7 @@ export const assetOutput = z.object({
   id: z.string(),
   name: z.string(),
   kind: z.enum(['image', 'video']),
-  status: z.enum(ASSET_STATUSES).describe('pending until finalize_asset checks the upload; only verified assets may be used'),
+  status: z.enum(ASSET_STATUSES).describe('pending until finalize_upload checks the upload; only verified assets may be used'),
   sha256: z.string().describe("The landscape rendition's, as are type, size, width and height"),
   type: z.string(),
   size: z.number(),
@@ -281,12 +463,9 @@ export const assetOutput = z.object({
 });
 export type AssetView = z.infer<typeof assetOutput>;
 
-const uploadOutput = z.object({
-  asset: assetOutput,
-  uploads: z
-    .array(z.object({ sha256: z.string(), method: z.literal('PUT'), url: z.string(), headers: z.record(z.string(), z.string()), expiresAt: z.number() }))
-    .describe('One per file the server does not already hold'),
-});
+const uploadTargets = z.array(
+  z.object({ sha256: z.string(), method: z.literal('PUT'), url: z.string(), headers: z.record(z.string(), z.string()), expiresAt: z.number() }),
+);
 
 // ------------------------------------------------------------------ videos
 
@@ -308,6 +487,29 @@ const fontOutput = z.object({
 });
 
 const fontRef = z.object({ id: z.string(), family: z.string() }).nullable();
+
+const manifestFont = z.object({
+  id: z.string(),
+  family: z.string(),
+  files: z.array(z.object({ weight: z.number(), style: z.enum(['normal', 'italic']), file: z.string() })),
+});
+
+/** The kits a preview's screen may get and the choices among them, as the compiler takes them: each kit the contract's `BrandKit`. */
+const previewBrand: z.ZodType<NonNullable<CompileInput['brand']>> = z.object({
+  screen: z.string().optional(),
+  groups: z.record(z.string(), z.string()),
+  default: z.string().optional(),
+  kits: z.record(
+    z.string(),
+    z.object({
+      id: z.string(),
+      colors: z.record(z.enum(BRAND_COLORS), z.string()),
+      shape: brandShape,
+      fonts: z.object({ display: manifestFont.optional(), body: manifestFont.optional() }),
+      logo: z.object({ onDark: z.string(), onLight: z.string().optional() }).optional(),
+    }),
+  ),
+});
 
 export const brandKitOutput = z.object({
   id: z.string(),
@@ -359,8 +561,8 @@ export const dataSourceOutput = z.object({
   refreshS: z.number(),
   horizonDays: z.number().nullable(),
   rowsPath: z.string().nullable().describe('A json-table source: the path to its list of objects; null for the whole document'),
-  photos: z.boolean().describe("An rss source: whether screens get its stories' photos. Ignored for other formats"),
-  nextPollAt: z.number(),
+  photos: z.boolean().describe("An rss source: whether screens get its stories' photos. False for every other format"),
+  nextPollAt: z.number().nullable().describe('When the poller next reads it; null when due at its next round (new, or just changed)'),
   failures: z.number().describe('Polls in a row that failed; the poller backs off, up to 6 hours'),
   lastError: z
     .string()
@@ -378,7 +580,7 @@ const listedSourceOutput = dataSourceOutput.extend({
 });
 
 const snapshotOutput = z
-  .object({ id: z.string(), version: z.number(), fetchedAt: z.string(), checkedAt: z.string(), data: z.unknown() })
+  .object({ id: z.string(), version: z.number(), fetchedAt: z.string(), checkedAt: z.string(), staleS: z.number().optional(), data: z.unknown() })
   .describe('The latest snapshot, as screens get it; null until a poll succeeds');
 
 const placeOutput = z.object({
@@ -414,20 +616,30 @@ export const connectionOutput = z.object({
 
 // ------------------------------------------------------------------ settings
 
-/** The alerts there are. `screen_offline` and `publish_finished` are sent (by email, to Slack and to the webhook); agents (Milestone 4) send `agent_refused`. */
-export const ALERT_KINDS = ['screen_offline', 'publish_finished', 'agent_refused'] as const;
+/**
+ * The alerts there are, each sent by email, to Slack and to the webhook as its rule says:
+ * `screen_offline` and `publish_finished` by the API's checks, `agent_refused` by `/mcp` (M4-08),
+ * `publish_requested` by `request_publish` (M4-09), its email only to members who may approve.
+ */
+export const ALERT_KINDS = ['screen_offline', 'publish_finished', 'agent_refused', 'publish_requested'] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
 /** Who gets an alert: owners, owners and editors, or every member. */
 export const AUDIENCES = ['owners', 'editors', 'everyone'] as const;
 export type Audience = (typeof AUDIENCES)[number];
+/** The roles each audience is. */
+export const AUDIENCE_ROLES: Record<Audience, readonly ('owner' | 'editor' | 'viewer')[]> = {
+  owners: ['owner'],
+  editors: ['owner', 'editor'],
+  everyone: ['owner', 'editor', 'viewer'],
+};
 
 /** Who gets the email, and which channels get it: `who` is for email only, as Slack and the webhook post to one place (#88). */
 export const rule = z.object({
   who: z.enum(AUDIENCES).describe('Who gets it by email'),
   email: z.boolean().describe('Send it by email'),
-  slack: z.boolean().describe("Post it to the org's Slack channel, if one is set (set_slack_alert_channel)"),
-  webhook: z.boolean().describe("Send it to the org's webhook, if one is set (set_webhook_alert_channel)"),
+  slack: z.boolean().describe("Post it to the org's Slack channel, if one is set (set_alert_channel)"),
+  webhook: z.boolean().describe("Send it to the org's webhook, if one is set (set_alert_channel)"),
 });
 export type AlertRule = z.output<typeof rule>;
 
@@ -447,12 +659,12 @@ export const auditRetentionDays = z
 const settingsView = z.object({
   timezone: z.string().nullable().describe('Default time zone for new screens; null for none set'),
   locale: z.string().nullable().describe('Default locale for new screens; null for the player default'),
-  displayHours: z.custom<DisplayHours>().nullable().describe('Default display hours for new screens; null for always on'),
+  displayHours: displayHours.nullable().describe('Default display hours for new screens; null for always on'),
   updateWindow: z.object({ from: z.string(), to: z.string() }),
   unreachableAfterMinutes: z.number(),
   editorsPublish,
   auditRetentionDays,
-  alerts: z.object({ screen_offline: rule, publish_finished: rule, agent_refused: rule }),
+  alerts: z.object({ screen_offline: rule, publish_finished: rule, agent_refused: rule, publish_requested: rule }),
   version: version.describe('1 until first set, then moves on with every change; pass it as ifVersion to update only what you read'),
   updatedAt: z.number().nullable(),
 });
@@ -471,6 +683,35 @@ export const channelView = z.object({
   version: version.describe('Moves on with every change; pass it as ifVersion to change only what you read'),
   createdAt: z.number(),
   updatedAt: z.number(),
+});
+
+// ------------------------------------------------------------------ AI providers
+
+/** The client id of the agent built into the CMS, which acts as the signed-in member (docs/proposals/cms-agent.md). */
+export const CMS_AGENT_CLIENT_ID = 'cms-agent';
+/** Its type, for the CMS, which imports only types from here: a constant of this type cannot drift from it. */
+export type CmsAgentClientId = typeof CMS_AGENT_CLIENT_ID;
+
+/** The model providers an org can bring its own key for: Anthropic (#261), and any OpenAI-compatible endpoint (#262). */
+export const AI_PROVIDERS = ['anthropic', 'openai-compatible'] as const;
+export type AiProviderName = (typeof AI_PROVIDERS)[number];
+
+export const aiProviderView = z.object({
+  provider: z.enum(AI_PROVIDERS),
+  baseUrl: z.string().nullable().describe("An OpenAI-compatible endpoint's base address; null for Anthropic"),
+  supports: z
+    .object({ images: z.boolean(), jsonSchema: z.boolean() })
+    .describe(
+      'Whether the provider takes images and returns output to a JSON schema, both of which Fill from a flyer needs: Anthropic does both; an endpoint, as its owner said',
+    ),
+  keyLast4: z.string().describe("The key's last four characters; the key itself is sealed and never shown"),
+  keySavedBy: z.string().describe('The user who saved the key'),
+  keySavedAt: z.number(),
+  verifiedAt: z.number().nullable().describe('When a test last reached the provider with this key; null until one does'),
+  fastModel: z.string().nullable().describe('The exact model id for fills from a flyer, photo or link'),
+  capableModel: z.string().nullable().describe("The exact model id for the agent's drawer"),
+  dailyTurnCeiling: z.number().nullable().describe('Agent turns a day across the org; null for no ceiling'),
+  version: version.describe('Moves on with every change; pass it as ifVersion to change only what you read'),
 });
 
 export const deliveryView = z.object({
@@ -517,10 +758,16 @@ const spotOutput = z.object({
   bindings: z
     .record(z.string(), z.object({ dataSourceId: z.string(), path: z.string(), table: tableMapping.optional() }))
     .nullable()
-    .describe('Template spots: fields bound to a data source, as update_spot takes them'),
+    .describe('Template spots: fields bound to a data source, as save_spot takes them'),
   assetId: z.string().nullable().describe('Image and video spots'),
   fit: z.enum(SPOT_FITS).nullable().describe('Image and video spots'),
   url: z.string().nullable().describe('URL spots'),
+  sampleFields: z
+    .object({ texts: z.array(z.string()), lists: z.record(z.string(), z.array(z.array(z.string()))) })
+    .nullable()
+    .describe(
+      "Template spots: the draft's fields still holding the template's sample copy that save_spot's sample started it with: texts by name, and each list's rows, the cells not edited yet. A saved edit of a field, or binding it, takes it out. publish refuses a spot with any (sample_text) unless a person allows it. null for none",
+    ),
   version: version.describe('Moves on with every edit of the draft; pass it as ifVersion to update only what you read'),
   ...draftOutput,
 });
@@ -543,10 +790,56 @@ const playlistOutput = z.object({
   spotIds: z.array(z.string()).describe('The spots in play order'),
   version: version.describe('Moves on with every edit of the draft, its spots too; pass it as ifVersion to update only what you read'),
   isDefault: z.boolean().describe('Whether it is the default playlist: what every screen plays when no schedule entry says otherwise'),
+  publishedSpotCount: z.number().int().describe('How many spots the published playlist plays, whatever its draft holds now; 0 when it was never published'),
   ...draftOutput,
 });
 export type PlaylistView = z.infer<typeof playlistOutput>;
 const playlistResult = z.object({ playlist: playlistOutput });
+
+/** A Reject or its Undo (#116): the draft as it is now, and whether an agent's draft is set aside beside it. */
+const rejected = z.boolean().describe("true: an agent's draft is set aside, and the same call again puts it back (its Undo); false: it was put back");
+
+const agentDraftOutput = z.object({
+  kind: z.enum(['spot', 'playlist']),
+  id: z.string(),
+  version: version.describe("The draft's version: Reject and Keep take it as ifVersion"),
+  proposed: z.boolean().describe("The draft is an agent's proposal: an agent wrote it over the person's draft, kept beside it"),
+  by: z
+    .object({
+      kind: z.enum(['mcp', 'drawer']).describe("An agent over /mcp, or the CMS's agent drawer"),
+      id: z.string().describe('The agent grant, or for the drawer the member who saved it'),
+      clientId: z.string().nullable(),
+      name: z.string().nullable().describe("The agent's client name as a page shows it, or the member's; null when not to be shown"),
+      gone: z.boolean().describe('The agent is no longer connected'),
+      at: z.number().describe('When it last wrote the draft'),
+    })
+    .nullable()
+    .describe("Who proposed it, from the audit log's newest row of an agent writing it; null when not proposed, or the log no longer has it"),
+  rejected: z.boolean().describe("A Reject set an agent's draft aside: the same revert call puts it back"),
+  agents: z
+    .array(
+      z.object({
+        id: z.string().describe('An agent grant'),
+        name: z.string().nullable().describe("Its client's name as a page shows it; null when the name may not be shown, or it is gone"),
+        gone: z.boolean().describe('No longer connected'),
+      }),
+    )
+    .describe("The agents among the draft's newest audit rows, named for its audit log strip"),
+  publishedVersion: z.number().nullable().describe('The version screens have; null if never published'),
+  changes: z
+    .array(
+      z.object({
+        field: z.string(),
+        in: z
+          .enum(['data', 'assets', 'bindings'])
+          .nullable()
+          .describe("A template spot's field, by where it is; null for the spot's or playlist's own (name, durationMs, url, transition, items…)"),
+        was: z.unknown().describe('As published'),
+        now: z.unknown().describe('As drafted'),
+      }),
+    )
+    .describe('What the draft changes against its published version; empty if never published'),
+});
 
 // ------------------------------------------------------------------ schedule
 
@@ -599,11 +892,103 @@ const auditEntryOutput = z.object({
 
 // ------------------------------------------------------------------ every tool's output
 
+/**
+ * A member's role: `ROLES` in ./tool.ts, written out because this file reaches no module that
+ * imports `@signforge/db` (the CMS types its calls by it). test/members.test.ts holds the two equal.
+ */
+const roleOutput = z.enum(['viewer', 'editor', 'owner']);
+const memberOutput = z.object({
+  id: z.string().describe("The membership's id: pass it as memberId"),
+  userId: z.string(),
+  name: z.string(),
+  email: z.string(),
+  role: roleOutput,
+  createdAt: z.string().describe('ISO 8601'),
+});
+const invitationOutput = z.object({
+  id: z.string(),
+  email: z.string(),
+  role: roleOutput,
+  status: z.literal('pending'),
+  expiresAt: z.string().describe('ISO 8601; after it the invitation can no longer be accepted'),
+  inviterId: z.string().describe("The inviting member's user id"),
+  createdAt: z.string().describe('ISO 8601'),
+});
+
+// ------------------------------------------------------------------ agent grants (M4-07)
+
+/** An agent's OAuth client as a page may name it (`shownClient`, ./agent-clients.ts). */
+const agentClientOutput = z.object({
+  id: z.string().describe('Its OAuth client id'),
+  name: z
+    .string()
+    .nullable()
+    .describe(
+      "Its name as it registered it, a claim of its own; null when a page may not show it (not plain ASCII, or it reads as SignForge's): name it an unverified app at its redirect",
+    ),
+  verified: z.boolean().describe("SignForge's own app (the sf CLI); every other client named itself"),
+  redirect: z.union([
+    z.object({ kind: z.literal('web'), host: z.string().describe('The host its code goes to') }),
+    z.object({
+      kind: z.literal('app'),
+      target: z.string().nullable().describe("An app's own scheme (com.example.app:); null when it is not plain, as for a name"),
+    }),
+  ]),
+});
+
+/** An agent grant as the grant tools return it. Times are milliseconds since the epoch. */
+const agentGrantOutput = z.object({
+  id: z.string().describe('The grant id: the agent actor id in the audit log'),
+  client: agentClientOutput,
+  scopes: z.array(z.enum(SCOPES)).describe('What it may do, as granted; each call is capped again by the role of the member it acts as'),
+  grantedBy: z.string().describe('The user id of the member who granted it: the agent acts as them, in this organization only'),
+  createdAt: z.number(),
+  lastUsedAt: z.number().nullable().describe('When it last called /mcp, to within the hour (written at most hourly); null if never'),
+  expiresAt: z.number().describe('Unused until then, it stops working: 90 days from its last use'),
+  version,
+});
+export type AgentGrantView = z.infer<typeof agentGrantOutput>;
+
+/** One call an agent made over /mcp (M4-08), as recorded: what was called and how it ended, never its input, output or message. */
+export const agentCallOutput = z.object({
+  at: z.number().describe('When, in ms since the epoch'),
+  tool: z.string().describe('The tool called, as the agent named it; tools/list for a listing'),
+  result: z
+    .string()
+    .describe("'ok', a refusal's code (forbidden, invalid_input, not_found, conflict, rate_limited, unavailable, unknown_tool), or 'error' for a fault"),
+  change: z.boolean().describe('Whether the tool changes data (its changes are in the audit log)'),
+  needs: z.string().nullable().describe('The scope the tool needs; null for a name that is no tool, or tools/list'),
+  target: z.object({ kind: z.string(), id: z.string() }).nullable().describe("A change's target: the audit log's rows for it are under this"),
+});
+export type AgentCall = z.infer<typeof agentCallOutput>;
+
+/** A grant's calls over a period (M4-08). */
+export const agentUsageOutput = z.object({
+  grantId: z.string(),
+  calls: z.number().int().describe('Every call, tools/list and refusals included'),
+  changes: z.number().int().describe('Calls that changed data'),
+  drafts: z.number().int().describe('Changes to drafts: calls under content:draft that changed data'),
+  refusals: z.number().int().describe('Calls refused, for any reason'),
+});
+export type AgentUsage = z.infer<typeof agentUsageOutput>;
+
+/** Whom one group reached at a publish (#187), by its name then. */
+const groupReach = z.object({
+  groupId: z.string(),
+  name: z.string().describe('Its name at the publish'),
+  rule: z.boolean().describe('A smart group: its screens are the ones its rule matched'),
+  screenIds: z.array(z.string()),
+});
+
 export const outputs = {
   list_screens: z.object({ screens: z.array(screenOutput), next: nextOutput }),
   list_screen_status: z.object({ screens: z.array(screenStatusOutput), next: nextOutput }),
   get_screen: z.object({
     screen: screenOutput,
+    fallbackPublish: z
+      .object({ id: z.string(), revision: z.number().int() })
+      .nullable()
+      .describe('The publish whose version it fell back from (heartbeat.fallbackFrom); null when it has not, or no publish gave it that'),
     groupIds: z.array(z.string()),
     credentials: z.array(credentialOutput),
     events: z.array(
@@ -615,15 +1000,19 @@ export const outputs = {
       }),
     ),
   }),
-  rename_screen: z.object({ screen: screenOutput }),
-  update_screen_settings: z.object({ screen: screenOutput }),
-  set_display_override: z.object({ screen: screenOutput }),
-  identify_screen: z.object({ screenId: z.string(), seconds: z.number() }),
-  restart_screen: z.object({ screenId: z.string() }),
+  update_screen: z.object({ screen: screenOutput }),
+  screen_command: z.object({
+    screenId: z.string(),
+    command: z.string().describe('The command sent'),
+    displayOverride: displayOverrideOutput.nullable().describe('The wake now or sleep now in force after it, null for none'),
+  }),
   revoke_screen_credential: z.object({ credential: credentialOutput }),
   claim_screen: z.object({ screen: screenOutput }),
   update_screen_labels: z.object({
     screens: z.array(z.object({ id: z.string(), labels: z.record(z.string(), z.string()).describe('Its labels after the change') })),
+  }),
+  import_screen_labels: z.object({
+    screens: z.array(z.object({ id: z.string(), labels: z.record(z.string(), z.string()).describe('Its labels after the import') })),
   }),
   list_label_keys: z.object({
     keys: z.array(
@@ -637,21 +1026,40 @@ export const outputs = {
     next: nextOutput,
   }),
   list_groups: z.object({ groups: z.array(groupOutput), next: nextOutput }),
-  create_group: groupResult,
-  rename_group: groupResult,
+  save_group: groupResult,
   delete_group: z.object({ deleted: z.string().describe("The deleted group's id") }),
-  set_group_members: groupResult,
-  add_group_members: groupResult,
-  remove_group_members: groupResult,
   publish_manifest_to_screen: z.object({
     screenId: z.string(),
     manifestId: z.string(),
     changed: z.boolean().describe('False if it was already the desired manifest'),
   }),
   publish: publishResult,
-  end_takeover: publishResult,
+  takeover: publishResult.extend({ entry: entryOutput.optional().describe('publish: the takeover, as published') }),
+  request_publish: publishRequestResult,
+  list_publish_requests: z.object({ requests: z.array(publishRequestOutput), next: nextOutput }),
+  get_publish_request: publishRequestResult,
+  approve_publish_request: z.object({ request: publishRequestOutput, published: publishResult.describe('What the approval published, as publish returns it') }),
+  decline_publish_request: publishRequestResult,
+  reopen_publish_request: publishRequestResult,
+  check_publish_request: checkPublishRequestResult,
   roll_back_publish: z.object({ publish: madeOutput }),
   list_publishes: z.object({ publishes: z.array(publishOutput), next: nextOutput }),
+  count_drafts: z.object({ spots: z.number(), playlists: z.number(), scheduleEntries: z.number() }),
+  preview_publish: z.object({
+    screens: z
+      .array(z.object({ screenId: z.string(), name: z.string(), reasons: z.array(z.string()).describe('Why its content would change, each in words') }))
+      .describe('The screens whose content would change, by name'),
+    unchanged: z.number().int().describe('Screens that would keep what they have'),
+    failed: z
+      .array(z.object({ screenId: z.string(), name: z.string(), problems: z.array(z.string()) }))
+      .describe('Screens that could not be compiled: they keep what they have'),
+    groups: z
+      .array(z.object({ groupId: z.string(), name: z.string(), joined: z.array(z.string()), left: z.array(z.string()) }))
+      .describe("Each group whose screens would change since the last publish's record of them; none before the first such record"),
+    samples: z
+      .array(z.object({ spotId: z.string(), name: z.string(), fields: z.array(z.string()) }))
+      .describe("Spots that would go live with their template's sample text: a publish refuses them unless a person says so"),
+  }),
   get_publish: z.object({
     publish: publishOutput.nullable(),
     screens: z.array(
@@ -663,8 +1071,17 @@ export const outputs = {
         filesMissing: z.number().nullable().describe('downloading: files it has still to fetch'),
         wakesAt: z.string().nullable().describe('asleep: when it wakes'),
         lastSeenAt: z.number().nullable(),
+        state: z
+          .object({ kind: z.enum(STATE_KINDS), reason: z.enum(NEEDS_YOU_REASONS).nullable() })
+          .describe("The screen's state now, its kind and reason as read screen_status gives them"),
       }),
     ),
+    targets: z
+      .array(groupReach)
+      .nullable()
+      .describe(
+        'With targets: whom each group reached at this publish, as it resolved them (#187); null unless asked, or for a publish made before it was kept',
+      ),
   }),
   list_templates: z.object({ templates: z.array(templateOutput), next: nextOutput }),
   get_template: z.object({ template: templateOutput }),
@@ -672,30 +1089,26 @@ export const outputs = {
   set_template_version_status: z.object({ version: versionOutput, changed: z.boolean() }),
   list_assets: z.object({ assets: z.array(assetOutput.extend({ usageCount: z.number().describe('How many spots use it') })), next: nextOutput }),
   get_asset: z.object({ asset: assetOutput, spotIds: z.array(z.string()) }),
-  create_asset_upload: uploadOutput,
-  renew_asset_upload: uploadOutput,
-  finalize_asset: z.object({ asset: assetOutput, changed: z.boolean() }),
-  delete_asset: z.object({ deleted: z.string().describe("The deleted asset's id") }),
-  create_video_upload: z.object({
+  start_upload: z.object({
     asset: assetOutput,
+    uploads: uploadTargets.optional().describe("An image's: one per file the server does not already hold"),
     upload: z
       .object({ uploadId: z.string(), partBytes: z.number(), parts: z.array(partOutput), expiresAt: z.number() })
       .nullable()
-      .describe('Null when the org already holds the file'),
+      .optional()
+      .describe("A video's multipart upload; null when the org already holds the file"),
   }),
-  finalize_video_upload: z.object({ asset: assetOutput, changed: z.boolean() }),
+  finalize_upload: z.object({ asset: assetOutput, changed: z.boolean() }),
   list_fonts: z.object({ fonts: z.array(fontOutput), next: nextOutput }),
   list_brand_kits: z.object({ brandKits: z.array(brandKitOutput), next: nextOutput }),
   get_brand_kit: kitResult,
-  create_brand_kit: kitResult,
-  update_brand_kit: kitResult,
-  set_default_brand_kit: kitResult,
+  save_brand_kit: kitResult.extend({
+    madeDefault: z.boolean().describe("Whether this save made it the organization's default: its first kit, or makeDefault on a kit that was not"),
+  }),
   assign_brand_kit: z.object({ brandKit: brandKitOutput.nullable() }),
   list_data_sources: z.object({ dataSources: z.array(listedSourceOutput), next: nextOutput }),
   get_data_source: z.object({ dataSource: dataSourceOutput, snapshot: snapshotOutput.nullable() }),
-  create_data_source: dataSourceResult,
-  update_data_source: dataSourceResult,
-  delete_data_source: z.object({ deleted: z.string().describe("The deleted data source's id") }),
+  save_data_source: dataSourceResult,
   find_places: z.object({ places: z.array(placeOutput) }),
   read_table: z.object({
     table: z
@@ -720,45 +1133,102 @@ export const outputs = {
   get_org_settings: z.object({ settings: settingsView }),
   update_org_settings: z.object({ settings: settingsView }),
   get_alert_channels: z.object({ slack: channelView.nullable(), webhook: channelView.nullable() }),
-  set_slack_alert_channel: z.object({ channel: channelView }),
-  set_webhook_alert_channel: z.object({ channel: channelView }),
+  set_alert_channel: z.object({ channel: channelView }),
   remove_alert_channel: z.object({ removed: z.boolean() }),
+  get_ai_provider: z.object({ provider: aiProviderView.nullable().describe("Null while the org uses SignForge's demo model") }),
+  save_ai_provider: z.object({ provider: aiProviderView }),
+  test_ai_provider: z.object({
+    ok: z.boolean(),
+    models: z.array(z.string()).describe('The exact model ids the provider offers this key, to choose from; empty when it could not be reached'),
+    problem: z
+      .enum(['refused', 'busy', 'unreachable', 'blocked'])
+      .nullable()
+      .describe(
+        'Why not: the provider refused the key, was busy, did not answer, or is at an address SignForge may not reach (not public https, or a redirect elsewhere)',
+      ),
+    provider: aiProviderView,
+  }),
+  remove_ai_provider: z.object({
+    removed: z.boolean(),
+    provider: z.enum(AI_PROVIDERS).nullable().describe('The provider whose key was removed; null if none was saved'),
+  }),
   test_alert_channel: z.object({ delivery: deliveryView }),
   list_alert_deliveries: z.object({ deliveries: z.array(deliveryView), next: nextOutput }),
   retry_alert_delivery: z.object({ delivery: deliveryView }),
-  list_spots: z.object({ spots: z.array(spotOutput), next: nextOutput }),
+  list_spots: z.object({ spots: z.array(spotOutput), next: nextOutput, total: z.number().describe('How many match the filters, over every page') }),
   get_spot: spotResult,
-  create_spot: spotResult,
-  update_spot: spotResult,
+  save_spot: spotResult,
+  delete_spot: z.object({ deleted: z.string().describe("The deleted spot's id") }),
+  revert_spot_draft: spotResult.extend({ rejected }),
+  keep_spot_draft: spotResult,
   get_spot_preview: z.object({
     preview: z
       .looseObject({
-        // The compiler's input types, not checked: an agent sees any JSON in them.
-        templates: z.record(z.string(), z.custom<CompileInput['templates'][string]>()),
+        templates: z.record(z.string(), z.object({ manifest: manifestOutput, html: z.string().describe("The bundle's SHA-256") })),
         files: z.record(z.string(), z.object({ size: z.number(), type: z.string() })),
-        dataSources: z.array(z.custom<CompileInput['dataSources'][number]>()),
-        brand: z.custom<NonNullable<CompileInput['brand']>>().optional(),
+        dataSources: z.array(z.object({ id: z.string(), refreshS: z.number() })),
+        brand: previewBrand.optional(),
       })
       .describe("A compiler input without its screen and content: templates, files, dataSources and brand (the chosen kit as the screen's)"),
     brandKitId: z.string().nullable().describe('The kit the preview wears, or null for none'),
     problems: z.array(z.string()),
     timezone: z.string().nullable().describe("The organization's time zone for new screens, or null for none set: the probe screen's"),
   }),
-  list_playlists: z.object({ playlists: z.array(playlistOutput), next: nextOutput }),
+  list_playlists: z.object({ playlists: z.array(playlistOutput), next: nextOutput, total: z.number().describe('How many match the filters, over every page') }),
   get_playlist: playlistResult,
-  create_playlist: playlistResult,
-  update_playlist: playlistResult,
-  delete_playlist: z.object({ deleted: z.string().describe("The deleted playlist's id") }),
+  save_playlist: playlistResult,
+  revert_playlist_draft: playlistResult.extend({ rejected }),
+  keep_playlist_draft: playlistResult,
+  get_agent_draft: agentDraftOutput,
   set_default_playlist: playlistResult,
-  list_schedule_entries: z.object({ entries: z.array(entryOutput), next: nextOutput }),
-  create_schedule_entry: entryResult,
+  list_schedule_entries: z.object({
+    entries: z.array(entryOutput),
+    next: nextOutput,
+    total: z.number().describe('How many match the filters, over every page'),
+  }),
+  save_schedule_entry: entryResult,
   start_takeover: entryResult,
-  update_schedule_entry: entryResult,
-  delete_schedule_entry: z.object({
-    deleted: z.string().describe("The deleted entry's id"),
-    version: version.nullable().describe("The deletion's version, to pin in a publish; null when it was never published and went at once"),
+  delete: z.object({
+    deleted: z.string().describe("The deleted thing's id"),
+    version: version
+      .nullable()
+      .describe("A published schedule entry's deletion's version, to pin in a publish; null when it went at once, as everything else does"),
   }),
   list_audit_log: z.object({ entries: z.array(auditEntryOutput), next: nextOutput }),
+  // #345: one read for every type, and what a type holds. A row is its type's own read tool's row (describe says its fields).
+  read: z.object({
+    type: z.string(),
+    items: z.array(z.record(z.string(), z.unknown())),
+    next: z.string().nullable().describe('Pass as cursor for the next page; null when there is none'),
+    total: z.number().optional().describe('How many match the filters, over every page, where the type counts them'),
+    extra: z.record(z.string(), z.unknown()).optional().describe("What the type's list says besides its rows (a connection's providers)"),
+  }),
+  describe: z.object({
+    type: z.string(),
+    about: z.string(),
+    rules: z.string().nullable().describe("What to know of it beyond its fields: a rollout's states, which entry wins, the video spec"),
+    ids: z.boolean().describe('Whether read takes ids for it'),
+    maxIds: z.number().describe('The most ids one read takes for it'),
+    idOptions: z.record(z.string(), z.unknown()).describe("What filter takes with ids, as JSON Schema (a spot's published)"),
+    query: z.boolean().describe('Whether read searches it by query'),
+    filters: z.record(z.string(), z.unknown()).describe('Its filters, as JSON Schema'),
+    summary: z.array(z.string()).describe("The fields of detail summary, read's default"),
+    fields: z.record(z.string(), z.unknown()).describe('Every field of detail full, as JSON Schema'),
+    changedBy: z.array(z.string()).describe('The tools that change it'),
+  }),
+  list_members: z.object({ members: z.array(memberOutput), next: nextOutput }),
+  list_agent_grants: z.object({ grants: z.array(agentGrantOutput), next: nextOutput }),
+  get_agent_grant: z.object({ grant: agentGrantOutput }),
+  update_agent_grant_scopes: z.object({ grant: agentGrantOutput }),
+  revoke_agent_grant: z.object({ revoked: z.string().describe("The revoked grant's id") }),
+  get_agent_grant_usage: z.object({
+    since: z.number().describe('The start of the period counted, in ms since the epoch: the last 7 days'),
+    grants: z.array(agentUsageOutput).describe('Each grant asked about, or each the caller may see'),
+    recent: z.array(agentCallOutput).describe('With grantId: its latest calls, newest first, reads and refusals included'),
+    lastRefusal: agentCallOutput.nullable().describe('With grantId: its latest refused call in the period, if any'),
+  }),
+  list_invitations: z.object({ invitations: z.array(invitationOutput), next: nextOutput }),
+  cancel_invitation: z.object({ canceled: z.string().describe("The canceled invitation's id"), email: z.string().describe('Who it was for') }),
 };
 
 /** A tool's name. */

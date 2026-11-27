@@ -2,18 +2,27 @@ packages:
   - apps/*
   - packages/*
   - templates/*
+  - examples
+  - infra/*
   - spike/m3-platform
+  - spike/m4-oauth
+  - spike/tanstack-ai
 allowBuilds:
   esbuild: true
   workerd: true
 minimumReleaseAgeExclude:
-  - '@cloudflare/workerd-darwin-64@1.20261117.1'
-  - '@cloudflare/workerd-darwin-arm64@1.20261117.1'
-  - '@cloudflare/workerd-linux-64@1.20261117.1'
-  - '@cloudflare/workerd-linux-arm64@1.20261117.1'
-  - '@cloudflare/workerd-windows-64@1.20261117.1'
-  - '@cloudflare/workers-types@5.20261117.1'
+  - "@cloudflare/workerd-darwin-64@1.20261117.1"
+  - "@cloudflare/workerd-darwin-arm64@1.20261117.1"
+  - "@cloudflare/workerd-linux-64@1.20261117.1"
+  - "@cloudflare/workerd-linux-arm64@1.20261117.1"
+  - "@cloudflare/workerd-windows-64@1.20261117.1"
+  - "@cloudflare/workers-types@5.20261117.1"
   - miniflare@5.20261117.0-beta
   - workerd@1.20261117.1
   - wrangler@4.164.0
-  - '@cloudflare/vitest-plugin@1.8.4'
+  - "@cloudflare/vitest-plugin@1.8.4"
+# cmdk 1.1.1 leaves the search's aria-activedescendant unset at opening and, after a filter, on a row it removed
+# (dip/cmdk#413, open; #209). The patch sets selectedItemId on every emit: the first rendered item, disabled or not, whose
+# value is the selected value, the test Item uses for aria-selected. Drop it once a release fixes #413.
+patchedDependencies:
+  cmdk@1.1.1: patches/cmdk@1.1.1.patch

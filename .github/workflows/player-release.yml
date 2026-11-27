@@ -1,0 +1,113 @@
+# A player release (#628), for demo. Run by hand only, never on a pull request. Two jobs:
+# - `build` holds no secret: it installs, builds the player with its release number, packs the tarball as the contract
+#   states it and writes the manifest, and hands both on as an artifact.
+# - `publish` runs in the protected `player-release` environment, whose reviewer approves it before any secret is read,
+#   and runs none of this repository's code or dependencies, only openssl, curl and jq. openssl signs the manifest's exact
+#   bytes; curl sends the manifest, the signature and the tarball to the API (`POST /v1/player-releases/register`,
+#   apps/api/src/releases), which checks the signature against demo's release key and the tarball against the
+#   manifest, stores the tarball in the releases bucket and registers the release on canary. CI holds no Cloudflare
+#   credential. Re-running `publish` after a failure sends the same request, which finishes what is left.
+# The approval covers the run, not the bytes: a poisoned dependency in `build` could still get one malicious player
+# signed, as any build it runs in would. `publish` refuses an artifact whose manifest names another release number,
+# format or a size past what the API stores, and the API checks the number again, so a build cannot choose its number.
+# The release number is the run's number: it only goes up and needs no secret. Re-running every job builds again
+# under the same number, which the API refuses once a release has it. Renaming this file starts the count again at 1,
+# so don't. Set-up is in docs/ci.md ("Player releases"); scripts/player-release-proof.sh runs the same pack and sign
+# with the contract's test key.
+name: Player release
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: player-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  VERSION: ${{ github.run_number }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0, version from package.json's packageManager
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+      - run: pnpm install --frozen-lockfile
+      - name: Build
+        env:
+          SF_PLAYER_RELEASE: ${{ github.run_number }}
+        run: pnpm build:player
+      - name: Pack
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          pnpm exec tsx packages/cli/src/player-release.ts pack dist/player "$RUNNER_TEMP/release" --version "$VERSION"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: player-release
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+
+      # What `build` handed on is checked before anything is signed: the number is this run's, not one the artifact chose;
+      # the format is the contract's; the tarball is the size the manifest says, and within what the API stores (8 MiB).
+      - name: Check the artifact
+        working-directory: ${{ runner.temp }}/release
+        run: |
+          jq -e --argjson v "$VERSION" --argjson size "$(stat -c %s release.tar.gz)" \
+            '.version == $v and .format == 1 and .size == $size and $size >= 1 and $size <= 8388608' manifest.json \
+            || { echo "::error::the artifact's manifest is not release $VERSION, format 1, its tarball's size, at most 8 MiB"; exit 1; }
+          [ "$(sha256sum release.tar.gz | cut -d' ' -f1)" = "$(jq -r .sha256 manifest.json)" ] \
+            || { echo "::error::the tarball is not the one the manifest names"; exit 1; }
+
+      # Ed25519 over the file's bytes exactly (-rawin). The key is written only to the runner's temp, and removed.
+      - name: Sign
+        working-directory: ${{ runner.temp }}/release
+        env:
+          PLAYER_RELEASE_SIGNING_KEY: ${{ secrets.PLAYER_RELEASE_SIGNING_KEY }}
+        run: |
+          key="$RUNNER_TEMP/signing.pem"
+          (umask 077 && printf '%s\n' "$PLAYER_RELEASE_SIGNING_KEY" > "$key")
+          openssl pkeyutl -sign -rawin -inkey "$key" -in manifest.json -out signature.bin
+          rm -f "$key"
+          openssl base64 -A -in signature.bin > signature
+
+      # The body is the manifest's bytes, then the tarball's; the header says where the manifest ends.
+      - name: Register on canary
+        working-directory: ${{ runner.temp }}/release
+        env:
+          API: ${{ vars.PLAYER_RELEASE_API }}
+          SECRET: ${{ secrets.PLAYER_RELEASE_ADMIN_SECRET }}
+        run: |
+          cat manifest.json release.tar.gz > body
+          curl --fail-with-body --silent --show-error --proto '=https' --max-time 300 -o answer.json \
+            -X POST "$API/v1/player-releases/register" \
+            -H "authorization: Bearer $SECRET" -H "x-release-signature: $(cat signature)" \
+            -H "x-release-manifest-bytes: $(stat -c %s manifest.json)" -H "x-release-version: $VERSION" \
+            -H 'content-type: application/octet-stream' \
+            --data-binary @body || { cat answer.json; exit 1; }
+          cat answer.json
+          echo "Release $VERSION is on canary for demo: $(cat answer.json). Promote it with the Player promote workflow." >> "$GITHUB_STEP_SUMMARY"

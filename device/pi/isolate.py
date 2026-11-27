@@ -9,8 +9,15 @@
               optionally followed by extra player options: "a+b&prep=hidden".
               The player drops spot ids its manifest lacks (all of them: it plays the schedule),
               so a spot asked for that never played is listed after the numbers as NOT PLAYED.
+
+  SF_PLAYER   the player page to measure, http://127.0.0.1:8090/index.html (the one deployed) by default,
+              or another build served beside it, so builds can be compared on one Pi.
+
+Each spec starts cold: the HTTP cache and the player origin's storage (its service worker, files and
+manifests) are cleared first, so the build and content asked for are what runs. Its prepares while
+measured are printed after its numbers, in ms.
 """
-import json, re, sys, time, urllib.request
+import json, os, re, sys, time, urllib.parse, urllib.request
 import websocket
 
 
@@ -29,7 +36,11 @@ named = re.fullmatch(r"cut|crossfade|fade|fade(\d+)|(\d+)", transition)
 ms = named and (named[1] or named[2])
 if not named or ms and not 1 <= int(ms) <= 10_000:
     usage(f"<transition> must be cut, crossfade, fade, fade<ms> or <ms>, not {transition!r}")
-page = next(t for t in json.load(urllib.request.urlopen("http://127.0.0.1:9222/json")) if t["type"] == "page" and ":8090/" in t["url"])
+player = os.environ.get("SF_PLAYER", "http://127.0.0.1:8090/index.html")
+origin = "{0.scheme}://{0.netloc}".format(urllib.parse.urlsplit(player))
+# The kiosk's page, on the deployed player or on the one measured last.
+page = next(t for t in json.load(urllib.request.urlopen("http://127.0.0.1:9222/json"))
+            if t["type"] == "page" and (":8090/" in t["url"] or t["url"].startswith(origin + "/")))
 ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=30, suppress_origin=True)
 n = 0
 def call(method, **p):
@@ -53,11 +64,13 @@ def pct(c):
 print(f"{'spots':38s} {'all%':>6s} {'play%':>6s} {'load%':>6s} {'trans%':>6s} {'worst':>6s}  big stalls")
 for spec in specs:
     spots, _, extra = spec.partition('&')
-    call("Page.navigate", url=f"http://127.0.0.1:8090/index.html?debug=1&poll=600&transition={transition}&spots={spots.replace('+', ',')}&{extra}")
+    call("Network.clearBrowserCache")
+    call("Storage.clearDataForOrigin", origin=origin, storageTypes="all")
+    call("Page.navigate", url=f"{player}?debug=1&poll=600&transition={transition}&spots={spots.replace('+', ',')}&{extra}")
     time.sleep(10)
-    ev("__sf.frames = {count: 0, dropped: 0, maxMs: 0}; __sf.byPhase = {}; __sf.stalls.length = 0; 1")
+    ev("__sf.frames = {count: 0, dropped: 0, maxMs: 0}; __sf.byPhase = {}; __sf.stalls.length = 0; __sf.prepares.length = 0; 1")
     time.sleep(secs)
-    s = json.loads(ev("JSON.stringify({f: __sf.frames, p: __sf.byPhase, st: __sf.stalls, sk: __sf.skipped, log: __sf.log})"))
+    s = json.loads(ev("JSON.stringify({f: __sf.frames, p: __sf.byPhase, st: __sf.stalls, sk: __sf.skipped, log: __sf.log, pr: __sf.prepares.map(x => x.ms)})"))
     ph = {k: f"{pct(v):6.2f}" for k, v in s["p"].items()}
     # Overall from the phase totals: the soak logger resets __sf.frames every minute.
     tot = {"count": sum(v["count"] for v in s["p"].values()), "dropped": sum(v["dropped"] for v in s["p"].values())}
@@ -65,4 +78,5 @@ for spec in specs:
     played = {x["spot"] for x in s["log"] if x["playlist"] == "__test"}
     unplayed = [x for x in spots.split("+") if x not in played]
     print(f"{spec[:38]:38s} {pct(tot):6.2f} {ph.get('play', '     -'):>6s} {ph.get('prepare', '     -'):>6s} {ph.get('transition', '     -'):>6s} {s['f']['maxMs']:6d}  {big}"
-          f"{'  SKIPPED ' + str(s['sk']) if s['sk'] else ''}{'  NOT PLAYED ' + ','.join(unplayed) if unplayed else ''}")
+          f"{'  SKIPPED ' + str(s['sk']) if s['sk'] else ''}{'  NOT PLAYED ' + ','.join(unplayed) if unplayed else ''}"
+          f"  prepares {','.join(str(round(m)) for m in s['pr'])}")

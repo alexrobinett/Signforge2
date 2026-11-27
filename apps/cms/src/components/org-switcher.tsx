@@ -56,7 +56,7 @@ export function OrgSwitcher({ shell, hues }: { shell: Shell; hues: Map<string, n
         <DropdownMenuRadioGroup value={active?.id ?? ''} onValueChange={choose}>
           {shell.organizations.map((org) => (
             <DropdownMenuRadioItem key={org.id} value={org.id} disabled={switchingTo !== null}>
-              <OrgAvatar name={org.name} hue={hues.get(org.id)!} className="size-6 rounded text-[0.6rem]" />
+              <OrgAvatar name={org.name} hue={hues.get(org.id)!} className="size-6 rounded text-2xs" />
               <span className="min-w-0 truncate">{org.name}</span>
             </DropdownMenuRadioItem>
           ))}
