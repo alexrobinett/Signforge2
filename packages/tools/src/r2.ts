@@ -4,6 +4,7 @@
  *   o/<org>/b/<sha256>                    assets, template bundles and `/admin` manifest files
  *   o/<org>/f/<sha256>                    feed photos (owned by `apps/api/src/data/feed-photos.ts`, #195, #329)
  *   sys/b/<sha256>                        base templates
+ *   sys/player/<sha256>                   player release tarballs (#628), which CI uploads; no sweep touches `sys/`
  *   o/<org>/m/<screen>/<manifestId>.json  manifests
  *   up/<org>/<asset>/<sha256>             asset uploads waiting for `finalize_upload`
  *
@@ -19,5 +20,7 @@
  */
 export const orgBlobKey = (orgId: string, sha256: string) => `o/${orgId}/b/${sha256}`;
 export const baseBlobKey = (sha256: string) => `sys/b/${sha256}`;
+/** A player release's tarball (#628): served to a device whose channel is offered the release, by its registered hash only. */
+export const playerReleaseKey = (sha256: string) => `sys/player/${sha256}`;
 export const manifestKey = (orgId: string, screenId: string, manifestId: string) => `o/${orgId}/m/${screenId}/${manifestId}.json`;
 export const uploadKey = (orgId: string, assetId: string, sha256: string) => `up/${orgId}/${assetId}/${sha256}`;

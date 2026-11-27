@@ -24,7 +24,7 @@
  * Every tenant `org_id` references Better Auth's `organization` table, with no cascade: an org
  * cannot be deleted while it holds content.
  */
-import { SCREEN_KINDS } from '@signforge/contract';
+import { PLAYER_CHANNELS, SCREEN_KINDS } from '@signforge/contract';
 import { sql } from 'drizzle-orm';
 import { check, customType, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { newId } from './ids';
@@ -411,6 +411,11 @@ export const screens = sqliteTable(
     reportedManifestAt: integer('reported_manifest_at'),
     lastSeenAt: integer('last_seen_at'),
     playerVersion: text('player_version'),
+    /**
+     * Which player releases the screen's device supervisor is offered (#628): `stable` unless it is a canary, which
+     * gets each release first (`player_releases`).
+     */
+    playerChannel: text('player_channel', { enum: PLAYER_CHANNELS }).notNull().default('stable'),
     /**
      * The screen's last heartbeat (`ScreenHeartbeat` in the API): display, clock, cache, fallback and
      * refused data, as its last sync reported them. Null until it first syncs.
@@ -1600,3 +1605,27 @@ export const feedPhotoQueueUsage = sqliteTable('feed_photo_queue_usage', {
   day: text('day').primaryKey(),
   messages: integer('messages').notNull(),
 });
+
+/**
+ * Player builds a device supervisor may install (#628), platform-wide: not a tenant table, no org reads or writes it.
+ * CI registers each release on `canary` with the exact manifest text it signed and the Ed25519 signature; promoting it
+ * moves it to `stable`. The tarball is in R2 at `sys/player/<sha256>` (`playerReleaseKey` in packages/tools). Read
+ * through `platform(db).playerReleases`.
+ */
+export const playerReleases = sqliteTable(
+  'player_releases',
+  {
+    /** The build number in the manifest, which only goes up. */
+    version: integer('version').primaryKey(),
+    sha256: text('sha256').notNull(),
+    size: integer('size').notNull(),
+    /** The release manifest as CI signed it, byte for byte: a device verifies these bytes, then parses them. */
+    manifest: text('manifest').notNull(),
+    /** Its Ed25519 signature, base64. */
+    signature: text('signature').notNull(),
+    channel: text('channel', { enum: PLAYER_CHANNELS }).notNull(),
+    createdAt: created(),
+    promotedAt: integer('promoted_at'),
+  },
+  (t) => [uniqueIndex('player_releases_sha256_uq').on(t.sha256), index('player_releases_channel_version_idx').on(t.channel, t.version)],
+);

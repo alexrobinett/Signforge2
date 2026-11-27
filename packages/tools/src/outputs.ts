@@ -9,7 +9,16 @@
  * CMS's DOM typecheck loads it, which it cannot do with the tool files. A schema a tool also takes
  * as input (a transition, a table mapping) lives here too, and the tool imports it.
  */
-import { BRAND_SHAPES, SCREEN_KINDS, TABLE_ROWS_PATH, TEMPLATE_CHECKS, type DisplayHours, type TemplateManifest } from '@signforge/contract';
+import {
+  BRAND_SHAPES,
+  FAILED_RELEASE_REASONS,
+  PLAYER_CHANNELS,
+  SCREEN_KINDS,
+  TABLE_ROWS_PATH,
+  TEMPLATE_CHECKS,
+  type DisplayHours,
+  type TemplateManifest,
+} from '@signforge/contract';
 import type { CompileInput } from '@signforge/compiler';
 import { z } from 'zod';
 import { displayHours, draftOutput, orientation, selector, version } from './fields';
@@ -47,6 +56,7 @@ export const screenOutput = z.object({
   reportedManifestId: z.string().nullable().describe('The manifest the screen last said it is playing'),
   lastSeenAt: z.number().nullable(),
   playerVersion: z.string().nullable(),
+  playerChannel: z.enum(PLAYER_CHANNELS).describe('Which player releases its device installs: canary gets each first, stable once promoted (#628)'),
   displayOverride: displayOverrideOutput.nullable().describe('A wake now or sleep now in force, set with screen_command'),
   state: z
     .object({
@@ -63,6 +73,10 @@ export const screenOutput = z.object({
     .object({
       at: z.number(),
       playerVersion: z.string(),
+      playerRelease: z.number().nullable().describe('The player release the build is (#628); null for one the release workflow did not make'),
+      failedReleases: z
+        .array(z.object({ version: z.number(), reason: z.enum(FAILED_RELEASE_REASONS) }))
+        .describe('Player releases its device supervisor rolled back, newest first, until it runs a newer one (#628)'),
       activeManifestId: z.string().nullable(),
       filesMissing: z.number(),
       fallbackFrom: z.string().nullable().describe('A newer manifest that played nothing, so the screen went back to its last good one'),

@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { axe, createOrg, d1, disabledOnServer, hydrated, innerCorner, joinAsEditor, publishImage, shots, signInAs, tool, toolResponse } from './helpers';
 import { API_PORT } from './servers';
 
@@ -591,4 +591,67 @@ test("at a phone's width, a new org's pairing code takes all six characters in v
   // And the card holding them does not clip the last: what is drawn at its middle is it.
   const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.getAttribute('aria-label'), [b!.x + b!.width / 2, b!.y + b!.height / 2]);
   expect(hit).toBe('Character 6 of 6');
+});
+
+/** With E2E_SCREENSHOTS: light and dark at the desktop's width, then at a phone's (390 px). */
+async function shotsBoth(page: Page, name: string) {
+  if (!process.env.E2E_SCREENSHOTS) return;
+  const size = page.viewportSize()!;
+  await shots(page, `${name}-desktop`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('region', { name: 'Versions' }).scrollIntoViewIfNeeded();
+  await shots(page, `${name}-390`);
+  await page.setViewportSize(size);
+}
+
+test("a screen's page says which player releases its device installs, and one its supervisor rolled back (#628)", async ({ page, request }) => {
+  await signInAs(page, `e2e-player-channel-${Date.now()}@example.com`, '192.0.2.248');
+  await createOrg(page, 'Release Deli', '192.0.2.248');
+  const pairing = await startPairing(request);
+  const { screen } = await tool(page, 'claim_screen', { code: pairing.code, name: 'Front window', timezone: 'UTC', orientation: 'landscape' });
+  const credential = await pairing.credential();
+  await sync(request, credential);
+  await page.goto(`/screens/${screen.id}`);
+  await hydrated(page);
+  const versions = page.getByRole('region', { name: 'Versions' });
+  await expect(versions).toContainText('UpdatesStable: player releases once promoted');
+  await expect(versions).not.toContainText('Rolled back');
+
+  // A canary, whose supervisor rolled release 42 back: the next sync carries it, as its /alive reply said.
+  await d1(`UPDATE screens SET player_channel = 'canary' WHERE id = '${screen.id}'`);
+  // Release 42, as CI would register it: a report counts only for a release the screen's channel was offered.
+  await d1(
+    `INSERT OR IGNORE INTO player_releases (version, sha256, size, manifest, signature, channel, created_at) VALUES (42, '${'4'.repeat(64)}', 1, '{}', 'c2ln', 'canary', 0)`,
+  );
+  const res = await request.post(`${DEVICE}/sync`, {
+    headers: { authorization: `Bearer ${credential}` },
+    data: {
+      seq: 1,
+      epoch: 'e2e',
+      player: { version: '0.41.0', release: 41, manifestSchemas: [2], protocols: [1, 2] },
+      manifest: { filesMissing: 0 },
+      display: { on: true },
+      deviceTime: new Date().toISOString(),
+      clock: { offsetMs: 0, trusted: true },
+      playCounts: [],
+      snapshots: {},
+      failedRelease: { version: 42, reason: 'not-alive' },
+    },
+  });
+  expect(res.status()).toBe(200);
+  await page.reload();
+  await hydrated(page);
+  await expect(versions).toContainText('Player0.41.0 · release 41');
+  await expect(versions).toContainText('UpdatesCanary: each player release first');
+  await expect(versions).toContainText('Rolled backRelease 42: it never came up, so the screen kept the one before');
+  await axe(page);
+  await versions.scrollIntoViewIfNeeded();
+  await shotsBoth(page, '628-screen-player-channel');
+
+  // A browser screen has no supervisor, so nothing to say about installing releases.
+  await d1(`UPDATE screens SET kind = 'browser' WHERE id = '${screen.id}'`);
+  await page.reload();
+  await hydrated(page);
+  await expect(versions).toContainText('Player0.41.0 · release 41');
+  await expect(versions).not.toContainText('Updates');
 });
