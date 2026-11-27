@@ -19,7 +19,7 @@ import {
 } from '~/components/ui/alert-dialog';
 import { Button } from '~/components/ui/button';
 import { type AssetView, librarySummary, matching } from '~/lib/assets';
-import { useCanManage } from '~/lib/live';
+import { useCanManage, useOrgId } from '~/lib/live';
 import { getAssets } from '~/server/assets.functions';
 import { useAppStore } from '~/state/provider';
 
@@ -93,6 +93,7 @@ function ConfirmDelete() {
   const error = useAppStore((s) => s.assets.deleteError);
   const ask = useAppStore((s) => s.askToDeleteAsset);
   const deleteAsset = useAppStore((s) => s.deleteAsset);
+  const orgId = useOrgId();
   return (
     <AlertDialog open={!!deleting} onOpenChange={(open) => !open && ask(null)}>
       <AlertDialogContent>
@@ -107,7 +108,7 @@ function ConfirmDelete() {
         )}
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <Button variant="destructive" disabled={pending} onClick={() => void deleteAsset()}>
+          <Button variant="destructive" disabled={pending} onClick={() => void deleteAsset(orgId)}>
             {pending ? 'Deleting…' : 'Delete image'}
           </Button>
         </AlertDialogFooter>

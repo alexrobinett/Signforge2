@@ -5,6 +5,7 @@
  */
 import { uploadImage } from '@signforge/media';
 import { callTool, callToolByName, toolMessage } from '~/lib/tools';
+import { assetsQuery } from '~/queries/spots';
 import type { SliceCreator } from './store';
 
 /**
@@ -33,7 +34,8 @@ export interface AssetsSlice {
   dismissUpload: (key: string) => void;
   /** Opens the confirmation for one asset; null closes it. */
   askToDeleteAsset: (asset: { id: string; name: string } | null) => void;
-  deleteAsset: () => Promise<void>;
+  /** Deletes it in `orgId`, the org on screen, and reads that org's assets again: the library's loader and the picker's cache. */
+  deleteAsset: (orgId: string) => Promise<void>;
   searchPicker: (query: string) => void;
 }
 
@@ -64,13 +66,13 @@ export const createAssetsSlice: SliceCreator<AssetsSlice> = (set, get, { router,
     dismissUpload: (key) => uploads((u) => u.filter((x) => x.key !== key)),
 
     askToDeleteAsset: (asset) => assets((a) => ({ ...a, deleting: asset, deletePending: false, deleteError: null })),
-    async deleteAsset() {
+    async deleteAsset(orgId) {
       const target = get().assets.deleting;
       if (!target) return;
       assets((a) => ({ ...a, deletePending: true, deleteError: null }));
       try {
         await callTool('delete', { type: 'asset', id: target.id });
-        await router.invalidate();
+        await Promise.all([router.invalidate(), queryClient.invalidateQueries({ queryKey: assetsQuery(orgId).queryKey, exact: true })]);
         assets((a) => ({ ...a, deleting: null, deletePending: false }));
       } catch (err) {
         assets((a) => ({ ...a, deletePending: false, deleteError: toolMessage(err) }));
