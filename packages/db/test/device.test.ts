@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { findDeviceScreen, platform, scoped } from '../src/index';
+import { CANARY_SCREENS_SQL, NEXT_RELEASE_SQL, promoteReleaseSql, registerReleaseSql } from '../src/player-release';
 import { seedOrg, signedRelease, type SeededOrg } from '../src/testing';
 
 let o: SeededOrg;
@@ -254,5 +255,60 @@ describe('platform(db).playerReleases.register', () => {
     await expect(register(good.manifest, 'c2ln')).rejects.toThrow('the signature is not an Ed25519 signature in base64');
     await expect(register(`${good.manifest}${' '.repeat(1_048_576)}`)).rejects.toThrow('the manifest text is too long');
     expect(await platform(env.DB).playerReleases.offered('canary')).not.toMatchObject({ version: 301 });
+  });
+});
+
+describe("the release workflows' SQL (#628)", () => {
+  const first = async (sql: string) => (await env.DB.prepare(sql).all()).results;
+
+  it('registers on canary exactly as register does, byte for byte, and the next release is one above it', async () => {
+    // Text with a quote and characters past ASCII, in a field a later format may add: the literal must neither end early
+    // nor change a byte. Only the device checks the signature, so it need not cover the extra field here.
+    const signed = await signedRelease({ version: 400, sha256: '4'.repeat(64) });
+    const manifest = signed.manifest.replace(/}$/, ',"note":"it\'s é ✓ \\u0000"}');
+    const { signature } = signed;
+    await env.DB.prepare(registerReleaseSql(manifest, signature, 1_000)).run();
+    expect(await platform(env.DB).playerReleases.offered('canary')).toEqual({
+      version: 400,
+      sha256: '4'.repeat(64),
+      size: 1024,
+      manifest,
+      signature,
+      channel: 'canary',
+      createdAt: 1_000,
+      promotedAt: null,
+    });
+    expect(await first(NEXT_RELEASE_SQL)).toEqual([{ next: 401 }]);
+  });
+
+  it('refuses what register refuses before any SQL is written', async () => {
+    const good = await signedRelease({ version: 402, sha256: '5'.repeat(64) });
+    expect(() => registerReleaseSql('not json', good.signature, 1)).toThrow('not a player release: the manifest text is not JSON');
+    expect(() => registerReleaseSql(good.manifest, "x'); DROP TABLE player_releases; --", 1)).toThrow('the signature is not an Ed25519');
+  });
+
+  it('promotes only a canary release, once', async () => {
+    const { manifest, signature } = await signedRelease({ version: 403, sha256: '6'.repeat(64) });
+    await env.DB.prepare(registerReleaseSql(manifest, signature, 1_000)).run();
+    expect(await first(promoteReleaseSql(403, 2_000))).toEqual([{ version: 403 }]);
+    expect(await platform(env.DB).playerReleases.offered('stable')).toMatchObject({ version: 403, channel: 'stable', promotedAt: 2_000 });
+    expect(await first(promoteReleaseSql(403, 3_000))).toEqual([]);
+    expect(await first(promoteReleaseSql(9_999, 3_000))).toEqual([]);
+  });
+
+  it("lists every canary with its heartbeat's release, since when, rollbacks and last sight", async () => {
+    const heartbeat = { player: { release: 403 }, releaseSince: 5_000, failedReleases: [{ version: 402, reason: 'not-alive' }] };
+    await o.scope.screens.update(o.screen, { playerChannel: 'canary', heartbeatJson: JSON.stringify(heartbeat), lastSeenAt: 6_000 });
+    const other = await seedOrg(env.DB, 'org-device-canary');
+    await other.scope.screens.update(other.screen, { playerChannel: 'canary' });
+    const canaries = await first(CANARY_SCREENS_SQL);
+    expect(canaries).toHaveLength(2);
+    expect(canaries).toEqual(
+      expect.arrayContaining([
+        { id: other.screen, lastSeenAt: null, release: null, releaseSince: null, failedReleases: null },
+        { id: o.screen, lastSeenAt: 6_000, release: 403, releaseSince: 5_000, failedReleases: JSON.stringify(heartbeat.failedReleases) },
+      ]),
+    );
+    await o.scope.screens.update(o.screen, { playerChannel: 'stable', heartbeatJson: null, lastSeenAt: null });
   });
 });

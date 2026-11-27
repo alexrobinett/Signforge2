@@ -1,0 +1,82 @@
+# Promotes a canary player release to stable (#628), so every other screen is offered it. Run by hand only, never on a
+# pull request, in the protected `player-release` environment. Two jobs, each approved on its own: the first shows
+# each canary screen's release, how long it has run it, what it rolled back and when it last synced; the second, once
+# its reviewer has read that, moves the release to stable. Set-up is in docs/ci.md ("Player releases").
+name: Player promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The release number to promote
+        required: true
+        type: string
+      target:
+        description: The deployment whose release it is
+        type: choice
+        options: [demo, prod]
+        default: demo
+
+concurrency:
+  group: player-release-${{ inputs.target }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TARGET: ${{ inputs.target }}
+  VERSION: ${{ inputs.version }}
+  STORE: signforge-${{ inputs.target }}
+
+jobs:
+  canaries:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: player-release
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0, version from package.json's packageManager
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+      - run: pnpm install --frozen-lockfile
+      - name: Canary screens
+        working-directory: apps/api
+        run: |
+          release="pnpm exec tsx ../../packages/cli/src/player-release.ts"
+          sql=$($release sql canaries)
+          pnpm exec wrangler d1 execute "$STORE" --env "$TARGET" --remote --json --command "$sql" | $release canaries "$VERSION" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  promote:
+    needs: canaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: player-release
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0, version from package.json's packageManager
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+      - run: pnpm install --frozen-lockfile
+      - name: Promote to stable
+        working-directory: apps/api
+        run: |
+          sql=$(pnpm exec tsx ../../packages/cli/src/player-release.ts sql promote "$VERSION")
+          promoted=$(pnpm exec wrangler d1 execute "$STORE" --env "$TARGET" --remote --json --command "$sql" | jq '.[0].results | length')
+          if [ "$promoted" != 1 ]; then
+            echo "::error::release $VERSION is not on canary for $TARGET: no such release, or it is stable already"
+            exit 1
+          fi
+          echo "Release $VERSION is stable for $TARGET." >> "$GITHUB_STEP_SUMMARY"

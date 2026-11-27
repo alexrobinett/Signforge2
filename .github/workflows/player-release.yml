@@ -1,0 +1,92 @@
+# A player release (#628): builds the player with its release number, packs and signs it as the contract states,
+# uploads the tarball to R2 and registers it on the canary channel. Run by hand only, never on a pull request, in the
+# protected `player-release` environment: its reviewer approves each run before any secret is read. Set-up is in
+# docs/ci.md ("Player releases"); scripts/player-release-proof.sh runs the same pack and sign with the contract's test key.
+name: Player release
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: The deployment whose screens are offered it
+        type: choice
+        options: [demo, prod]
+        default: demo
+
+# One release at a time per deployment: two would take the same number, and the second would fail to register.
+concurrency:
+  group: player-release-${{ inputs.target }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: player-release
+    env:
+      TARGET: ${{ inputs.target }}
+      # The D1 database and the R2 bucket of the deployment are both named so (apps/api/wrangler.jsonc).
+      STORE: signforge-${{ inputs.target }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_TOKEN }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0, version from package.json's packageManager
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+      - run: pnpm install --frozen-lockfile
+
+      - name: Release number
+        id: next
+        working-directory: apps/api
+        run: |
+          sql=$(pnpm exec tsx ../../packages/cli/src/player-release.ts sql next)
+          next=$(pnpm exec wrangler d1 execute "$STORE" --env "$TARGET" --remote --json --command "$sql" | jq -er '.[0].results[0].next')
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          SF_PLAYER_RELEASE: ${{ steps.next.outputs.version }}
+        run: pnpm build:player
+
+      - name: Pack
+        env:
+          VERSION: ${{ steps.next.outputs.version }}
+        run: |
+          echo "OUT=$RUNNER_TEMP/release" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/release"
+          pnpm exec tsx packages/cli/src/player-release.ts pack dist/player "$RUNNER_TEMP/release" --version "$VERSION"
+
+      - name: Sign
+        env:
+          PLAYER_RELEASE_KEY: ${{ secrets.PLAYER_RELEASE_SIGNING_KEY }}
+        run: pnpm exec tsx packages/cli/src/player-release.ts sign "$OUT"
+
+      # The key screens ship with: a secret that is not its pair stops the run here, before anything is uploaded.
+      - name: Verify against device/pi/player-release.pub
+        run: pnpm exec tsx packages/cli/src/player-release.ts verify "$OUT" device/pi/player-release.pub
+
+      # R2's S3 API, with a key that may write this deployment's bucket and no other.
+      - name: Upload the tarball
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          sha=$(jq -er .sha256 "$OUT/manifest.json")
+          aws s3 cp "$OUT/release.tar.gz" "s3://$STORE/sys/player/$sha" \
+            --endpoint-url "https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com" --content-type application/gzip --no-progress
+
+      # The checks `platform(db).playerReleases.register` makes, then one INSERT (@signforge/db/player-release).
+      - name: Register on canary
+        working-directory: apps/api
+        run: |
+          pnpm exec tsx ../../packages/cli/src/player-release.ts register-sql "$OUT" > "$RUNNER_TEMP/register.sql"
+          pnpm exec wrangler d1 execute "$STORE" --env "$TARGET" --remote --file "$RUNNER_TEMP/register.sql"
+          jq -r '"Release \(.version) is on canary for '"$TARGET"': \(.size) bytes, \(.files | length) files, sha256 \(.sha256). Promote it with the Player promote workflow."' "$OUT/manifest.json" >> "$GITHUB_STEP_SUMMARY"

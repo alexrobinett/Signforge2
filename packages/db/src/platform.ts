@@ -11,8 +11,9 @@
  */
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
-import { MAX_RELEASE_MANIFEST_BYTES, parsePlayerReleaseManifest, RELEASE_SIGNATURE, type PlayerChannel } from '@signforge/contract';
+import type { PlayerChannel } from '@signforge/contract';
 import { newId } from './ids';
+import { releaseRow, type PlayerRelease } from './player-release';
 import type { NewRow, RowPatch } from './scoped';
 import * as s from './schema';
 import { commit, fullRow, staged, strip, updateSet, type Staged, type Write } from './writes';
@@ -20,7 +21,6 @@ import { commit, fullRow, staged, strip, updateSet, type Staged, type Write } fr
 type Db = DrizzleD1Database<Record<string, never>>;
 type Template = typeof s.templates.$inferSelect;
 type TemplateVersion = typeof s.templateVersions.$inferSelect;
-type PlayerRelease = typeof s.playerReleases.$inferSelect;
 
 export function platform(d1: D1Database) {
   const db: Db = drizzle(d1);
@@ -163,28 +163,13 @@ export function platform(d1: D1Database) {
           .from(pr)
           .where(and(eq(pr.version, version), channel === 'canary' ? undefined : eq(pr.channel, 'stable')))
           .get()) !== undefined,
-      /**
-       * Register a release as CI made it (#628): its manifest text exactly as signed, and the signature. `version`,
-       * `sha256` and `size` come from that text, never from the caller, so the row cannot say other than what a device
-       * verifies. Refused (`Error`, with every problem) for text past `MAX_RELEASE_MANIFEST_BYTES`, a manifest the contract
-       * does not read, or a signature not in `RELEASE_SIGNATURE`'s form. The signature itself is the device's to check.
-       */
-      register: async (manifest: string, signature: string, channel: PlayerChannel = 'canary', now = Date.now()): Promise<PlayerRelease> => {
-        const problems: string[] = [];
-        if (new TextEncoder().encode(manifest).byteLength > MAX_RELEASE_MANIFEST_BYTES) problems.push('the manifest text is too long');
-        if (!RELEASE_SIGNATURE.test(signature)) problems.push('the signature is not an Ed25519 signature in base64');
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(manifest);
-        } catch {
-          problems.push('the manifest text is not JSON');
-        }
-        const read = problems.length ? undefined : parsePlayerReleaseManifest(parsed);
-        if (read && !read.ok) problems.push(...read.problems);
-        if (!read?.ok) throw new Error(`not a player release: ${problems.join('; ')}`);
-        const { version, sha256, size } = read.value;
-        return db.insert(pr).values({ version, sha256, size, manifest, signature, channel, createdAt: now }).returning().get();
-      },
+      /** Register a release as CI made it (#628): `releaseRow`'s row, inserted. */
+      register: async (manifest: string, signature: string, channel: PlayerChannel = 'canary', now = Date.now()): Promise<PlayerRelease> =>
+        db
+          .insert(pr)
+          .values(releaseRow(manifest, signature, channel, now))
+          .returning()
+          .get(),
       /** The release whose tarball has this hash, if the channel is offered it: a stable screen never fetches a canary build. */
       bySha256: (channel: PlayerChannel, sha256: string): Promise<PlayerRelease | undefined> =>
         db

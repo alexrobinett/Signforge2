@@ -1,6 +1,6 @@
 # CI
 
-One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready for review, on pushes to `master`, nightly and by hand. It runs Turbo's tasks (typecheck, test, the CMS end-to-end run and the CMS ESLint) and the repo-wide checks.
+One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready for review, on pushes to `master`, nightly and by hand. (The player release workflows, run by hand only, are in [Player releases](#player-releases).) It runs Turbo's tasks (typecheck, test, the CMS end-to-end run and the CMS ESLint) and the repo-wide checks.
 
 - **A pull request** runs typecheck, test and lint for the packages its diff affects. It does not run the CMS end-to-end run (`test:e2e`): run that locally before marking the pull request ready or pushing to it, on your own ports (`E2E_API_PORT=... E2E_CMS_PORT=... pnpm --filter @signforge/cms test:e2e`), and say in the pull request that it passed.
 - **A draft pull request** runs nothing: the job is skipped. Marking it ready (`gh pr ready <n>`) starts the run.
@@ -187,3 +187,46 @@ A change to `templates/clock` alone now runs `template-clock:test` (5 s) beside 
 `master` cannot require this check today. Branch protection and rulesets need GitHub Pro (or Team) for a private repository: the API answers 403, "Upgrade to GitHub Pro or make this repository public to enable this feature". So nothing waits on `check`: a docs-only pull request, which starts no run, merges as any other.
 
 On a plan that has them, requiring `check` needs one change first. A draft's skipped job counts as passed, but a docs-only pull request starts no run at all, so a required `check` would sit pending on it forever. Either drop the workflow's `paths:` filter (the run then only installs and runs the repo-wide checks, about 50 s, billed as a minute) or add a second workflow with the same job name that runs on exactly those paths and passes.
+
+## Player releases
+
+Two workflows put a player build on screens through the device supervisor (#628). Both run by hand only (Actions, then the workflow, then "Run workflow"), never on a pull request, in the protected `player-release` environment, so no secret is read until its reviewer approves the run.
+
+- **Player release** (`player-release.yml`; input: `demo` or `prod`) takes the next release number, one above the newest registered, and builds `dist/player` with it (`SF_PLAYER_RELEASE`). It packs the tarball as the contract states it and writes the manifest. It signs the manifest's exact bytes with Ed25519 and checks the signature against the committed `device/pi/player-release.pub`. It uploads the tarball to R2 at `sys/player/<sha256>` and registers it on `canary`.
+- **Player promote** (`player-promote.yml`; inputs: the release number and the deployment) has two jobs, each approved on its own. The first lists every canary screen by id: the release it runs and for how long, the releases it rolled back, and its last sync. The second moves the release to `stable`. Approve it only after reading the first job's summary.
+
+The steps are `packages/cli/src/player-release.ts`. The workflows reach D1 with `wrangler d1 execute`, because CI cannot call `platform()`. The SQL is `@signforge/db/player-release`, and registering runs `releaseRow`, the checks `platform(db).playerReleases.register` makes. A route on the API would have been new attack surface that every deploy carries. A D1 token, by contrast, reaches only D1.
+
+`sh scripts/player-release-proof.sh [updater.py]` runs the same pack and sign on your machine with the contract's test-only key, with no secret. It checks the result three ways: with WebCrypto, with Python `cryptography`, and with the supervisor's `read_manifest` and `extract`.
+
+### Setting it up
+
+Do this once, before the first run:
+
+1. **Make the key pair on your machine.** The private key goes only into the secret:
+
+   ```sh
+   umask 077
+   openssl genpkey -algorithm ed25519 -out player-release.key
+   openssl pkey -in player-release.key -pubout -out device/pi/player-release.pub
+   gh secret set PLAYER_RELEASE_SIGNING_KEY --env player-release < player-release.key
+   rm player-release.key
+   ```
+
+   Commit `device/pi/player-release.pub`. `scripts/deploy-pi.sh` copies it to each screen, and a screen installs only releases that verify against it.
+
+   A lost private key needs no recovery. Make a new pair, set the secret, commit the new `.pub` and run `deploy-pi.sh` on each screen. A leaked key needs the same steps, and fast.
+2. **Create the environment.** Go to Settings, Environments, New environment, and name it `player-release`. Under "Required reviewers", add yourself. Leave "Prevent self-review" off, or no one can approve your own runs. Under "Deployment branches and tags", choose "Selected branches and tags" and add `master` only. A workflow changed on another branch then never gets the secrets.
+3. **Make two Cloudflare credentials.**
+   - **An API token for D1.** Go to My Profile, API Tokens, Create Custom Token. Give it one permission, Account / D1 / Edit, and under Account Resources include only the SignForge account. Cloudflare cannot narrow a D1 permission to one database, so the token can reach every D1 database in that account. The workflows run against `signforge-demo` and `signforge-prod` only.
+   - **An R2 API token.** Go to R2, Manage API tokens, Create API token. Choose "Object Read & Write" and "Apply to specific buckets only", and pick `signforge-demo` and `signforge-prod`. It shows an Access Key ID and a Secret Access Key once.
+4. **Set the environment's secrets.** Run `gh secret set <name> --env player-release`, which reads each value from the prompt. Set them on the environment, not the repository:
+
+   | Secret | What |
+   | --- | --- |
+   | `PLAYER_RELEASE_SIGNING_KEY` | the Ed25519 private key, PEM (step 1) |
+   | `CLOUDFLARE_ACCOUNT_ID` | the account's id, for wrangler and the R2 endpoint |
+   | `CLOUDFLARE_D1_TOKEN` | the D1 token |
+   | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | the R2 token's key pair |
+
+A run's log and summary are public, like the repository. The workflows print release numbers, hashes and screen ids, never a screen's or an org's name.
