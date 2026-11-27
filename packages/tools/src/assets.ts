@@ -62,8 +62,6 @@ export async function requireAsset(org: OrgScope, assetId: string) {
   return row;
 }
 
-export const SHA256 = /^[0-9a-f]{64}$/;
-
 const listAssets = defineTool({
   name: 'list_assets',
   description:

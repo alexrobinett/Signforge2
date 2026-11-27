@@ -31,9 +31,9 @@ import type { EmailSender } from './email';
 /**
  * Deliveries per run, sized for the Workers Paid plan's 1,000 D1 queries and 1,000 calls to services an invocation. Each
  * POST takes one fetch, and its host's DNS two more, once per run: 40 to as many hosts is 120. Its D1 queries do not grow
- * with it: the claim, the channels and the settles are one each (`claimDueAlertDeliveries` in packages/db), and an email
- * test reads its org's members once. The most is 40, not more, because the channels' query binds two values a delivery
- * and D1 allows 100 to a statement. The rest wait for the next run.
+ * with it: the claim, the channels (one JSON bind) and the settles are one each (`claimDueAlertDeliveries` in packages/db),
+ * and an email test reads its org's members once. Bounded at 40 so even worst-case approver fan-out stays under 1,000 calls.
+ * The rest wait for the next run.
  */
 export const DELIVERIES_PER_RUN = 40;
 /**

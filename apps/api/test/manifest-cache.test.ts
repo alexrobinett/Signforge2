@@ -26,7 +26,9 @@ it('holds the manifests of at least 1,000 screens, so a second sync reads none f
   expect(MAX_CACHED).toBeGreaterThanOrEqual(1024);
   const { bucket, seen } = countedBucket();
   const ids = Array.from({ length: MAX_CACHED }, (_, i) => `screen-${i}`);
-  await Promise.all(ids.map((screen) => env.BLOBS.put(manifestKey('cache-org', screen, 'man_c'), JSON.stringify({ files: {}, spots: {}, templates: {}, screen: {} }))));
+  await Promise.all(
+    ids.map((screen) => env.BLOBS.put(manifestKey('cache-org', screen, 'man_c'), JSON.stringify({ files: {}, spots: {}, templates: {}, screen: {} }))),
+  );
   for (const screen of ids) expect(await manifestSummary(bucket, 'cache-org', screen, 'man_c')).toMatchObject({ id: 'man_c' });
   expect(seen.gets).toBe(MAX_CACHED);
   for (const screen of ids) await manifestSummary(bucket, 'cache-org', screen, 'man_c');

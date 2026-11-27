@@ -37,7 +37,7 @@ describe('CheckSlots', () => {
     expect(claimSlot(l, 'org:c', 10_000 + IDLE, MAX, SLOT)).toBe(true);
   });
 
-  it("keeps the slot while another check of the same org is in flight, and settles it once the last ends", () => {
+  it('keeps the slot while another check of the same org is in flight, and settles it once the last ends', () => {
     const l = fresh();
     claimSlot(l, 'org:a', 0, MAX, SLOT);
     claimSlot(l, 'org:a', 1, MAX, SLOT);

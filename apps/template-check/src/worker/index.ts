@@ -137,7 +137,12 @@ export default {
       // Read here, so the check is over when its slot is settled.
       body = await res.arrayBuffer();
     } finally {
-      await env.CHECK_SLOTS.getByName('slots').settle(name, await checker.running());
+      // Conservative default (true): an RPC failure while checking state keeps the slot for IDLE_MS
+      // rather than risking a start past MAX_CONTAINERS or masking the check's own error.
+      const running = await checker.running().catch(() => true);
+      await env.CHECK_SLOTS.getByName('slots')
+        .settle(name, running)
+        .catch(() => undefined);
     }
     // Which instance answered, for the API's logs and the isolation test; the runner adds its boot id.
     const answer = new Response(body, res);

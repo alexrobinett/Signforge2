@@ -307,10 +307,7 @@ const kindInput = {
 /** Reject's and Keep's input: the spot, at the version shown. */
 const decideSpotInput = z.object({ spotId: id('spot'), ifVersion: shownVersion });
 
-const spotIds = z
-  .array(id('spot'))
-  .max(500)
-  .describe("The spots in play order: the whole list, replacing the draft's. A spot may appear more than once");
+const spotIds = z.array(id('spot')).max(500).describe("The spots in play order: the whole list, replacing the draft's. A spot may appear more than once");
 
 /** Reject's and Keep's input: the playlist, at the version shown. */
 const decidePlaylistInput = z.object({ playlistId: id('playlist'), ifVersion: shownVersion });
