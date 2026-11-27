@@ -197,6 +197,17 @@ describe('preview content source', () => {
     expect(blobRequests).toEqual([]);
   });
 
+  it('keeps no contained bundle: a preview stores nothing (#232)', async () => {
+    const p = await openPreview(CMS);
+    await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'listening' });
+    await p.post(draft({ label: 'First draft' }));
+    await p.until((s) => s.played >= 1);
+    // The read-ahead keeps frames in idle callbacks while a spot plays: two of them later, it has had its turn.
+    await p.player().evaluate(() => new Promise((r) => requestIdleCallback(() => requestIdleCallback(r))));
+    // A preview framed from an http page has no Cache Storage at all; where it has one, it keeps nothing in it.
+    expect(await p.player().evaluate(async () => (typeof caches === 'undefined' ? [] : (await caches.keys()).filter((k) => k.startsWith('sf-'))))).toEqual([]);
+  });
+
   it('refuses a posted file whose bytes are not those of its hash', async () => {
     const p = await openPreview(CMS);
     await expect.poll(p.messages).toContainEqual({ sfPreview: 1, type: 'listening' });

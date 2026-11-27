@@ -99,10 +99,13 @@ jobs:
       # on every change rather than only when db is affected (docs/ci.md). About 2 s.
       - name: db import boundary
         run: pnpm --filter @signforge/db exec vitest run --project node
-      # The Pi supervisor's tests (device/pi/test_supervisor.py, #558): stdlib unittest against a faked wlr-randr, no
-      # package to make them affected, so on every change. Well under a second.
+      # The Pi supervisor's tests (device/pi/test_supervisor.py, #558; test_updater.py, #628): unittest against a faked
+      # wlr-randr and API, no package to make them affected, so on every change. Well under a second. The update channel
+      # checks Ed25519 with python3-cryptography, which Raspberry Pi OS ships; installed here when the runner lacks it.
       - name: Pi supervisor tests
-        run: python3 -m unittest discover -s device/pi -p 'test_*.py'
+        run: |
+          python3 -c 'import cryptography' 2>/dev/null || sudo apt-get install -y -qq python3-cryptography
+          python3 -m unittest discover -s device/pi -p 'test_*.py'
 
       # Which tasks run, whether any of them needs Chromium (the tests of a package that declares a
       # Playwright dependency, or the template harness, launch it), and whether any needs the stress media (the cli's golden

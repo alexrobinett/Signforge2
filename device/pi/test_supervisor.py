@@ -3,7 +3,7 @@ the monotonic time passed in: no Pi, no clock.
 
 Run from the repo root: python3 -m unittest discover -s device/pi -p 'test_*.py'
 """
-import contextlib, io, os, sys, tempfile, unittest
+import contextlib, io, json, os, sys, tempfile, threading, unittest
 from unittest import mock
 
 # The supervisor makes its token under ~/signforge as it loads: a home of its own for the tests.
@@ -217,6 +217,175 @@ class PlayerWatch(unittest.TestCase):
             at += supervisor.RESTART_RETRY_S
         self.assertEqual(tries, supervisor.RESTART_TRIES)
         self.assertIn("no more tries until the player beats", self.log.getvalue())
+
+class Alive(unittest.TestCase):
+    """POST /alive through the supervisor's own server, on a free port: the beat's release reaches the update channel (#628)."""
+
+    class Updates:
+        def __init__(self):
+            self.beats = []
+
+        def beat(self, release):
+            self.beats.append(release)
+
+        def alive_reply(self):
+            return {"failedRelease": {"version": 42, "reason": "stopped"}}
+
+    def setUp(self):
+        self.server = supervisor.ThreadingHTTPServer(("127.0.0.1", 0), supervisor.Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.shutdown)
+
+    def alive(self, body):
+        import http.client
+
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
+        headers = {"Host": f"127.0.0.1:{supervisor.PORT}", "x-sf-token": supervisor.TOKEN}
+        conn.request("POST", "/alive", body=body, headers=headers)
+        res = conn.getresponse()
+        return res.status, json.loads(res.read())
+
+    def test_passes_the_beat_s_release_and_answers_with_the_release_rolled_back(self):
+        updates = self.Updates()
+        with mock.patch.object(supervisor, "updates", updates):
+            self.assertEqual(self.alive(json.dumps({"version": "0.1.0+abc", "release": 42})), (200, {"failedRelease": {"version": 42, "reason": "stopped"}}))
+            # A player before #628 beats with no body, and a hand-built one with no release: still beats, for no release's gate.
+            self.assertEqual(self.alive(None), (200, {"failedRelease": {"version": 42, "reason": "stopped"}}))
+            self.assertEqual(self.alive(json.dumps({"version": "0.1.0+abc"})), (200, {"failedRelease": {"version": 42, "reason": "stopped"}}))
+            self.assertEqual(self.alive(json.dumps({"version": "0.1.0+abc", "release": "42"})), (200, {"failedRelease": {"version": 42, "reason": "stopped"}}))
+        # A beat with no release, or one not a whole number, reaches the gate as None: an older build, still beating.
+        self.assertEqual(updates.beats, [42, None, None, None])
+
+    def test_answers_nothing_more_without_the_update_channel(self):
+        with mock.patch.object(supervisor, "updates", None):
+            self.assertEqual(self.alive(json.dumps({"version": "0.1.0+abc", "release": 42})), (200, {}))
+
+
+class Updates(unittest.TestCase):
+    """What the supervisor gives the update channel (#628): the API with no redirects, a start that cannot fail, the
+    watchdog disarmed across an update's restart, and a gate check that waits for no download."""
+
+    def test_follows_no_redirect_so_the_credential_reaches_only_its_api(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        elsewhere = []
+
+        class Other(BaseHTTPRequestHandler):
+            def do_GET(self):
+                elsewhere.append(self.headers.get("authorization"))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *_):
+                pass
+
+        other = ThreadingHTTPServer(("127.0.0.1", 0), Other)
+        threading.Thread(target=other.serve_forever, daemon=True).start()
+        self.addCleanup(other.shutdown)
+
+        class Api(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{other.server_port}/stolen")
+                self.end_headers()
+
+            def log_message(self, *_):
+                pass
+
+        api = ThreadingHTTPServer(("127.0.0.1", 0), Api)
+        threading.Thread(target=api.serve_forever, daemon=True).start()
+        self.addCleanup(api.shutdown)
+        held = ("sfd_secret", f"http://127.0.0.1:{api.server_port}/v1/device")
+        with mock.patch.object(supervisor, "load_credential", return_value=held):
+            self.assertEqual(supervisor.api_get("/player-release"), (302, b""))
+        self.assertEqual(elsewhere, [])
+
+    def download(self, chunks, clock):
+        """api_download against a fake API answering with `chunks`, one per read, on `clock`, the monotonic time."""
+        import updater
+
+        class Body:
+            def __init__(self):
+                self.left = list(chunks)
+
+            def read1(self, _n):
+                return self.left.pop(0) if self.left else b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+        class Opener:
+            def open(self, req, timeout):
+                return Body()
+
+        dest = os.path.join(tempfile.mkdtemp(), "t.tar.gz")
+        held = ("sfd_secret", "https://api.test/v1/device")
+        with (
+            mock.patch.object(supervisor, "api_opener", Opener()),
+            mock.patch.object(supervisor, "load_credential", return_value=held),
+            mock.patch.object(supervisor, "updater", updater, create=True),
+            mock.patch.object(supervisor.time, "monotonic", clock),
+        ):
+            supervisor.api_download("/player-release/abc", dest, 10)
+        with open(dest, "rb") as f:
+            return f.read()
+
+    def test_a_download_writes_no_more_than_the_signed_size_and_stops_at_its_deadline(self):
+        import updater
+
+        self.assertEqual(self.download([b"12345", b"67890"], lambda: 0), b"1234567890")
+        with self.assertRaisesRegex(updater.Refused, "larger than the one signed"):
+            self.download([b"12345", b"678901"], lambda: 0)
+        # A trickle: a byte a read, the clock past the deadline by the third.
+        times = iter([0, 1, supervisor.DOWNLOAD_DEADLINE_S, supervisor.DOWNLOAD_DEADLINE_S + 1])
+        with self.assertRaisesRegex(updater.Refused, "the download took more than"):
+            self.download([b"1", b"2", b"3", b"4"], lambda: next(times))
+
+    def test_starts_with_updates_off_and_names_the_key_it_lacks(self):
+        missing = os.path.join(HOME, "signforge", "no-such.pub")
+        with mock.patch.object(supervisor, "RELEASE_KEY_FILE", missing), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertIsNone(supervisor.load_updater())
+        self.assertEqual(out.getvalue(), f"player updates off: no {missing}\n")
+
+    def test_starts_with_updates_off_when_the_key_or_its_state_is_bad(self):
+        key = os.path.join(HOME, "bad.pub")
+        with open(key, "w") as f:
+            f.write("not a key")
+        with mock.patch.object(supervisor, "RELEASE_KEY_FILE", key), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertIsNone(supervisor.load_updater())
+        self.assertIn("player updates off", out.getvalue())
+
+    def test_an_update_s_kiosk_restart_disarms_the_watchdog_until_the_player_beats(self):
+        with mock.patch.object(supervisor, "last_beat", 100.0), mock.patch.object(supervisor, "run", return_value=(0, "")) as run:
+            supervisor.kiosk_restart()
+            self.assertIsNone(supervisor.last_beat)
+            # Long after, with no beat: the watchdog does not restart it again on its own.
+            supervisor.check_player(10_000.0)
+        self.assertEqual(run.call_count, 1)
+
+    def test_the_gate_check_waits_for_no_poll_holding_the_lock(self):
+        class Gate:
+            checks = 0
+
+            def check_gate(self):
+                Gate.checks += 1
+
+        gate = Gate()
+        sleeps = iter([None, Stop()])
+
+        def sleep(_):
+            nxt = next(sleeps)
+            if nxt:
+                raise nxt
+
+        with mock.patch.object(supervisor, "updates", gate), mock.patch.object(supervisor.time, "sleep", sleep), mock.patch.object(supervisor, "check_player"):
+            with supervisor.update_lock, self.assertRaises(Stop):
+                supervisor.watch_player()
+        self.assertEqual(Gate.checks, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
