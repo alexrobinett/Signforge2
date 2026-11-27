@@ -1,0 +1,12 @@
+[Unit]
+Description=SignForge player files (local static server)
+
+[Service]
+User=signforge
+# As device/pi's: www is a link to players/<version> (#628), followed on each request, every reply no-store.
+WorkingDirectory=/home/signforge/signforge
+ExecStart=/usr/bin/python3 /home/signforge/signforge/player_web.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

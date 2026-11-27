@@ -344,6 +344,12 @@ class Updates(unittest.TestCase):
         with self.assertRaisesRegex(updater.Refused, "the download took more than"):
             self.download([b"1", b"2", b"3", b"4"], lambda: next(times))
 
+    def test_starts_with_updates_off_and_names_the_key_it_lacks(self):
+        missing = os.path.join(HOME, "signforge", "no-such.pub")
+        with mock.patch.object(supervisor, "RELEASE_KEY_FILE", missing), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertIsNone(supervisor.load_updater())
+        self.assertEqual(out.getvalue(), f"player updates off: no {missing}\n")
+
     def test_starts_with_updates_off_when_the_key_or_its_state_is_bad(self):
         key = os.path.join(HOME, "bad.pub")
         with open(key, "w") as f:
