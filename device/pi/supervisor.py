@@ -359,6 +359,8 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 api_opener = build_opener(NoRedirect)
+# Cloudflare refuses urllib's own user agent (`Python-urllib/3.x`) with 403, error 1010, before the Worker runs (#628).
+USER_AGENT = "signforge-supervisor/1"
 
 
 def api_request(path):
@@ -366,7 +368,7 @@ def api_request(path):
     held = load_credential()
     if not held or not held[1]:
         raise OSError("no credential bound to an API")
-    return Request(held[1] + path, headers={"authorization": f"Bearer {held[0]}"})
+    return Request(held[1] + path, headers={"authorization": f"Bearer {held[0]}", "user-agent": USER_AGENT})
 
 
 def api_get(path):
