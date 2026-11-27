@@ -11,7 +11,7 @@ import { app } from '../src/index';
 import { mintCredential } from '../src/device/credential';
 import { baseBlobKey, manifestKey, orgBlobKey } from '../src/r2';
 
-const TOKEN = 'test-admin-token'; // vitest.config.ts
+const TOKEN = 'test-admin-token-of-32-characters'; // vitest.config.ts
 const API = 'https://api.test';
 const encoder = new TextEncoder();
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -135,6 +135,17 @@ describe('admin auth', () => {
         expect(res.status, `${method} ${path}`).toBe(404);
       }
     }
+  });
+
+  // A deploy secret is 32 random bytes (`openssl rand -base64 32`, 44 characters): one a person could guess never turns the tree on.
+  it('is off while ADMIN_TOKEN is shorter than 32 characters, to its holder too, and on from 32', async () => {
+    const fetchWith = (token: string, method: string, path: string) =>
+      app.fetch(new Request(`${API}/admin${path}`, { method, body: '{}', headers: { authorization: `Bearer ${token}` } }), { ...env, ADMIN_TOKEN: token });
+    for (const [method, path] of paths) expect((await fetchWith('a'.repeat(31), method, path)).status, `${method} ${path}`).toBe(404);
+    // Its holder reaches the route, which refuses the body: not the file of that hash.
+    const reached = await fetchWith('a'.repeat(32), 'PUT', `/base/blobs/${'a'.repeat(64)}`);
+    expect(reached.status).toBe(400);
+    expect(await reached.json()).toEqual({ error: 'body does not match its sha256' });
   });
 
   it('is not accepted on the device tree', async () => {
