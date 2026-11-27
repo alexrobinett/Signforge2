@@ -300,6 +300,28 @@ class Updates(unittest.TestCase):
             self.assertEqual(supervisor.api_get("/player-release"), (302, b""))
         self.assertEqual(elsewhere, [])
 
+    def test_names_itself_so_cloudflare_does_not_refuse_urllibs_agent(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        agents = []
+
+        class Api(BaseHTTPRequestHandler):
+            def do_GET(self):
+                agents.append(self.headers.get("user-agent"))
+                self.send_response(204)
+                self.end_headers()
+
+            def log_message(self, *_):
+                pass
+
+        api = ThreadingHTTPServer(("127.0.0.1", 0), Api)
+        threading.Thread(target=api.serve_forever, daemon=True).start()
+        self.addCleanup(api.shutdown)
+        held = ("sfd_secret", f"http://127.0.0.1:{api.server_port}/v1/device")
+        with mock.patch.object(supervisor, "load_credential", return_value=held):
+            supervisor.api_get("/player-release")
+        self.assertEqual(agents, [supervisor.USER_AGENT])
+
     def download(self, chunks, clock):
         """api_download against a fake API answering with `chunks`, one per read, on `clock`, the monotonic time."""
         import updater
