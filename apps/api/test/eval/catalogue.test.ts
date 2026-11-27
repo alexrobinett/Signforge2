@@ -45,7 +45,7 @@ const DISCOVERY: Record<Role, Size> = {
  */
 const PROMPT: Record<Arm, Record<Role, { bytes: number; tokens: number }>> = {
   mcp: { owner: { bytes: 1415, tokens: 329 }, editor: { bytes: 1415, tokens: 329 }, viewer: { bytes: 1415, tokens: 329 } },
-  drawer: { owner: { bytes: 3452, tokens: 846 }, editor: { bytes: 3576, tokens: 876 }, viewer: { bytes: 3864, tokens: 940 } },
+  drawer: { owner: { bytes: 3453, tokens: 846 }, editor: { bytes: 3577, tokens: 876 }, viewer: { bytes: 3865, tokens: 940 } },
 };
 
 const ROLES = ['owner', 'editor', 'viewer'] as const;

@@ -74,7 +74,7 @@ const DRAFTS: Record<string, Target> = {
 };
 
 /** At most this many drafts in a turn, and in one save. */
-export const MAX_DRAFTS = 5;
+export const MAX_DRAFTS = 15;
 
 /** How long after its turn a draft may be saved: later, the person asks the agent again. */
 export const DRAFT_MS = 30 * 60_000;
@@ -119,11 +119,11 @@ async function proposedTo(env: Pick<Env, 'AUTH_SECRET' | 'ENVIRONMENT'>, who: Pr
 }
 
 /**
- * The most D1 statements a save prepares, the session's reads with its drafts', inside the Free
- * plan's 50 a request. A save's drafts are costed before any is written (`saveStatements`), and
+ * The most D1 statements a save prepares, the session's reads with its drafts', well inside Workers
+ * Paid's 1,000 a request. A save's drafts are costed before any is written (`saveStatements`), and
  * the turn drafts no more than one save holds.
  */
-export const SAVE_STATEMENTS = 48;
+export const SAVE_STATEMENTS = 300;
 
 /**
  * Each draft's D1 statements, saved by an editor (whose role check reads the org's settings): its

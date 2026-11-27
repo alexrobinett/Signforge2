@@ -42,8 +42,8 @@ export interface FillRequest {
 
 /** The most an inline answer may be, in tokens. */
 const FILL_MAX_TOKENS = 4096;
-/** How long a model has to answer an inline call: the drawer's per-turn cap (docs/proposals/cms-agent.md). */
-const FILL_TIMEOUT_MS = 25_000;
+/** How long a model has to answer an inline call. */
+const FILL_TIMEOUT_MS = 45_000;
 
 type Problem = Extract<AiProviderTest, { ok: false }>['problem'];
 

@@ -9,7 +9,7 @@ import { testScope } from '@signforge/db/testing';
 import { env } from 'cloudflare:workers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { drawerReadTypes, drawerTools, MAX_CALLS, NEVER_OFFERED, TOOL_CARDS } from '../src/agent/chat';
+import { drawerReadTypes, drawerTools, MAX_CALLS, MODEL_FETCHES, NEVER_OFFERED, TOOL_CARDS, TOOL_STATEMENTS, TURN_MS } from '../src/agent/chat';
 import { CLIENT_SAYS, plant, reads, SAYS } from './planted';
 import { DRAFT_MS, draftTools, SAVE_STATEMENTS, saveStatements, signDraft } from '../src/agent/drafts';
 import { type AnswerCard, CHAT_EVENTS, type ChatTurn, type ConfirmCard, type ToolCard } from '../src/agent/chat-shapes';
@@ -450,26 +450,26 @@ describe('POST /api/agent/chat', () => {
       const s = await setup({ steps: [{ calls: Array.from({ length: MAX_CALLS + 1 }, () => ({ name: 'read', input: { type: 'screen' } })) }] });
       const lines = await events(await s.ask());
       expect(lines.filter((e) => e.type === 'call')).toHaveLength(MAX_CALLS);
-      expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more than 8 lookups') });
+      expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining(`more than ${MAX_CALLS} lookups`) });
       // Stopped there: no model call after the one that asked too many.
       expect(s.model.asked).toHaveLength(1);
     });
 
-    it('at 25 seconds, on the clock it is given', async () => {
+    it(`at ${TURN_MS / 1000} seconds, on the clock it is given`, async () => {
       let t = NOON;
-      // Each reading of the clock is 10 seconds on: the third model call would start past 25.
-      const s = await setup({ now: () => (t += 10_000), steps: [{ calls: [{ name: 'read', input: { type: 'screen' } }] }] });
+      // Each reading of the clock is 40 seconds on: the third model call would start past 90.
+      const s = await setup({ now: () => (t += 40_000), steps: [{ calls: [{ name: 'read', input: { type: 'screen' } }] }] });
       const lines = await events(await s.ask());
-      expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('longer than 25 seconds') });
+      expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining(`longer than ${TURN_MS / 1000} seconds`) });
     });
 
-    it("at more D1 statements than its tools' 40: reading every template's versions", async () => {
-      const s = await setup({ steps: [{ calls: [{ name: 'read', input: { type: 'template' } }] }, ANSWER] });
-      for (let i = 0; i < 45; i++) await s.scope.templates.insert({ key: `t${i}`, name: `T${i}` });
+    it(`at more D1 statements than its tools' ${TOOL_STATEMENTS}: reading every template's versions`, async () => {
+      const s = await setup({ steps: [{ calls: Array.from({ length: 10 }, () => ({ name: 'read', input: { type: 'template' } })) }, ANSWER] });
+      for (let i = 0; i < 30; i++) await s.scope.templates.insert({ key: `t${i}`, name: `T${i}` });
       expect((await events(await s.ask())).at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more reading') });
     });
 
-    it('at more than 40 fetches for the model: an endpoint whose every call is redirected three times', async () => {
+    it(`at more than ${MODEL_FETCHES} fetches for the model: an endpoint whose every call is redirected three times`, async () => {
       const base = 'https://models.example.com/v1';
       let n = 0;
       const guards: FetchGuards = {
@@ -495,11 +495,11 @@ describe('POST /api/agent/chat', () => {
         },
       });
       expect((await events(await s.ask())).at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more reading') });
-      // Each call is 4 hops of 2 lookups and a request: the fourth would pass 40.
-      expect(n).toBe(3);
+      // Each call is 4 hops of 2 lookups and a request (12): the 13th would pass 150.
+      expect(n).toBe(Math.floor(MODEL_FETCHES / 12));
     });
 
-    it("counting find_places' lookups with the model's: three redirected model calls (36) and 8 places pass 40, which the model's alone would not (review of #402)", async () => {
+    it(`counting find_places' lookups with the model's: 12 redirected model calls (144) and 8 places pass ${MODEL_FETCHES}, which the model's alone would not (review of #402)`, async () => {
       const base = 'https://models.example.com/v1';
       let n = 0;
       const places = (call: number) =>
@@ -512,7 +512,9 @@ describe('POST /api/agent/chat', () => {
           if (url.endsWith('/r1')) return Response.redirect(`${base}/r2`, 307);
           if (url.endsWith('/r2')) return Response.redirect(`${base}/r3`, 307);
           n++;
-          return n < 3 ? completionStream({ toolCalls: places(n) }, 'tool_calls') : completionStream({ content: JSON.stringify(CARD) }, 'stop');
+          if (n <= 2) return completionStream({ toolCalls: places(n) }, 'tool_calls');
+          if (n < 12) return completionStream({ toolCalls: [{ id: `r${n}`, name: 'read', arguments: '{"type":"screen"}' }] }, 'tool_calls');
+          return completionStream({ content: JSON.stringify(CARD) }, 'stop');
         },
       };
       const s = await setup({ guards, save: ENDPOINT });
@@ -845,9 +847,9 @@ describe('confirmation cards (#269)', () => {
     ask.called = { action: 'publish', playlistId: playlist.id, target: 'org', endsAt: new Date(NOON + 3_600_000).toISOString() };
     const { body } = pressOf(await raw(await s.ask('q')), 'q');
     const lines = await events(await s.member.post('/api/agent/chat', body));
-    // The press itself runs, the eighth call; the read after it would be the ninth, and the turn stops there.
+    // The press itself runs, the last allowed call; the read after it would pass MAX_CALLS, and the turn stops there.
     expect(lines.filter((e) => e.type === 'call').map((e) => (e.type === 'call' ? e.card.tool : ''))).toEqual(['takeover']);
-    expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining('more than 8 lookups') });
+    expect(lines.at(-1)).toEqual({ type: 'error', error: 'over_budget', message: expect.stringContaining(`more than ${MAX_CALLS} lookups`) });
   });
 
   it('ends a takeover, and deletes a playlist or removes a schedule entry, each behind its own card, saying what each did (#345)', async () => {
@@ -1860,25 +1862,24 @@ describe('the drawer drafting changes (#268)', () => {
       }
     });
 
-    it(`the costliest save it allows, two screens renamed and a playlist's order, in at most ${SAVE_STATEMENTS}`, async () => {
+    it(`the costliest save it allows, 15 playlist orders at ${SAVE_STATEMENTS} statements, in at most ${SAVE_STATEMENTS}`, async () => {
       const d = await drafting({ role: 'editor', script: () => [ANSWER] });
-      const { playlist, screen } = await content(d, 0);
-      const other = await d.scope.screens.insert({ name: 'Drive-thru', timezone: 'UTC', orientation: 'landscape' });
-      const calls = [
-        { tool: 'update_screen', input: { screenId: screen.id, name: 'Front lobby', ifVersion: screen.rowVersion } },
-        { tool: 'update_screen', input: { screenId: other.id, name: 'Drive-thru 1', ifVersion: other.rowVersion } },
-        { tool: 'save_playlist', input: { playlistId: playlist.id, spotIds: [], ifVersion: playlist.rowVersion } },
-      ];
+      const playlists = [];
+      for (let i = 0; i < 15; i++) playlists.push(await d.scope.playlists.insert({ name: `P${i}`, transitionJson: CUT }));
+      const calls = playlists.map((p, i) => ({
+        tool: 'save_playlist',
+        input: { playlistId: p.id, spotIds: Array(i === 14 ? 48 : 72).fill(d.spot.id), ifVersion: p.rowVersion },
+      }));
       expect(saveStatements(calls)).toBe(SAVE_STATEMENTS);
       const { status, body, statements } = await measured(d, calls);
       expect(status, body).toBe(200);
       expect(statements).toBeLessThanOrEqual(SAVE_STATEMENTS);
     });
 
-    it('refuses a save over it before writing anything: five orders of 200 spots', async () => {
+    it('refuses a save over it before writing anything: ten orders of 200 spots', async () => {
       const d = await drafting({ role: 'editor', script: () => [ANSWER] });
       const playlists = [];
-      for (let i = 0; i < 5; i++) playlists.push(await d.scope.playlists.insert({ name: `P${i}`, transitionJson: CUT }));
+      for (let i = 0; i < 10; i++) playlists.push(await d.scope.playlists.insert({ name: `P${i}`, transitionJson: CUT }));
       const calls = playlists.map((p) => ({
         tool: 'save_playlist',
         input: { playlistId: p.id, spotIds: Array(200).fill(d.spot.id), ifVersion: p.rowVersion },
