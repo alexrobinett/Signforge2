@@ -120,7 +120,8 @@ export const createGroupsSlice: SliceCreator<GroupsSlice> = (set, get, { router,
     clock: realClock,
     state: { read: () => get().groups.renames, write: (change) => patch((s) => ({ ...s, renames: change(s.renames) })) },
     async save({ draft: { orgId, record, edit, version } }) {
-      const out = await callTool('save_group', { groupId: record, name: edit.name.trim(), ifVersion: version });
+      // A rename edits a group the page holds: never a create, so it has its id and version.
+      const out = await callTool('save_group', { groupId: record!, name: edit.name.trim(), ifVersion: version! });
       putGroup(queryClient, orgId, out.group);
       return { version: out.group.version };
     },

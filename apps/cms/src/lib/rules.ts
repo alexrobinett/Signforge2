@@ -3,7 +3,7 @@
  * the screens it matches now, matched in the browser with the same `matches` the publish resolves it with.
  */
 import { matches, MAX_TERMS, type Selector } from '@signforge/compiler/selector';
-import { factsOf } from './label-filter';
+import { factsOf, type SelectorInput } from './label-filter';
 import type { ScreenView } from './screen-types';
 
 /** One condition: a label key, how it is compared, and its values (one for is and is not, any for one of, none for set). */
@@ -33,7 +33,7 @@ export const withOp = (t: RuleTerm, op: RuleOp): RuleTerm => ({ ...t, op, values
 export const termWords = (t: RuleTerm) => [t.key, OP_WORDS[t.op], ...(t.values.length ? [t.values.join(', ')] : [])].join(' ');
 
 /** The conditions as the tools take them: values trimmed, and only the ones their comparison takes. */
-export const ruleOf = (terms: readonly RuleTerm[]): Selector => ({
+export const ruleOf = (terms: readonly RuleTerm[]): SelectorInput => ({
   all: terms.map((t) => {
     const values = t.values.map((v) => v.trim()).filter(Boolean);
     const kind = valuesOf(t.op);

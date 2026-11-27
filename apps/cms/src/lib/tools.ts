@@ -1,15 +1,17 @@
 /**
  * Calling a tool (`POST /api/tools/:name`) as the signed-in member: from the browser (`callTool`)
  * or from a server function (`tool` in src/server/tools.server.ts), both reading the answer here
- * (`answer`). An output is typed by the tool's own output schema (`@signforge/tools/outputs`, a
- * types-only import, so no tool code reaches the browser) and trusted: the tools' tests check
- * every output against that schema. A refusal is a `Refusal` with the code it was refused with on
+ * (`answer`). An input is typed by the tool's own input schema (`@signforge/tools/inputs`) and an
+ * output by its output schema (`@signforge/tools/outputs`), both types-only imports, so no tool
+ * code reaches the browser. The output is trusted: the tools' tests check every output against
+ * that schema. A refusal is a `Refusal` with the code it was refused with on
  * either side, and a server function's reaches the browser as one (`refusalAdapter`).
  */
 import { createSerializationAdapter } from '@tanstack/react-router';
 import type { ChatProblem } from '@signforge/api/agent-chat';
 import type { InlineProblem } from '@signforge/api/agent-inline';
 import { ORG_CHANGED } from '@signforge/api/tab-org';
+import type { ToolInput } from '@signforge/tools/inputs';
 import type { ToolErrorCode, ToolName, ToolOutput } from '@signforge/tools/outputs';
 import { TAB_ORG_HEADER } from '@signforge/api/tab-org';
 import { tabOrgHeaders } from './tab-org';
@@ -65,7 +67,7 @@ async function post(name: string, input: unknown, org?: string): Promise<Respons
  * Calls a tool from the browser, naming the tab's org, or `org`: the API refuses the call unless it
  * is the session's (#129), so it never acts on an org other than the one named.
  */
-export async function callTool<N extends ToolName>(name: N, input: unknown, org?: string): Promise<ToolOutput<N>> {
+export async function callTool<N extends ToolName>(name: N, input: ToolInput<N>, org?: string): Promise<ToolOutput<N>> {
   const res = await post(name, input, org);
   return answer(res, `Something went wrong (${res.status}).`);
 }
