@@ -237,7 +237,10 @@ const saveBrandKit = defineTool({
   },
   // The audit log's Made the default follows this, the outcome, not the input's makeDefault (#507).
   auditDetail: (output) => (output.madeDefault ? { madeDefault: true } : undefined),
-  target: (input, output) => ({ kind: 'brand_kit', id: input.brandKitId ?? output.brandKit.id }),
+  target: (input, output) => {
+    const id = input.brandKitId ?? output?.brandKit.id;
+    return id === undefined ? undefined : { kind: 'brand_kit', id };
+  },
   handler: async ({ org, input, write }) => {
     await checkLogo(org, input.logoOnDarkAssetId, 'logoOnDarkAssetId');
     await checkLogo(org, input.logoOnLightAssetId, 'logoOnLightAssetId');

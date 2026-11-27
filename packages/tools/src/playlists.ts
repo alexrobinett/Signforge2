@@ -115,7 +115,10 @@ const savePlaylist = defineTool({
   }),
   output: outputs.save_playlist,
   example: { name: 'Weekend promos', transition: { type: 'fade', ms: 600 }, spotIds: ['spt_example'] },
-  target: (input, output) => ({ kind: 'playlist', id: input.playlistId ?? output.playlist.id }),
+  target: (input, output) => {
+    const id = input.playlistId ?? output?.playlist.id;
+    return id === undefined ? undefined : { kind: 'playlist', id };
+  },
   handler: async ({ org, actor, input, write }) => {
     const { playlistId, name } = input;
     if (playlistId === undefined) {

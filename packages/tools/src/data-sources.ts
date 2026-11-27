@@ -256,8 +256,7 @@ const saveDataSource = defineTool({
     format: 'json',
     feedUrl: 'https://api.open-meteo.com/v1/forecast?latitude=33.75&longitude=-84.39&current=temperature_2m',
   },
-  // Behind the drawer's card, a refused press has no output (`refusedPress`): no target then, for a new source.
-  target: (input, output: { dataSource: { id: string } } | undefined) => {
+  target: (input, output) => {
     const sourceId = input.dataSourceId ?? output?.dataSource.id;
     return sourceId === undefined ? undefined : { kind: 'data_source', id: sourceId };
   },

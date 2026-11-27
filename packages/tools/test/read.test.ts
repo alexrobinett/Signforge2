@@ -7,7 +7,8 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { describeTools, dispatch, READ_TYPES, type ReadType, readTypes, registry, toolsOf } from '../src';
 import { call } from './calls';
-import { member, seededMembers } from './member';
+import { member, memberOf, seededMembers } from './member';
+import { fakeServices } from './services';
 
 const { o, as } = seededMembers('read-tool');
 
@@ -221,6 +222,21 @@ describe('describe', () => {
     expect(await changers('owner', 'publish_request')).toEqual(['request_publish']);
     for (const type of readTypes(registry, { role: 'owner', editorsPublish: true }))
       for (const name of await changers('owner', type)) expect(registry.get(name)?.mutates, `${type}: ${name}`).toBe(true);
+  });
+
+  it('names no publish tool to an editor of an org whose editors do not publish, as the dispatcher refuses them', async () => {
+    const org = scoped(env.DB, (await seedOrg(env.DB, 'read-tool-owners-publish')).orgId);
+    await org.commit((await org.settings.stage.set({ editorsPublish: false })).writes);
+    expect((await call(memberOf(org, 'editor'), 'describe', { type: 'publish' })).changedBy).not.toContain('publish');
+    expect((await call(memberOf(org, 'owner'), 'describe', { type: 'publish' })).changedBy).toContain('publish');
+    expect((await call(as('editor'), 'describe', { type: 'publish' })).changedBy).toContain('publish');
+  });
+
+  it('refuses a type read does not serve the caller: one whose tool needs a service it lacks', async () => {
+    const noConnectors = memberOf(scoped(env.DB, o.orgId), 'owner', { ...fakeServices, connectors: undefined });
+    expect(readTypes(registry, { role: 'owner', editorsPublish: true }, noConnectors.services)).not.toContain('connection');
+    expect(await dispatch(registry, 'describe', { type: 'connection' }, noConnectors)).toMatchObject({ ok: false, error: 'forbidden' });
+    expect(await dispatch(registry, 'describe', { type: 'connection' }, as('owner'))).toMatchObject({ ok: true });
   });
 
   it("keeps each fact a listed description no longer carries in its type's rules (#345's description pass)", async () => {

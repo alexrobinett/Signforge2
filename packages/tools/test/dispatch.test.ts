@@ -12,6 +12,7 @@ import {
   ListedInput,
   platformRegistry,
   redact,
+  refusedPress,
   registry,
   ROLES,
   TOOLS,
@@ -193,6 +194,27 @@ describe('the registry', () => {
     // Its output: what a call parses to (n always there), not the input again.
     expect(standard.jsonSchema.output({ target: 'draft-2020-12' })).toMatchObject({ required: ['id', 'n'] });
     expect(latest).toMatchObject({ required: ['id'] });
+  });
+
+  it("lists the shapes an output holds as JSON Schema, not {}: a template's manifest, display hours, a preview's compiler input", () => {
+    type Schema = { type?: unknown; properties?: Record<string, Schema>; anyOf?: Schema[]; oneOf?: Schema[]; items?: Schema; additionalProperties?: Schema };
+    const listed = describeTools(registry, { role: 'owner', editorsPublish: true });
+    const out = (name: string): Schema => listed.find((t) => t.name === name)!.outputSchema as Schema;
+    /** Every schema under a property named `key`, at any depth. */
+    const under = (s: Schema, key: string): Schema[] => [
+      ...(s.properties?.[key] ? [s.properties[key]] : []),
+      ...[...Object.values(s.properties ?? {}), ...(s.anyOf ?? []), ...(s.items ? [s.items] : [])].flatMap((c) => under(c, key)),
+    ];
+    // A shape: a type, or alternatives each one (null among them).
+    const shaped = (s: Schema): boolean => s.type !== undefined || [s.anyOf, s.oneOf].some((alts) => alts?.every(shaped));
+    const manifests = under(out('list_templates'), 'manifest');
+    expect(manifests.length).toBeGreaterThan(0);
+    for (const m of manifests) expect(m.properties?.fields?.additionalProperties, 'a manifest field').toSatisfy(shaped);
+    expect(under(out('get_org_settings'), 'displayHours')[0]).toSatisfy(shaped);
+    const preview = out('get_spot_preview').properties!.preview!.properties!;
+    expect(preview.templates!.additionalProperties, 'templates').toSatisfy(shaped);
+    expect(preview.dataSources!.items, 'dataSources').toSatisfy(shaped);
+    expect(preview.brand, 'brand').toSatisfy(shaped);
   });
 
   it('keeps the platform tools apart: base templates only, never on /api', () => {
@@ -465,6 +487,21 @@ describe('the audit log', () => {
       screenIds: ['a'],
     });
   });
+});
+
+describe("a person's press of a card, refused (refusedPress)", () => {
+  // A refused call has no output: a tool whose target names it from its output (request_publish's request) records no target.
+  it.for(TOOLS.filter((t) => t.target).map((t) => [t.name, t] as const))(
+    '%s: records the refusal, its target named from the input alone',
+    async ([name, t]) => {
+      const refusal = { ok: false as const, error: 'forbidden' as const, message: 'refused for the test' };
+      const confirmed = { summary: `press ${name}`, runId: 'run-1', callId: `call-${name}` };
+      expect(await refusedPress(registry, name, t.example, { ...caller('owner'), confirmed }, refusal)).toEqual(refusal);
+      const [entry] = await testScope(env.DB, o.orgId).auditLog.list({ limit: 1 });
+      expect(entry).toMatchObject({ action: name });
+      expect(JSON.parse(entry!.detailJson!)).toMatchObject({ refused: { error: 'forbidden' }, confirmed });
+    },
+  );
 });
 
 describe('write safety', () => {

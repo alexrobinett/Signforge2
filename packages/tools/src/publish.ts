@@ -336,8 +336,7 @@ const publish = defineTool({
   }),
   output: outputs.publish,
   example: {},
-  // Behind the drawer's card, a refused press has no output (`refusedPress`): no target then.
-  target: (_input, output: { publish: { id: string } | null } | undefined) => (output?.publish ? { kind: 'publish', id: output.publish.id } : undefined),
+  target: (_input, output) => (output?.publish ? { kind: 'publish', id: output.publish.id } : undefined),
   // The default it set is a change of the org's settings: its row says so.
   auditDetail: (output) => (output.madeDefault ? { madeDefault: output.madeDefault } : undefined),
   handler: async (ctx) => {
@@ -412,8 +411,7 @@ const takeover = defineTool({
   listedInput: () => z.strictObject(takeoverInput).superRefine(takeoverRules),
   output: outputs.takeover,
   example: { action: 'publish', playlistId: 'pls_example', target: 'org', endsAt: '2026-11-17T20:00:00Z' },
-  // A refused press has no output (`refusedPress`): no target then, for a new one.
-  target: (input, output: { entry?: { id: string } } | undefined) => {
+  target: (input, output) => {
     const entryId = input.scheduleEntryId ?? output?.entry?.id;
     return entryId === undefined ? undefined : { kind: 'schedule_entry', id: entryId };
   },

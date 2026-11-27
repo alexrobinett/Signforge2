@@ -172,7 +172,7 @@ const testAiProvider = defineTool({
   input: z.object({}),
   output: outputs.test_ai_provider,
   example: {},
-  target: (_input, output) => target(output.provider.provider),
+  target: (_input, output) => (output ? target(output.provider.provider) : undefined),
   handler: async ({ org, write, services: { aiProviders } }) => {
     const current = await org.aiProvider.get();
     if (!current) throw new ToolError('not_found', 'no model key is saved: save one first');
@@ -206,7 +206,7 @@ const removeAiProvider = defineTool({
   input: z.object({}),
   output: outputs.remove_ai_provider,
   example: {},
-  target: (_input, output) => (output.provider ? target(output.provider) : undefined),
+  target: (_input, output) => (output?.provider ? target(output.provider) : undefined),
   handler: async ({ org, write }) => {
     const current = await org.aiProvider.get();
     if (!current) return { removed: false, provider: null };

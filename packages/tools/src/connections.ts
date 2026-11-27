@@ -87,7 +87,7 @@ const startConnection = defineTool({
   output: outputs.start_connection,
   example: { provider: 'google' },
   target: (input, output) =>
-    input.connectionId ? { kind: 'connection', id: input.connectionId } : { kind: 'connection_authorization', id: output.authorizationId },
+    input.connectionId ? { kind: 'connection', id: input.connectionId } : output && { kind: 'connection_authorization', id: output.authorizationId },
   handler: async ({ org, actor, input, write, services: { connectors } }) => {
     if (!connectors.providers.includes(input.provider))
       throw new ToolError(
@@ -135,7 +135,7 @@ const finishConnection = defineTool({
   output: outputs.finish_connection,
   example: { oauthState: 'example-state-from-the-callback', code: 'example-code' },
   // No output when the provider refused the code: the authorization was used up, with nothing to name.
-  target: (_input, output: { connection: { id: string } } | undefined) => (output ? { kind: 'connection', id: output.connection.id } : undefined),
+  target: (_input, output) => (output ? { kind: 'connection', id: output.connection.id } : undefined),
   handler: async ({ org, actor, input, write, onDiscard, services: { connectors } }) => {
     const pending = await org.connections.authorizations.byState(await sha256Hex(input.oauthState), Date.now());
     if (!pending || pending.actorKind !== actor.kind || pending.actorId !== actor.id) throw new ToolError('not_found', NOT_PENDING);

@@ -191,7 +191,7 @@ const requestPublish = defineTool({
   }),
   output: outputs.request_publish,
   example: { drafts: [{ kind: 'spot', id: 'spt_example', version: 1 }], reason: 'Weekend opening hours on the lobby screens' },
-  target: (_input, output) => ({ kind: 'publish_request', id: output.request.id }),
+  target: (_input, output) => (output ? { kind: 'publish_request', id: output.request.id } : undefined),
   // Its batch refused as it ran: another call of the asker's, made at the same moment, got there first.
   refuseFailedCommit: async ({ org, input, actor }) => {
     const waiting = await org.publishRequests.pendingBy(actor.id, Date.now());

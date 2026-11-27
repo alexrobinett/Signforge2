@@ -142,7 +142,7 @@ const registerTemplateVersion = defineSharedTool({
     bundleId: '0'.repeat(64),
     sourcesId: '1'.repeat(64),
   },
-  target: (_input, output) => ({ kind: 'template_version', id: output.version.id }),
+  target: (_input, output) => (output ? { kind: 'template_version', id: output.version.id } : undefined),
   handler: async ({ org, blobs, input, write, services: { templateCheck, rateLimit } }) => {
     const [bundle, sourcesObj] = await Promise.all([blobs.get(blobKey(org, input.bundleId)), blobs.get(blobKey(org, input.sourcesId))]);
     if (!bundle) throw new ToolError('not_found', `bundle ${input.bundleId} has not been uploaded`);

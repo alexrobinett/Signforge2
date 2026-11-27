@@ -46,7 +46,7 @@ const claimScreen = defineTool({
   }),
   output: outputs.claim_screen,
   example: { code: 'ABC234', name: 'Lobby', timezone: 'Europe/London', orientation: 'landscape' },
-  target: (_input, output) => ({ kind: 'screen', id: output.screen.id }),
+  target: (_input, output) => (output ? { kind: 'screen', id: output.screen.id } : undefined),
   handler: async ({ org, input, write, blobs, services: { rateLimit } }) => {
     // Counted before the code is looked at, so right and wrong guesses cost the same.
     if (!(await rateLimit('pairing_claim'))) throw new ToolError('rate_limited', 'too many pairing claims; wait a minute and try again');

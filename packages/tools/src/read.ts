@@ -7,7 +7,7 @@
  */
 import { VIDEO_SPEC } from '@signforge/contract';
 import { z } from 'zod';
-import { effectiveScopes, type Grant, permits } from './dispatch';
+import { effectiveScopes, type Grant, grantOf, permits } from './dispatch';
 import { agentTimeProperties, applyTimes, type TimePlan, timePlan } from './agent-times';
 import { outputs } from './outputs';
 import { id } from './fields';
@@ -516,10 +516,10 @@ export function readTools(tools: Tools) {
     listedInput: (grant, services) => describeInput(readTypes(tools, grant, services)),
     output: outputs.describe,
     example: { type: 'spot' },
-    handler: async ({ input: { type }, role, scopes }) => {
-      const grant: Grant = { role, scopes, editorsPublish: true };
-      if (!toolsOf(type).every((name) => permits(grant, toolNamed(tools, name))))
-        throw new ToolError('forbidden', `reading ${type} is not open to this caller`);
+    handler: async ({ input: { type }, org, role, scopes, services }) => {
+      // As read is listed to the caller: a type it may not read with these services is not described either.
+      const grant = await grantOf({ org, role, scopes });
+      if (!readTypes(tools, grant, services).includes(type)) throw new ToolError('forbidden', `reading ${type} is not open to this caller`);
       const def = defOf(type);
       const { summary } = def;
       return {

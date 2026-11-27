@@ -287,8 +287,7 @@ const saveSpot = defineTool({
   }),
   output: outputs.save_spot,
   example: { name: 'Fresh picked', kind: 'template', templateVersionId: 'tpv_example', data: { title: 'Fresh picked' } },
-  // Behind the drawer's card, a refused press has no output (`refusedPress`): no target then, for a new spot.
-  target: (input, output: { spot: { id: string } } | undefined) => {
+  target: (input, output) => {
     const spotId = input.spotId ?? output?.spot.id;
     return spotId === undefined ? undefined : { kind: 'spot', id: spotId };
   },

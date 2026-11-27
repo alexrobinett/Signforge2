@@ -200,7 +200,7 @@ export async function refusedPress<D extends DataScope>(
 ): Promise<DispatchResult> {
   const tool = registry.get(name);
   const parsed = tool?.input.safeParse(rawInput ?? {});
-  const target = tool?.target && parsed?.success ? tool.target(parsed.data, undefined as never) : undefined;
+  const target = tool?.target && parsed?.success ? tool.target(parsed.data, undefined) : undefined;
   const audit = caller.org.auditLog.stage({
     actorKind: caller.actor.kind,
     actorId: caller.actor.id,
@@ -446,7 +446,7 @@ async function dispatchCall<D extends DataScope>(
         // staged: a person's press of a card (#269) refused so gets its row alone (`refusedPress`).
         if (err.changed) {
           try {
-            await commit(tool.target?.(parsed.data, undefined as never), {
+            await commit(tool.target?.(parsed.data, undefined), {
               refused: { error: err.code, message: err.message },
               ...(err.auditDetail ? { detail: redact(err.auditDetail) } : {}),
             });

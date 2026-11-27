@@ -96,7 +96,10 @@ const saveGroup = defineTool({
     }),
   output: outputs.save_group,
   example: { name: 'Front of house', screenIds: ['scr_example'] },
-  target: (input, output) => ({ kind: 'group', id: input.groupId ?? output.group.id }),
+  target: (input, output) => {
+    const id = input.groupId ?? output?.group.id;
+    return id === undefined ? undefined : { kind: 'group', id };
+  },
   handler: async ({ org, input, write }) => {
     const screenIds = [...new Set(input.screenIds ?? [])];
     // The screens a rule matches now, read only for a rule (review of #608).

@@ -10,13 +10,16 @@
  * as input (a transition, a table mapping) lives here too, and the tool imports it.
  */
 import {
+  BRAND_COLORS,
   BRAND_SHAPES,
   FAILED_RELEASE_REASONS,
+  LIVE_SOURCES,
   PLAYER_CHANNELS,
   SCREEN_KINDS,
   TABLE_ROWS_PATH,
   TEMPLATE_CHECKS,
-  type DisplayHours,
+  type FieldDef,
+  type ListItemFieldDef,
   type TemplateManifest,
 } from '@signforge/contract';
 import type { CompileInput } from '@signforge/compiler';
@@ -311,18 +314,65 @@ export const OUTCOMES = ['playing', 'downloading', 'asleep', 'unreachable', 'wai
 
 export const TEMPLATE_STATUSES = ['draft', 'approved', 'retired'] as const;
 
+const fieldLabel = z.string().describe('Shown over its input in the editor');
+const scalarFields = [
+  z.object({ type: z.literal('text'), label: fieldLabel, default: z.string().optional(), maxLength: z.number().optional(), maxMarks: z.number().optional() }),
+  z.object({
+    type: z.literal('number'),
+    label: fieldLabel,
+    default: z.number().optional(),
+    min: z.number().optional(),
+    max: z.number().optional(),
+    step: z.number().optional(),
+  }),
+  z.object({ type: z.literal('boolean'), label: fieldLabel, default: z.boolean().optional() }),
+  z.object({ type: z.literal('color'), label: fieldLabel, default: z.string().optional() }),
+  z.object({ type: z.literal('select'), label: fieldLabel, options: z.array(z.string()), default: z.string().optional() }),
+  z.object({ type: z.literal('url'), label: fieldLabel, default: z.string().optional(), maxLength: z.number().optional(), maxBytes: z.number().optional() }),
+  z.object({ type: z.literal('date'), label: fieldLabel, default: z.string().optional(), min: z.string().optional(), max: z.string().optional() }),
+  z.object({ type: z.literal('datetime'), label: fieldLabel, default: z.string().optional(), min: z.string().optional(), max: z.string().optional() }),
+] as const;
+const listItemField: z.ZodType<ListItemFieldDef> = z.discriminatedUnion('type', [...scalarFields, z.object({ type: z.literal('image'), label: fieldLabel })]);
+const fieldDef: z.ZodType<FieldDef> = z.discriminatedUnion('type', [
+  ...scalarFields,
+  z.object({
+    type: z.literal('image'),
+    label: fieldLabel,
+    portraitBox: z.object({ w: z.number(), h: z.number() }).optional().describe('The largest box it is drawn in on a portrait screen, in CSS px'),
+  }),
+  z.object({
+    type: z.literal('list'),
+    label: fieldLabel,
+    item: z.record(z.string(), listItemField),
+    maxItems: z.number().optional(),
+    default: z.array(z.record(z.string(), z.unknown())).optional(),
+  }),
+]);
+const liveSource = z.object({
+  source: z.enum(LIVE_SOURCES),
+  fields: z.record(z.string(), z.string()).describe("Field name to its path in the source's snapshot"),
+  place: z.string().optional(),
+  units: z.object({ temperature: z.string().optional(), wind: z.string().optional() }).optional(),
+});
+
 /**
- * A built `template.json`, as a tool's output describes it: checked loosely here, as the contract's
- * `templateManifestShape` read it in full when the version was registered (`checkTemplateBundle`).
+ * A built `template.json`, as a tool's output describes it: the contract's `TemplateManifest`, which its
+ * `templateManifestShape` checked in full when the version was registered (`checkTemplateBundle`).
  */
-const manifestOutput = z
-  .custom<TemplateManifest>(
-    (v) =>
-      z
-        .looseObject({ id: z.string(), version: z.string(), name: z.string(), fields: z.record(z.string(), z.unknown()), orientations: z.array(z.string()) })
-        .safeParse(v).success,
-    'not a template manifest',
-  )
+const manifestOutput: z.ZodType<TemplateManifest> = z
+  .object({
+    id: z.string(),
+    version: z.string(),
+    name: z.string(),
+    description: z.string().optional(),
+    fields: z.record(z.string(), fieldDef),
+    duration: z.object({ defaultMs: z.number(), minMs: z.number(), maxMs: z.number() }),
+    orientations: z.array(orientation),
+    uses: z.array(z.enum(['canvas', 'webgl', 'audio'])),
+    background: z.string(),
+    protocol: z.number().optional(),
+    live: z.union([liveSource, z.object({ sources: z.record(z.string(), liveSource.extend({ label: z.string() })) })]).optional(),
+  })
   .describe("The template's template.json, as built: id, version, name, fields, duration, orientations, uses, background");
 
 /** What is stored on a version: the contract's report, plus when it ran and on which sources. */
@@ -437,6 +487,29 @@ const fontOutput = z.object({
 });
 
 const fontRef = z.object({ id: z.string(), family: z.string() }).nullable();
+
+const manifestFont = z.object({
+  id: z.string(),
+  family: z.string(),
+  files: z.array(z.object({ weight: z.number(), style: z.enum(['normal', 'italic']), file: z.string() })),
+});
+
+/** The kits a preview's screen may get and the choices among them, as the compiler takes them: each kit the contract's `BrandKit`. */
+const previewBrand: z.ZodType<NonNullable<CompileInput['brand']>> = z.object({
+  screen: z.string().optional(),
+  groups: z.record(z.string(), z.string()),
+  default: z.string().optional(),
+  kits: z.record(
+    z.string(),
+    z.object({
+      id: z.string(),
+      colors: z.record(z.enum(BRAND_COLORS), z.string()),
+      shape: brandShape,
+      fonts: z.object({ display: manifestFont.optional(), body: manifestFont.optional() }),
+      logo: z.object({ onDark: z.string(), onLight: z.string().optional() }).optional(),
+    }),
+  ),
+});
 
 export const brandKitOutput = z.object({
   id: z.string(),
@@ -586,7 +659,7 @@ export const auditRetentionDays = z
 const settingsView = z.object({
   timezone: z.string().nullable().describe('Default time zone for new screens; null for none set'),
   locale: z.string().nullable().describe('Default locale for new screens; null for the player default'),
-  displayHours: z.custom<DisplayHours>().nullable().describe('Default display hours for new screens; null for always on'),
+  displayHours: displayHours.nullable().describe('Default display hours for new screens; null for always on'),
   updateWindow: z.object({ from: z.string(), to: z.string() }),
   unreachableAfterMinutes: z.number(),
   editorsPublish,
@@ -1091,11 +1164,10 @@ export const outputs = {
   get_spot_preview: z.object({
     preview: z
       .looseObject({
-        // The compiler's input types, not checked: an agent sees any JSON in them.
-        templates: z.record(z.string(), z.custom<CompileInput['templates'][string]>()),
+        templates: z.record(z.string(), z.object({ manifest: manifestOutput, html: z.string().describe("The bundle's SHA-256") })),
         files: z.record(z.string(), z.object({ size: z.number(), type: z.string() })),
-        dataSources: z.array(z.custom<CompileInput['dataSources'][number]>()),
-        brand: z.custom<NonNullable<CompileInput['brand']>>().optional(),
+        dataSources: z.array(z.object({ id: z.string(), refreshS: z.number() })),
+        brand: previewBrand.optional(),
       })
       .describe("A compiler input without its screen and content: templates, files, dataSources and brand (the chosen kit as the screen's)"),
     brandKitId: z.string().nullable().describe('The kit the preview wears, or null for none'),

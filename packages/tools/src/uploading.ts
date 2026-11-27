@@ -58,7 +58,7 @@ const startUpload = defineTool({
       portrait: { sha256: '2'.repeat(64), type: 'image/jpeg', size: 690_000, width: 2880, height: 1920 },
     },
   },
-  target: (_input, output) => ({ kind: 'asset', id: output.asset.id }),
+  target: (_input, output) => (output ? { kind: 'asset', id: output.asset.id } : undefined),
   handler: async (ctx) => {
     const { org, blobs, input, services } = ctx;
     if (input.assetId !== undefined) {

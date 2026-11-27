@@ -226,7 +226,7 @@ const startTakeover = defineTool({
   input: z.object({ ...takeoverFields, idempotencyKey }).refine(aimed, AIMED),
   output: outputs.start_takeover,
   example: { playlistId: 'pls_example', target: 'org', endsAt: '2026-11-17T20:00:00Z' },
-  target: (_input, output) => ({ kind: 'schedule_entry', id: output.entry.id }),
+  target: (_input, output) => (output ? { kind: 'schedule_entry', id: output.entry.id } : undefined),
   handler: async ({ org, input, write }) => ({ entry: entryView(write(await org.scheduleEntries.stage.insert(await takeoverOf(org, input, Date.now())))) }),
   refuseFailedCommit: async ({ org, input }) => missingAim(org, input),
 });
@@ -260,7 +260,10 @@ const saveEntry = defineTool({
     .refine(aimed, AIMED),
   output: outputs.save_schedule_entry,
   example: { playlistId: 'pls_example', target: 'group', groupId: 'grp_example', days: [1, 2, 3, 4, 5], from: '06:00', to: '10:30' },
-  target: (input, output) => ({ kind: 'schedule_entry', id: input.scheduleEntryId ?? output.entry.id }),
+  target: (input, output) => {
+    const id = input.scheduleEntryId ?? output?.entry.id;
+    return id === undefined ? undefined : { kind: 'schedule_entry', id };
+  },
   handler: async ({ org, input, write }) => {
     const { scheduleEntryId } = input;
     if (scheduleEntryId === undefined) {
