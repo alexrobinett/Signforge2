@@ -240,6 +240,7 @@
       },
       "images": { "binding": "IMAGES" },
       "triggers": { "crons": ["* * * * *", "*/5 * * * *"] },
+      // Placeholder id until the database exists: `pnpm --filter @signforge/api check:deploy prod` refuses a deploy while it is.
       "d1_databases": [
         {
           "binding": "DB",

@@ -14,6 +14,7 @@
     "types": "wrangler types --env dev --strict-vars=false",
     "typecheck": "wrangler types --env dev --strict-vars=false >/dev/null && tsc -p . && tsc -p scripts",
     "test": "vitest run",
+    "check:deploy": "tsx scripts/check-deploy-config.ts",
     "dev:screen": "wrangler d1 migrations apply DB --local --env dev >&2 && tsx scripts/dev-screen.ts",
     "eval:agents": "vitest run --config vitest.eval.config.ts"
   },

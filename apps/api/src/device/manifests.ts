@@ -23,7 +23,12 @@ export interface ManifestSummary extends ManifestNeeds {
   bound: Map<string, BoundField[]>;
 }
 
-const MAX_CACHED = 256;
+/**
+ * A summary is a few kB: 1,024 hold the current and previous manifest of 512 screens, and a sync reads both. 1,000 screens
+ * need about 2,000 across the isolates that serve them (a screen's syncs spread over Cloudflare's), so a smaller cache
+ * would drop an entry before its screen's next sync and read R2 again.
+ */
+export const MAX_CACHED = 1024;
 const cache = new Map<string, ManifestSummary>();
 
 function summarise(id: string, m: ScreenManifest): ManifestSummary {

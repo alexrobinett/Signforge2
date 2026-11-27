@@ -12,20 +12,22 @@
  * part-way leaves its rows and its claims, which expire with the lease, and the next run takes them up: deleting an
  * object twice is harmless.
  *
- * Bounded for Free D1's 50 queries and 50 subrequests an invocation: ORGS_PER_RUN orgs, each at most seven D1 queries
- * (the lease, the unindexed manifests, the index written, the claim's batch, the pending uploads, their renditions, the
- * last batch), INDEX_PER_ORG manifest reads and two R2 deletes of 1,000 keys: at most 90 files, 90 uploads' 360, and
- * 1,000 stored manifests, one key each (packages/db `MANIFESTS_PER_SWEEP`).
+ * Bounded for one Workers Paid invocation's 1,000 D1 queries and 1,000 calls to services: ORGS_PER_RUN orgs, each at most
+ * seven D1 queries (the lease, the unindexed manifests, the index written, the claim's batch, the pending uploads, their
+ * renditions, the last batch), INDEX_PER_ORG manifest reads and two R2 deletes of 1,000 keys: at most 90 files, 90 uploads'
+ * 360, and 1,000 stored manifests, one key each (packages/db `MANIFESTS_PER_SWEEP`). 1 + 100 * 7 = 701 queries and
+ * 100 * (6 + 2) = 800 R2 calls. One run sweeps every org due, so an org is swept daily, and one with 100 manifests the
+ * index does not hold yet has them indexed in 17 days.
  */
 import { nothingDue, orgsWithStorageDue, scoped, STORAGE_LEASE_MS } from '@signforge/db';
 import { manifestKey, orgBlobKey, uploadKey } from '@signforge/tools';
 
-/** Orgs one run sweeps: the rest, the least recently swept first, the next day. */
-export const ORGS_PER_RUN = 5;
+/** Orgs one run sweeps: any more, the least recently swept first, wait for the next day. */
+export const ORGS_PER_RUN = 100;
 /** Of each kind (files, uploads), the most one org's sweep claims. */
 const DUE_PER_ORG = 90;
 /** Manifests one org's sweep reads from R2 to index. */
-export const INDEX_PER_ORG = 4;
+export const INDEX_PER_ORG = 6;
 /** Objects are deleted only while at least this much of the lease is left: a lease that ran out may have let a writer in. */
 const LEASE_MARGIN_MS = 60_000;
 

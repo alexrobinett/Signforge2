@@ -99,14 +99,17 @@ describe('the storage sweep', () => {
     expect(await a.assets.get(left.id)).toBeUndefined();
     // Measured: the orgs due, then the org's lease, its unindexed manifests, the index written, the claim's batch, the
     // pending uploads and the last batch; an image upload's renditions are one query more. Seven an org at most, so
-    // ORGS_PER_RUN fit in Free D1's 50. A new query fails this on purpose: look at the budget, then raise it.
+    // ORGS_PER_RUN fit in a Paid invocation's 1,000. A new query fails this on purpose: look at the budget, then raise it.
     expect(measured.result()).toEqual({ statements: 16, queries: 7, rpcs: [] });
-    expect(1 + ORGS_PER_RUN * 7).toBeLessThanOrEqual(50);
+    expect(1 + ORGS_PER_RUN * 7).toBeLessThanOrEqual(1000);
     // R2: here a read (the manifest indexed) and a delete. At most INDEX_PER_ORG reads and two deletes an org: a sweep
     // claims at most 90 files, 90 uploads' 360 and 1,000 manifests, 1,000 keys a delete (review of #431).
     expect(first.calls).toEqual({ get: 1, delete: 1 });
     expect(Math.ceil((90 + 90 * 4 + 1000) / 1000)).toBe(2);
-    expect(ORGS_PER_RUN * (INDEX_PER_ORG + 2)).toBeLessThanOrEqual(50);
+    expect(ORGS_PER_RUN * (INDEX_PER_ORG + 2)).toBeLessThanOrEqual(1000);
+    // A day's run reaches every org of 100, and 100 unindexed manifests in an org are indexed within three weeks.
+    expect(ORGS_PER_RUN).toBeGreaterThanOrEqual(100);
+    expect(Math.ceil(100 / INDEX_PER_ORG)).toBeLessThanOrEqual(21);
 
     // A newer publish moves the screen on: the old manifest is still kept (its publish is the screen's newest before the
     // grace period), so its file stays, until a publish past the grace period replaces it there too.
@@ -135,6 +138,14 @@ describe('the storage sweep', () => {
       { files: 2, uploads: [], manifests: 1 },
       { files: 1, uploads: [left.id], manifests: 0 },
     ]);
+  });
+
+  it('sweeps every org due in one run, more than the 5 a run took on the Free plan', async () => {
+    const swept = [];
+    for (let i = 0; i < 7; i++) swept.push(await orgWithDueFile(`sweep-many-${i}`, sha(String(i))));
+    expect(ORGS_PER_RUN).toBeGreaterThan(swept.length);
+    expect(await sweepStorage(env.DB, recorded().blobs, at(DUE))).toBe(swept.length);
+    for (const { key } of swept) expect(await exists(key), key).toBe(false);
   });
 
   it('claims no file until every kept manifest is indexed, reading INDEX_PER_ORG a run', async () => {

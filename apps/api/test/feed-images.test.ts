@@ -1602,10 +1602,11 @@ describe('budgets, resilience and cleanup', () => {
       },
       { ...env, DB: counter.db },
     );
-    expect(counter.counts().apiCalls).toBeLessThan(50);
+    // All twelve fit one run (POLLS_PER_RUN): the claim and at most seven calls each, far under a Paid invocation's 1,000.
+    expect(counter.counts().apiCalls).toBeLessThanOrEqual(1 + 12 * 7);
     expect(refresh).toHaveBeenCalledTimes(2);
     for (const org of providers) expect(await org.scope.dataSources.get(org.dataSource)).toMatchObject({ failures: 1, lastError: 'needs-reconnect' });
-    expect(take()).toHaveLength(4);
+    expect(take()).toHaveLength(10);
   });
 
   // Twelve orgs and 18,000 old rows, then two crons: 9.1 s on CI (run 45070332774), against 0.5 s on a laptop.
