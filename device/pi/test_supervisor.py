@@ -300,6 +300,50 @@ class Updates(unittest.TestCase):
             self.assertEqual(supervisor.api_get("/player-release"), (302, b""))
         self.assertEqual(elsewhere, [])
 
+    def download(self, chunks, clock):
+        """api_download against a fake API answering with `chunks`, one per read, on `clock`, the monotonic time."""
+        import updater
+
+        class Body:
+            def __init__(self):
+                self.left = list(chunks)
+
+            def read1(self, _n):
+                return self.left.pop(0) if self.left else b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+        class Opener:
+            def open(self, req, timeout):
+                return Body()
+
+        dest = os.path.join(tempfile.mkdtemp(), "t.tar.gz")
+        held = ("sfd_secret", "https://api.test/v1/device")
+        with (
+            mock.patch.object(supervisor, "api_opener", Opener()),
+            mock.patch.object(supervisor, "load_credential", return_value=held),
+            mock.patch.object(supervisor, "updater", updater, create=True),
+            mock.patch.object(supervisor.time, "monotonic", clock),
+        ):
+            supervisor.api_download("/player-release/abc", dest, 10)
+        with open(dest, "rb") as f:
+            return f.read()
+
+    def test_a_download_writes_no_more_than_the_signed_size_and_stops_at_its_deadline(self):
+        import updater
+
+        self.assertEqual(self.download([b"12345", b"67890"], lambda: 0), b"1234567890")
+        with self.assertRaisesRegex(updater.Refused, "larger than the one signed"):
+            self.download([b"12345", b"678901"], lambda: 0)
+        # A trickle: a byte a read, the clock past the deadline by the third.
+        times = iter([0, 1, supervisor.DOWNLOAD_DEADLINE_S, supervisor.DOWNLOAD_DEADLINE_S + 1])
+        with self.assertRaisesRegex(updater.Refused, "the download took more than"):
+            self.download([b"1", b"2", b"3", b"4"], lambda: next(times))
+
     def test_starts_with_updates_off_when_the_key_or_its_state_is_bad(self):
         key = os.path.join(HOME, "bad.pub")
         with open(key, "w") as f:

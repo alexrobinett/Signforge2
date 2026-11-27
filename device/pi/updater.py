@@ -10,7 +10,8 @@ About every POLL_S, with jitter, it asks the API its credential is bound to for 
   - the release plays the manifest schema the server compiles.
 A canary installs at once; a stable screen while its panel is off, or else once the release has been offered for an
 hour, at a random minute in the hour after, so a fleet does not restart at once. An install that fails waits before
-the same release is downloaded again, doubling each time (RETRY_S, at most RETRY_MAX_S).
+the same release is downloaded again, doubling each time (RETRY_S, at most RETRY_MAX_S); after RETRY_TRIES it is
+marked bad as `other` and reported, as a release rolled back is.
 
 Installing: with room on the disk, it downloads the tarball (`GET <api>/player-release/<sha256>`) into players/, no
 more than its size, and checks its sha256 and size. It extracts it into players/.<version>.tmp/ as the contract states
@@ -31,12 +32,13 @@ If the new player does not beat in time, the link goes back to the version befor
 kiosk restarts. The version is marked bad, never installed again, and the `/alive` reply names it (`failedRelease`)
 until a newer one passes, so the player reports it on its syncs. When an older build went on beating after the
 switch, the new one never ran: that is not its fault, so it goes back without being marked, and waits to retry as a
-failed install does. A version that passes leaves the one before it as the way back; older ones are deleted.
+failed install does, until RETRY_TRIES. A rollback records the release bad before it switches back, so a crash between
+the two finishes the rollback at the next start rather than serving the failed release again. A version that passes leaves the one before it as the way back; older ones are deleted.
 
 State that must outlive a restart is in players/state.json. Everything outside is injected, the clocks included, so
 the tests run on fixed ones.
 """
-import base64, hashlib, json, os, re, shutil, tarfile
+import base64, hashlib, json, os, re, shutil, tarfile, zlib
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -54,6 +56,10 @@ OFFERED_WAIT_S = 3600
 # A release whose install failed waits this long before it is downloaded again, doubling each time, at most a day.
 RETRY_S = POLL_S
 RETRY_MAX_S = 86_400
+# Tries before a release that keeps failing is marked bad (`other`) and reported: waits of 15, 30, 60, 120 and 240
+# minutes, about 8 hours, outlast a night's network or storage fault, and bound a canary's downloads and kiosk restarts
+# for one release to 6, where trying for good cost 144 downloads in 3 days with nothing reported.
+RETRY_TRIES = 6
 # The contract's bounds (packages/contract, player releases): past any, nothing is written.
 RELEASE_FORMAT = 1
 MAX_RELEASE_MANIFEST_BYTES = 1_048_576
@@ -63,8 +69,6 @@ MAX_RELEASE_PATH_LENGTH = 1024
 RELEASE_PATH_SEGMENT = re.compile(r"^[A-Za-z0-9._-]{1,255}\Z")
 RELEASE_SIGNATURE = re.compile(r"^[A-Za-z0-9+/]{86}==\Z")
 RESERVED_RELEASE_PATH = "content"
-# The most members a tarball may hold: every file, a directory for each, and `./`.
-MAX_MEMBERS = 2 * MAX_RELEASE_FILES + 1
 # This supervisor's level: a release whose `minSupervisor` is higher needs a supervisor deployed by hand first.
 SUPERVISOR_LEVEL = 1
 # Room left on the disk after an install's tarball and files.
@@ -195,6 +199,15 @@ class Updater:
         if not gate:
             return
         target = f"players/{gate['version']}"
+        if gate["version"] in self.state["bad"]:
+            # A rollback that stopped part way: finished, and never switched to the release again.
+            previous = gate["previous"]
+            if self.served() == target and previous and os.path.isdir(os.path.join(self.home, previous)):
+                self.switch(previous)
+                shutil.rmtree(os.path.join(self.home, target), ignore_errors=True)
+            self.state["gate"] = None
+            self.try_save()
+            return
         if self.served() != target:
             if self.served() != gate["previous"] or not os.path.isdir(os.path.join(self.home, target)):
                 self.state["gate"] = None
@@ -281,10 +294,15 @@ class Updater:
         return f"installed {v}"
 
     def retry_later(self, version, sha256):
-        """Hold this release back before it is downloaded again, for longer each time it fails; other releases' holds go."""
+        """Hold this release back before it is downloaded again, for longer each time it fails; other releases' holds go.
+        At RETRY_TRIES it is marked bad, as `other`, and the `/alive` reply reports it."""
         key = f"{version}:{sha256}"
         tries = self.state["retry"].get(key, {}).get("tries", 0) + 1
-        self.state["retry"] = {key: {"tries": tries, "at": self.clock() + min(RETRY_S * 2 ** (tries - 1), RETRY_MAX_S)}}
+        if tries >= RETRY_TRIES:
+            self.state.update(bad=sorted(set(self.state["bad"]) | {version}), failed={"version": version, "reason": "other"}, retry={})
+            self.log(f"player release {version} failed {tries} times: marked bad")
+        else:
+            self.state["retry"] = {key: {"tries": tries, "at": self.clock() + min(RETRY_S * 2 ** (tries - 1), RETRY_MAX_S)}}
         self.try_save()
 
     def verified(self, offer):
@@ -339,7 +357,6 @@ class Updater:
         self.state.update(
             gate={"version": v, "sha256": m["sha256"], "previous": self.served(), "started": self.mono(), "first": None, "last": None, "old": None},
             offered=None,
-            retry={},
         )
         self.save()
         self.switch(f"players/{v}")
@@ -387,7 +404,7 @@ class Updater:
             return self.roll_back("stopped")
         if now - gate["first"] >= GATE_HOLD_S:
             v = gate["version"]
-            self.state.update(gate=None, failed=None, passed=max(self.state["passed"], v))
+            self.state.update(gate=None, failed=None, retry={}, passed=max(self.state["passed"], v))
             self.save()
             self.keep(f"players/{v}", gate["previous"])
             self.log(f"player {v} passed its health gate")
@@ -395,10 +412,15 @@ class Updater:
         return None
 
     def roll_back(self, reason):
-        """Back to what served before, when it is still there, then the record: switching first, so a full disk that
-        cannot save still rolls back. `reason` None: the new version never ran, so it waits to retry, unmarked."""
+        """Back to what served before, when it is still there. A failed release is recorded bad first, the gate still
+        open, so a crash before the switch finishes the rollback at start (resume_gate); a save that fails, on a full disk,
+        does not stop it. `reason` None: the new version never ran, so it waits to retry, unmarked."""
         gate = self.state["gate"]
         v, previous = gate["version"], gate["previous"]
+        if reason:
+            self.state["bad"] = sorted(set(self.state["bad"]) | {v})
+            self.state["failed"] = {"version": v, "reason": reason}
+            self.try_save()
         if previous and os.path.isdir(os.path.join(self.home, previous)):
             self.switch(previous)
             shutil.rmtree(os.path.join(self.players, str(v)), ignore_errors=True)
@@ -408,8 +430,6 @@ class Updater:
             self.log(f"player {v} failed its gate ({reason or 'not switched'}), and there is no version before it to go back to")
         self.state["gate"] = None
         if reason:
-            self.state["bad"] = sorted(set(self.state["bad"]) | {v})
-            self.state["failed"] = {"version": v, "reason": reason}
             self.try_save()
         else:
             self.retry_later(v, gate["sha256"])
@@ -430,49 +450,57 @@ class Updater:
 def extract(tarball, dest, files):
     """Extract `tarball` into `dest` as the contract states a release tarball, each file and directory synced to disk."""
     parents = {"/".join(p.split("/")[:i]) for p in files for i in range(1, p.count("/") + 1)}
+    # Every member is a listed file, a directory one is in, or `./`, each once.
+    most = len(files) + len(parents) + 1
     os.makedirs(dest)
-    seen, total, members = set(), 0, 0
-    with tarfile.open(tarball, "r:gz") as tar:
-        for member in tar:
-            members += 1
-            if members > MAX_MEMBERS:
-                raise Refused(f"the tarball holds more than {MAX_MEMBERS} members")
-            name = member.name[2:] if member.name.startswith("./") else member.name
-            name = name.rstrip("/") if member.isdir() else name
-            if member.isdir() and name in ("", "."):
-                continue
-            if not is_release_path(name):
-                raise Refused(f"the tarball holds a path outside it: {member.name!r}")
-            if member.isdir():
-                if name not in parents:
-                    raise Refused(f"the tarball holds a directory no listed file is in: {name!r}")
-                os.makedirs(os.path.join(dest, name), exist_ok=True)
-                continue
-            if not member.isreg():
-                raise Refused(f"the tarball holds something other than a file or a directory: {member.name!r}")
-            if name not in files or name in seen:
-                raise Refused(f"the tarball holds a file the manifest does not list once: {name!r}")
-            seen.add(name)
-            path = os.path.join(dest, name)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            src = tar.extractfile(member)
-            digest = hashlib.sha256()
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-            with os.fdopen(fd, "wb") as out:
-                # Counted as written, not as the header says: a header cannot make a file larger than a release.
-                for chunk in iter(lambda: src.read(1 << 16), b""):
-                    total += len(chunk)
-                    if total > MAX_RELEASE_BYTES:
-                        raise Refused("the tarball's files add up to more than a release may")
-                    digest.update(chunk)
-                    out.write(chunk)
-                out.flush()
-                os.fsync(out.fileno())
-            if digest.hexdigest() != files[name]:
-                raise Refused(f"{name} is not the file signed")
+    seen, dirs, total, members = set(), set(), 0, 0
+    try:
+        with tarfile.open(tarball, "r:gz") as tar:
+            for member in tar:
+                members += 1
+                if members > most:
+                    raise Refused(f"the tarball holds more than {most} members")
+                name = member.name[2:] if member.name.startswith("./") else member.name
+                name = name.rstrip("/") if member.isdir() else name
+                if member.isdir() and name in ("", "."):
+                    name = ""
+                elif not is_release_path(name):
+                    raise Refused(f"the tarball holds a path outside it: {member.name!r}")
+                if member.isdir():
+                    if name and name not in parents:
+                        raise Refused(f"the tarball holds a directory no listed file is in: {name!r}")
+                    if name in dirs:
+                        raise Refused(f"the tarball names a directory twice: {member.name!r}")
+                    dirs.add(name)
+                    os.makedirs(os.path.join(dest, name), exist_ok=True)
+                    continue
+                if not member.isreg():
+                    raise Refused(f"the tarball holds something other than a file or a directory: {member.name!r}")
+                if name not in files or name in seen:
+                    raise Refused(f"the tarball holds a file the manifest does not list once: {name!r}")
+                seen.add(name)
+                path = os.path.join(dest, name)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                src = tar.extractfile(member)
+                digest = hashlib.sha256()
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+                with os.fdopen(fd, "wb") as out:
+                    # Counted as written, not as the header says: a header cannot make a file larger than a release.
+                    for chunk in iter(lambda: src.read(1 << 16), b""):
+                        total += len(chunk)
+                        if total > MAX_RELEASE_BYTES:
+                            raise Refused("the tarball's files add up to more than a release may")
+                        digest.update(chunk)
+                        out.write(chunk)
+                    out.flush()
+                    os.fsync(out.fileno())
+                if digest.hexdigest() != files[name]:
+                    raise Refused(f"{name} is not the file signed")
+    except (tarfile.TarError, EOFError, zlib.error) as e:
+        raise Refused(f"the tarball is not a gzipped tar: {e}")
     missing = set(files) - seen
     if missing:
         raise Refused(f"the tarball lacks {len(missing)} file(s) the manifest lists, such as {sorted(missing)[0]!r}")
-    for root, dirs, _ in os.walk(dest):
-        for d in dirs:
+    for root, subdirs, _ in os.walk(dest):
+        for d in subdirs:
             fsync_dir(os.path.join(root, d))

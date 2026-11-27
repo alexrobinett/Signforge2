@@ -235,6 +235,8 @@ class Installs(unittest.TestCase):
             "a listed file twice": ([*FILES.items(), file("sw.js", b"// sw")], "a file the manifest does not list once: 'sw.js'"),
             "a listed file with other bytes": ([file("index.html", b"<script>evil()</script>"), *rest], "index.html is not the file signed"),
             "a listed file missing": (rest, "lacks 1 file(s) the manifest lists, such as 'index.html'"),
+            "a directory named twice": ([member("assets", tarfile.DIRTYPE), member("assets/", tarfile.DIRTYPE), *FILES.items()], "names a directory twice: 'assets'"),
+            "./ twice": ([member("./", tarfile.DIRTYPE), member(".", tarfile.DIRTYPE), *FILES.items()], "names a directory twice: '.'"),
         }
         for why, (entries, said) in hostile.items():
             with self.subTest(why):
@@ -254,11 +256,26 @@ class Installs(unittest.TestCase):
         with mock.patch.object(updater, "MAX_RELEASE_BYTES", 4095):
             self.assertEqual(s.u.poll(), "refused: the tarball's files add up to more than a release may")
         self.assertEqual(s.players(), ["0"])
+        # Three files, one directory they are in, and `./`: five members at most, as the manifest allows.
         s = Screen()
-        tar, rel = release(42)
+        tar = tarball([member("./", tarfile.DIRTYPE), member("assets", tarfile.DIRTYPE), *FILES.items(), file("x", b"")])
+        _, rel = release(42, tar=tar)
         s.offering(rel, tar)
-        with mock.patch.object(updater, "MAX_MEMBERS", 2):
-            self.assertEqual(s.u.poll(), "refused: the tarball holds more than 2 members")
+        self.assertEqual(s.u.poll(), "refused: the tarball holds more than 5 members")
+        s = Screen()
+        tar = tarball([member("./", tarfile.DIRTYPE), member("assets", tarfile.DIRTYPE), *FILES.items()])
+        _, rel = release(42, tar=tar)
+        s.offering(rel, tar)
+        self.assertEqual(s.u.poll(), "installed 42")
+
+    def test_a_signed_tarball_that_is_not_a_gzipped_tar_is_refused_and_waits_to_retry(self):
+        for why, body in {"not gzip": b"plain bytes, not a tarball", "gzip, not a tar": __import__("gzip").compress(b"x" * 600)}.items():
+            with self.subTest(why):
+                s = Screen()
+                _, rel = release(42, tar=body)
+                s.offering(rel, body)
+                self.assertTrue(s.u.poll().startswith("refused: the tarball is not a gzipped tar"))
+                self.assertEqual((s.u.poll(), s.players()), ("release 42 waits to retry", ["0"]))
 
     def test_with_no_room_on_the_disk_nothing_is_downloaded(self):
         s = Screen()
@@ -285,6 +302,23 @@ class Installs(unittest.TestCase):
         s.tarballs[sha(tar)] = tar
         self.assertEqual(s.u.poll(), "installed 42")
         self.assertEqual(s.downloads, 3)
+
+    def test_a_release_that_keeps_failing_is_marked_bad_as_other_and_reported(self):
+        s = Screen()
+        tar, rel = release(42)
+        s.offering(rel)
+        s.tarballs[sha(tar)] = b"not it"
+        waits = []
+        for _ in range(updater.RETRY_TRIES):
+            self.assertEqual(s.u.poll(), "refused: the tarball is not the one signed")
+            retry = s.u.state["retry"]
+            if retry:
+                waits.append(next(iter(retry.values()))["at"] - s.now)
+                s.now = next(iter(retry.values()))["at"]
+        self.assertEqual([w // 60 for w in waits], [15, 30, 60, 120, 240])
+        self.assertEqual(s.u.alive_reply(), {"failedRelease": {"version": 42, "reason": "other"}})
+        self.assertEqual(s.u.poll(), "refused: version 42 was rolled back before")
+        self.assertEqual(s.downloads, updater.RETRY_TRIES)
 
     def test_at_start_it_clears_what_an_install_left_and_reads_past_a_state_file_that_is_not_one(self):
         s = Screen()
@@ -379,6 +413,17 @@ class HealthGate(unittest.TestCase):
         self.assertEqual(s.u.poll(), "release 42 waits to retry")
         s.tick(updater.RETRY_S)
         self.assertEqual(s.u.poll(), "installed 42")
+        # A second round: the install keeps the count, so the wait doubles rather than starting again.
+        self.assertIsNone(self.beat(s, updater.GATE_FIRST_S - 5, release=7))
+        s.tick(10)
+        self.assertEqual(s.u.check_gate(), "rolled back: not switched")
+        s.tick(updater.RETRY_S)
+        self.assertEqual(s.u.poll(), "release 42 waits to retry")
+        s.tick(updater.RETRY_S)
+        self.assertEqual(s.u.poll(), "installed 42")
+        # And a pass clears it.
+        self.assertEqual(self.beat(s, updater.GATE_HOLD_S + 5), "passed")
+        self.assertEqual(s.u.state["retry"], {})
 
     def test_a_player_that_stops_beating_before_the_gate_closes_is_rolled_back(self):
         s = self.installed()
@@ -434,6 +479,31 @@ class HealthGate(unittest.TestCase):
         shutil.rmtree(os.path.join(s.home, "players", "42"))
         s.u = s.make()
         self.assertEqual((s.served(), s.u.state["gate"], s.restarts), ("players/7", None, 1))
+
+    def test_a_crash_inside_a_rollback_finishes_it_at_start(self):
+        s = self.installed()
+        s.tick(updater.GATE_FIRST_S + 1)
+        # The record is saved; the supervisor dies before the link moves back.
+        with mock.patch.object(s.u, "switch", side_effect=SystemExit):
+            with self.assertRaises(SystemExit):
+                s.u.check_gate()
+        self.assertEqual(s.served(), "players/42")
+        s.u = s.make()
+        self.assertEqual((s.served(), s.u.state["gate"], s.players()), ("players/7", None, ["7"]))
+        self.assertEqual(s.u.alive_reply(), {"failedRelease": {"version": 42, "reason": "not-alive"}})
+
+    def test_a_hand_deploy_over_a_rolled_back_release_is_not_undone_at_start(self):
+        s = self.installed()
+        s.tick(updater.GATE_FIRST_S + 1)
+        with mock.patch.object(s.u, "switch", side_effect=SystemExit):
+            with self.assertRaises(SystemExit):
+                s.u.check_gate()
+        # deploy-pi.sh, before the supervisor starts again.
+        os.makedirs(os.path.join(s.home, "players", "0"))
+        os.replace(os.path.join(s.home, "www"), os.path.join(s.home, "www.gone"))
+        os.symlink("players/0", os.path.join(s.home, "www"))
+        s.u = s.make()
+        self.assertEqual((s.served(), s.u.state["gate"]), ("players/0", None))
 
     def test_with_the_version_before_gone_a_failed_release_stays_served_and_is_marked(self):
         s = self.installed()

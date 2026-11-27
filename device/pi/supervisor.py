@@ -382,7 +382,8 @@ def api_download(path, dest, limit):
     deadline = time.monotonic() + DOWNLOAD_DEADLINE_S
     with api_opener.open(api_request(path), timeout=60) as r, open(dest, "wb") as f:
         got = 0
-        for chunk in iter(lambda: r.read(1 << 16), b""):
+        # read1: what has arrived, at most 64 KiB, so a trickle returns at once and meets the deadline.
+        for chunk in iter(lambda: r.read1(1 << 16), b""):
             got += len(chunk)
             if got > limit:
                 raise updater.Refused("the tarball is larger than the one signed")

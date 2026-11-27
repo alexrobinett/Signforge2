@@ -33,6 +33,7 @@ class PlayerWeb(unittest.TestCase):
         with self.assertRaises(Exception) as e:
             urlopen(url.replace("index.html", "assets/gone.js"))
         self.assertEqual((e.exception.code, e.exception.headers["Cache-Control"]), (404, "no-store"))
+        e.exception.close()
 
 
 if __name__ == "__main__":
