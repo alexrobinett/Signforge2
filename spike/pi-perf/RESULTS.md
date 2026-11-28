@@ -344,7 +344,7 @@ Video-pan's prepare, loading-next drops and the first prepare after a restart di
 - **Timers and services.** `apt-daily` ran in 3.8 s with no effect on frames (table above). man-db already runs at idle I/O priority and nice 19. Not changed.
 - **zram.** 30 MB of the 2 GB swap is in use, so it is not changed.
 - **I/O scheduler** (mq-deadline) and **ozone/Wayland against cage**: not tried. Nothing measured pointed at them.
-- **Overclock**: not tried. It could not be left in place, and no measurement showed the ARM clock to be the limit. Performance pins the ARM at 1.8 GHz and the hot spots are GPU and process start.
+- **Overclock**: not tried here. Measured on 2026-11-22: the ARM at 2.0 GHz is a small gain and an option of `tune.sh`, and the GPU at 750 MHz hung the display driver ("Overclock and a quiet console", below).
 - **NetworkManager's netplan rewrites** cost about 5 s of boot and are the biggest remaining delay. They were not touched: the network configuration is how the rig is reached, and a mistake there leaves a Pi off the network.
 
 ### Still over budget
@@ -1675,3 +1675,122 @@ Master's player, content built from master `9c09d376` (A) and from the branch (B
 - **Landscape is the same or better**, and later prepares are unchanged (portrait 356 to 410 ms in both; landscape 312 to 376 against 342 to 379).
 
 **Night's caption clipped again** (review of #638). Night's caption rises into place from just below the photo's edge (7 px at 380 ms); inside the panel, the panel's rounded clip hid that. `.photo-area` now clips to the same rounded edge in Night. It never animates, but a rounded clip over layers can take a render pass of its own, so Night portrait fades, the branch without the clip (A) against it (B), ABBA, two runs a pass: A 0.78, 0.78, 0.78, 0.72%; B 0.89, 0.89, 0.89, 0.94%. About 0.15 points, under 1%, so the clip stays.
+
+## Overclock and a quiet console (2026-11-22 and 2026-11-27)
+
+The Pi 400 as `tune.sh` left it on 2026-11-18, changed one setting at a time. Kept changes are in `device/pi/tune.sh`.
+
+### Overclock
+
+Master's player (`7efa7b85`) and the 21-spot stress playlist, `device/pi/bench.sh` with 4 playlist runs (2 cut, 2 fade 600 ms, 290 s each) and 5 kiosk restarts per round, each round after a reboot into its `config.txt`. Order: stock, ARM, stock, ARM. Both ARM rounds ran at `arm_freq=2000` and `over_voltage=6` (1.00 V at the core against 0.92 V; `vcgencmd` reported 2000 MHz throughout).
+
+| Measure | Stock, 1.8 GHz (2 rounds) | ARM 2.0 GHz (2 rounds) |
+| --- | --- | --- |
+| Overall, cut | 0.70, 0.56, 0.67, 0.67% | 0.68, 0.62, 0.51, 0.59% |
+| Overall, fade | 0.81, 0.83, 0.69, 0.71% | 0.66, 0.65, 0.65, 0.67% |
+| Fade window | 2.31, 1.98, 1.37, 1.46% | 1.63, 1.29, 1.72, 1.46% |
+| Loading next | 15.3-17.7% | 14.2-18.7% |
+| Prepare median | 250-271 ms | 238-261 ms |
+| Prepares over 500 ms, per run | 5, 4, 3, 3, 2, 3, 2, 1 | 1, 1, 1, 2, 1, 2, 0, 2 |
+| Worst frame | 150-300 ms | 117-283 ms |
+| Chromium launch after a restart | 2.02-2.19 s | 1.92-2.03 s |
+| First prepare after a restart, median per round | 888, 737 ms | 746, 781 ms |
+| Kernel start to first spot (1 boot each) | 21.9 s | 22.3 s |
+| Temperature max | 59.4 C | 62.8 C |
+
+Never throttled in any run (`get_throttled` 0x0), and no kernel error.
+
+- **The ARM overclock is a small gain.** Prepares come 5 to 8% sooner and fewer run over 500 ms, Chromium launches 0.1 s sooner, and fade runs drop slightly fewer frames, for 3.4 C.
+- **It does not move what is over budget.** Frames dropped while the next spot loads, the first prepare after a restart and boot time are where they were: those are GPU work, process start and SD reads.
+- **It is an option, not the default** (`sh tune.sh --overclock`). It was measured on one Pi 400, whose keyboard plate is its heat sink. A bare Pi 4 in an enclosure has to be checked for temperature and stability before it is left on, and 2.0 GHz is as far as this went.
+- **The GPU overclock is rejected**: it is slower, not faster. Next section.
+
+One run of the first stock round was lost to a DevTools socket that timed out on the read at the end of its 290 s; `bench.py` now opens a new socket for that read, and the 16 runs after it all completed.
+
+### The GPU clock (2026-11-27)
+
+The V3D clock is 500 MHz by default and 550 on this rig, because `hdmi_enable_4kp60=1` raises it and the core clock together. One boot per setting, checking that the firmware answers and the display has a mode:
+
+| `config.txt` | Result |
+| --- | --- |
+| `v3d_freq=750`, `over_voltage=6` (11-22) | firmware hung, no display |
+| `v3d_freq=600`, `over_voltage=6` | firmware hung, no display |
+| `v3d_freq=600` | firmware hung, no display |
+| `v3d_freq=600`, `v3d_freq_min=600`, `over_voltage=6` | firmware hung, no display |
+| `v3d_freq=550` | fine, 550 MHz |
+| `hdmi_enable_4kp60=0`, `v3d_freq=600` | fine, 600 MHz |
+| `hdmi_enable_4kp60=0`, `v3d_freq=700`, `over_voltage=6` | fine, 700 MHz |
+
+With `hdmi_enable_4kp60=1`, any V3D clock above 550 MHz hangs the firmware (2026-09-14 build, kernel 6.18.50) when `vc4` takes the display over from it, 9 to 10 s into boot: `Firmware transaction 0x00030066 timeout`, then `vc4_hdmi` fails to bind with -110, `vcgencmd` hangs, and a normal shutdown takes about eight minutes (`systemctl reboot --force` takes two). Voltage and clock ramping are not the cause. With the flag off the clock can be raised.
+
+Player release 4 and the stress playlist, `bench.sh` with 4 runs and 5 restarts per round, in this order:
+
+| Measure | Stock (550 MHz, core 550) | V3D 750 MHz, 4kp60 off, `over_voltage=6` | The same with the ARM at 2.0 GHz | Stock again |
+| --- | --- | --- | --- | --- |
+| Core clock | 550 MHz | 375 MHz | 375 MHz | 550 MHz |
+| Overall, cut | 0.45, 0.19% | 0.45, 0.25% | 0.48, 0.23% | 0.44, 0.22% |
+| Overall, fade | 0.31, 0.31% | 0.41, 0.34% | 0.35, 0.27% | 0.32, 0.29% |
+| Fade window | 0.69, 0.77% | 1.37, 0.94% | 0.86, 0.86% | 0.60, 0.86% |
+| Loading next | 5.9-13.3% | 8.1-13.3% | 7.9-14.2% | 7.9-13.3% |
+| Prepare median | 201-227 ms | 215-252 ms | 214-233 ms | 206-225 ms |
+| Chromium launch after a restart | 2.14-2.19 s | 2.29-2.43 s | 2.18-2.24 s | 2.16-2.23 s |
+| First prepare after a restart, median | 572 ms | 589 ms | 601 ms | 545 ms |
+| Temperature max | 58.4 C | 60.3 C | 62.3 C | 59.9 C |
+
+No kernel error and no throttling in any round, so 750 MHz is stable under this load.
+
+A second series the same evening, one round each, to see whether a smaller step does better:
+
+| Measure | V3D 600 MHz | V3D 650 MHz, `over_voltage=6` | V3D 700 MHz, `over_voltage=6` | Stock, third round |
+| --- | --- | --- | --- | --- |
+| Core clock | 300 MHz | 325 MHz | 350 MHz | 550 MHz |
+| Overall, cut | 0.63, 0.36% | 0.60, 0.34% | 0.49, 0.28% | 0.57, 0.24% |
+| Overall, fade | 0.53, 0.53% | 0.47, 0.43% | 0.42, 0.37% | 0.30, 0.26% |
+| Fade window | 2.06, 2.22% | 1.37, 1.21% | 1.11, 1.03% | 0.86, 0.86% |
+| Loading next | 9.2-17.2% | 8.5-16.7% | 9.1-13.9% | 7.0-15.0% |
+| Prepare median | 228-260 ms | 219-242 ms | 222-249 ms | 204-230 ms |
+| Chromium launch after a restart | 2.34-2.41 s | 2.32-2.39 s | 2.29-2.37 s | 2.14-2.18 s |
+| First prepare after a restart, median | 633 ms | 600 ms | 596 ms | 533 ms |
+
+All with `hdmi_enable_4kp60=0`; `kernel problems: 0` and never throttled in each.
+
+- **Every raised V3D clock makes the player slower than stock**, and the slowest is the smallest step. With `hdmi_enable_4kp60=0` and `v3d_freq` set, the firmware runs the core clock at half the V3D clock (300, 325, 350, 375 MHz), against 550 with the flag on, and the core clock cannot be set on a Pi 4. The results follow the core clock, not the V3D clock: fade-window drops 2.1% at 300 MHz, 1.3% at 325, 1.1% at 350, 0.9 to 1.4% at 375, 0.6 to 0.9% at 550. That the core clock is the cause is an inference from that order; nothing here varied it alone.
+- **The halved core clock cannot be configured away** (2026-11-28, one boot each, flag off). At the default `v3d_freq` both clocks read 500 MHz, so the halving starts only when V3D is raised. At `v3d_freq=600`, `core_freq_min=500` and `force_turbo=1` each left the core clock at 300 MHz while `get_config` still reported `core_freq=500`. It reads as one source clock feeding both, with the core clock taking a whole-number division of it; that is a guess from the readings, and the Raspberry Pi documentation only says `core_freq` cannot be changed on a Pi 4.
+- **With the ARM at 2.0 GHz as well, 750 MHz is back to about stock**, 4 C hotter: the two cancel.
+- So `hdmi_enable_4kp60=1` stays and the V3D clock stays at 550 MHz.
+
+### CPU or GPU when frames drop (2026-11-27)
+
+Stock clocks, player release 4, the stress playlist with fade 600 ms, 240 s in 462 windows of 0.5 s. Per window: the share of time the V3D had a job running (the kernel's `gpu_stats`, bin + render + tfu + csd runtime over its timestamp), the CPU share of the busiest thread among Chromium's and cage's (`/proc/<pid>/task/*/stat`), and the frames the player dropped (`__sf.byPhase`). One run; the sampler itself costs a few percent of a core.
+
+| Windows | n | V3D busy, mean (max) | Busiest thread, mean (max) | All threads, of 400% |
+| --- | --- | --- | --- | --- |
+| All | 462 | 28% (102%) | 12% (56%) | 48% |
+| Mostly playing | 425 | 26% (102%) | 11% (45%) | 44% |
+| Mostly loading next | 6 | 25% (43%) | 43% (56%) | 154% |
+| Mostly transition | 31 | 47% (95%) | 18% (34%) | 80% |
+| No frame dropped | 432 | 27% (102%) | 11% (45%) | 43% |
+| 1 or 2 dropped | 22 | 37% (101%) | 25% (52%) | 112% |
+| 3 or more dropped | 8 | 49% (95%) | 36% (56%) | 135% |
+
+- **The V3D is not what drops frames.** 27 windows had it over 90% busy, and 24 of them dropped nothing: it fills a 60 Hz frame at full load. The two worst windows, both while the next spot loaded, had it at 43% and 6% busy.
+- **The drops are single-thread CPU bursts.** The worst window dropped 19 frames (about 320 ms) with the GPU process's main thread at 56% of the window, 280 ms of work: the driver's CPU side, not the hardware. The next dropped 8 with the template renderer's main thread at 44% and the V3D at 6%. No thread is busy for a whole window, and the four cores together are at 135% of 400 when frames drop, so more cores would not help either.
+- That fits the clocks: the ARM at 2.0 GHz shortens prepares a little, and a faster V3D does nothing.
+
+### Boot
+
+Kernel start to the first spot, from `signforge-bootprobe.service`, 3 reboots per variant, on the cloud config. Measured twice, because the rig's player changed in between: on 2026-11-22 with master's player and its cached stress content, and on 2026-11-27 with player release 4.
+
+| Variant | Kiosk unit starts | Navigation | First spot | Kept |
+| --- | --- | --- | --- | --- |
+| 11-22: as `tune.sh` left it | 7.75-8.28 s | 18.69-19.11 s | 21.88-22.29 s | |
+| 11-22: `quiet`, no serial console, four services off | 7.06-7.23 s | 17.75-17.88 s | 21.20-21.39 s | |
+| 11-27: as `tune.sh` left it | 7.85-8.06 s | 18.90-19.03 s | 23.20-23.78 s | |
+| 11-27: `quiet`, no serial console | 7.17-7.31 s | 18.21-18.40 s | 22.37-22.83 s | **yes** |
+| 11-27: the same, four services off (2 boots) | 7.14, 7.20 s | 17.95, 18.07 s | 22.23, 22.82 s | no |
+
+- **A quiet kernel console without the serial port is kept** (`quiet` in `cmdline.txt`, `console=serial0,115200` removed): the kiosk unit starts 0.7 s sooner and the first spot comes 0.8 to 0.9 s sooner. The two were not measured apart. Errors still reach the screen and the journal has everything; a serial cable shows nothing until `tune.sh --undo`.
+- **Turning off `e2scrub_reap`, `rpi-eeprom-update`, `udisks2` and `bluetooth` is rejected**: with the quiet console already on, it changed nothing beyond the spread between boots.
+- Settings that act before the kernel starts (`disable_splash`, `boot_delay`, the camera and display auto-detect) were not tried: `/proc/uptime` cannot see that time, so they could not be measured.
+
+Raw files are on the rig in `~/signforge/tuning-logs-20261122/` and `tuning-logs-20261127/`.

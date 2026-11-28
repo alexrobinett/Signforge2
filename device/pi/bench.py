@@ -86,6 +86,9 @@ def playlist(label, content, secs, runs):
         s = Sampler(); s.start()
         time.sleep(secs)
         s.stop = True
+        # A new socket for the read: the one left idle through the run once timed out here (30 s, no reply).
+        p.ws.close()
+        p = Page()
         d = json.loads(p.ev("JSON.stringify({f: __sf.frames, b: __sf.byPhase, st: __sf.stalls, p: __sf.prepares, sk: __sf.skipped,"
                             " js: [...document.scripts].map(s => s.src.split('/').pop())})"))
         p.ws.close()
