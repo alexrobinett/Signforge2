@@ -1,0 +1,30 @@
+[Unit]
+Description=SignForge kiosk (cage + Chromium)
+# After the network, unlike the Pi's kiosk: that one plays a player served on the Pi itself, offline-first, while this
+# one loads a remote page.
+After=systemd-logind.service getty@tty1.service network-online.target
+Wants=network-online.target
+Conflicts=getty@tty1.service
+# Always restart, never give up.
+StartLimitIntervalSec=0
+
+[Service]
+User=kiosk
+PAMName=signforge-kiosk
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=wayland
+EnvironmentFile=/etc/signage/config.env
+# No -s on cage: a public screen must not switch VTs. $CHROMIUM_EXTRA_FLAGS is unbraced so systemd splits it into
+# words; ${KIOSK_URL} is braced so it stays one.
+ExecStart=/usr/bin/cage -- /usr/bin/chromium-browser --kiosk --ozone-platform=wayland --no-first-run --noerrdialogs --disable-infobars --password-store=basic --autoplay-policy=no-user-gesture-required --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy --enable-features=AcceleratedVideoDecodeLinuxGL,AcceleratedVideoDecodeLinuxZeroCopyGL --disable-session-crashed-bubble $CHROMIUM_EXTRA_FLAGS ${KIOSK_URL}
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical.target

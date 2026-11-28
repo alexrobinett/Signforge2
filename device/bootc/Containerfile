@@ -1,0 +1,20 @@
+FROM quay.io/fedora/fedora-bootc:44
+
+ARG KIOSK_URL=https://player.example.com/pair
+
+RUN dnf -y install \
+      https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
+      https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm \
+ && dnf -y install intel-media-driver libva-utils mesa-dri-drivers mesa-va-drivers-freeworld cage chromium \
+      NetworkManager greenboot openssh-server \
+ && dnf clean all
+
+COPY rootfs/ /
+
+# printf, not sed: a SignForge URL carries ? and &.
+RUN printf 'KIOSK_URL=%s\n' "$KIOSK_URL" >> /etc/signage/config.env
+
+RUN systemctl enable signforge-kiosk.service greenboot-healthcheck.service bootc-fetch-apply-updates.timer sshd.service \
+ && systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+
+RUN bootc container lint
