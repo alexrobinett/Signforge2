@@ -6,8 +6,8 @@ on:
   push:
     branches: [master]
     paths:
-      - 'device/bootc/**'
-      - '.github/workflows/device-os.yml'
+      - "device/bootc/**"
+      - ".github/workflows/device-os.yml"
   workflow_dispatch:
     inputs:
       promote:
