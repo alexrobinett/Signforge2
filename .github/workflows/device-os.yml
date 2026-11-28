@@ -1,0 +1,70 @@
+# Builds the signage OS image (device/bootc) and pushes it to GHCR as :canary and :<commit SHA>. A manual run with
+# `promote` set tags that commit's image :stable instead: the same bytes, never a rebuild. docs/ci.md, "Device OS image".
+name: Device OS image
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "device/bootc/**"
+      - ".github/workflows/device-os.yml"
+  workflow_dispatch:
+    inputs:
+      promote:
+        description: Commit SHA of a canary image to tag :stable
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  OWNER: ${{ github.repository_owner }}
+
+jobs:
+  canary:
+    if: github.event_name == 'push' || inputs.promote == ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        env:
+          KIOSK_URL: ${{ vars.SIGNFORGE_KIOSK_URL }}
+        run: |
+          image="ghcr.io/${OWNER,,}/signforge-os"
+          args=()
+          if [ -n "$KIOSK_URL" ]; then args+=(--build-arg "KIOSK_URL=$KIOSK_URL"); fi
+          podman build "${args[@]}" -t "$image:canary" -t "$image:$GITHUB_SHA" -f device/bootc/Containerfile device/bootc
+      - name: Push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          image="ghcr.io/${OWNER,,}/signforge-os"
+          printf '%s' "$GITHUB_TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          podman push "$image:$GITHUB_SHA"
+          podman push "$image:canary"
+
+  stable:
+    if: github.event_name == 'workflow_dispatch' && inputs.promote != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Promote
+        env:
+          PROMOTE: ${{ inputs.promote }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Only a commit's own tag: :canary may have moved on since it was tested.
+          if [[ ! $PROMOTE =~ ^[0-9a-f]{40}$ ]]; then
+            echo "promote must be a full commit SHA" >&2
+            exit 1
+          fi
+          image="ghcr.io/${OWNER,,}/signforge-os"
+          printf '%s' "$GITHUB_TOKEN" | skopeo login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          skopeo copy --all --preserve-digests "docker://$image:$PROMOTE" "docker://$image:stable"

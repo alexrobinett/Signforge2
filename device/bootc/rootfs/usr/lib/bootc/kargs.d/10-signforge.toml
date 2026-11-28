@@ -1,0 +1,2 @@
+# A sign's console never blanks.
+kargs = ["consoleblank=0"]

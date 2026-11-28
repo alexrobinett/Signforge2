@@ -1,6 +1,6 @@
 # CI
 
-One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready for review, on pushes to `master`, nightly and by hand. (The player release workflows, run by hand only, are in [Player releases](#player-releases).) It runs Turbo's tasks (typecheck, test, the CMS end-to-end run and the CMS ESLint) and the repo-wide checks.
+One job, `check`, in `.github/workflows/ci.yml`, on pull requests that are ready for review, on pushes to `master`, nightly and by hand. (The player release workflows, run by hand only, are in [Player releases](#player-releases), and the signage OS image's in [Device OS image](#device-os-image).) It runs Turbo's tasks (typecheck, test, the CMS end-to-end run and the CMS ESLint) and the repo-wide checks.
 
 - **A pull request** runs typecheck, test and lint for the packages its diff affects. It does not run the CMS end-to-end run (`test:e2e`): run that locally before marking the pull request ready or pushing to it, on your own ports (`E2E_API_PORT=... E2E_CMS_PORT=... pnpm --filter @signforge/cms test:e2e`), and say in the pull request that it passed.
 - **A draft pull request** runs nothing: the job is skipped. Marking it ready (`gh pr ready <n>`) starts the run.
@@ -241,3 +241,12 @@ Only demo is set up. When prod is, sign one release once and register it in both
 4. **The bucket and a deploy.** `signforge-releases-demo` must exist (`pnpm exec wrangler r2 bucket create signforge-releases-demo` in `apps/api`) before the API is deployed with its `PLAYER_RELEASES` binding.
 
 A run's log and summary are public, like the repository. The workflows print release numbers, hashes and short screen hashes, never a screen's id, an org's name or the account id.
+
+## Device OS image
+
+`device-os.yml` builds the signage OS image for mini PCs ([device/bootc](../device/bootc/README.md)) with podman and pushes it to GHCR as `ghcr.io/<owner>/signforge-os`.
+
+- **A push to `master`** that touches `device/bootc/` or the workflow, or a manual run with no input, builds the image and pushes it as `:canary` and as `:<commit SHA>`. The repository variable `SIGNFORGE_KIOSK_URL`, when set, is the URL the kiosk opens; otherwise the Containerfile's placeholder. Devices on `:canary` take it in their next nightly window.
+- **A manual run with `promote`** set to a commit SHA tags that commit's image `:stable` with `skopeo copy`: the same bytes a canary ran, never a rebuild. It takes only a full SHA, not `:canary`, which may have moved on since.
+
+The job writes with the run's `GITHUB_TOKEN` (`packages: write`), and holds no other secret. Devices pull without one only while the package is public.

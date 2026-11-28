@@ -1,0 +1,5 @@
+# The kiosk session gets a logind seat and XDG_RUNTIME_DIR from pam_systemd, without the login stack.
+account required pam_unix.so
+session required pam_loginuid.so
+session optional pam_keyinit.so force revoke
+session required pam_systemd.so
