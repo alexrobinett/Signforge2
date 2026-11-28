@@ -45,7 +45,7 @@ None of them waits for the network. The player is offline-first and plays its ca
 
    Together with the unit ordering, the first spot after boot comes 22 to 23 s after the kernel starts, against 37 to 46 s before.
 
-   `sh tune.sh --overclock` also runs the ARM at 2.0 GHz instead of 1.8 (`arm_freq=2000`, `over_voltage=6`). Prepares come 5 to 8% sooner for 3.4 C more; frames dropped while the next spot loads and boot time do not change. It is not the default: it was measured on one Pi 400, so check temperature (`vcgencmd measure_temp`, `get_throttled`) on a bare Pi 4 in its enclosure before leaving it on. Do not overclock the GPU: `v3d_freq=750` hung the display driver.
+   `sh tune.sh --overclock` also runs the ARM at 2.0 GHz instead of 1.8 (`arm_freq=2000`, `over_voltage=6`). Prepares come 5 to 8% sooner for 3.4 C more; frames dropped while the next spot loads and boot time do not change. It is not the default: it was measured on one Pi 400, so check temperature (`vcgencmd measure_temp`, `get_throttled`) on a bare Pi 4 in its enclosure before leaving it on. Do not overclock the GPU: with `hdmi_enable_4kp60=1`, any `v3d_freq` above 550 leaves the screen dark, and with it off, 750 MHz measured slower.
 
 Left as Raspberry Pi OS ships them, each for a measured reason given in RESULTS.md: `hdmi_enable_4kp60=1` (it also runs the GPU at 550 MHz rather than 500), the 512 MB CMA pool, zram swap, the persistent journal and the apt and man-db timers.
 

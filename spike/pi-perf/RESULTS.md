@@ -1703,9 +1703,45 @@ Never throttled in any run (`get_throttled` 0x0), and no kernel error.
 - **The ARM overclock is a small gain.** Prepares come 5 to 8% sooner and fewer run over 500 ms, Chromium launches 0.1 s sooner, and fade runs drop slightly fewer frames, for 3.4 C.
 - **It does not move what is over budget.** Frames dropped while the next spot loads, the first prepare after a restart and boot time are where they were: those are GPU work, process start and SD reads.
 - **It is an option, not the default** (`sh tune.sh --overclock`). It was measured on one Pi 400, whose keyboard plate is its heat sink. A bare Pi 4 in an enclosure has to be checked for temperature and stability before it is left on, and 2.0 GHz is as far as this went.
-- **The GPU overclock is rejected.** With `v3d_freq=750` and `over_voltage=6` the Pi booted, then the display driver hung in a firmware call (`vc4` blocked in `rpi_firmware_property`): the screen went dark, `vcgencmd` hung and the shutdown took about eight minutes. Stock clocks came back with the setting removed. Nothing was measured at that clock, and the two together were not tried.
+- **The GPU overclock is rejected**: it is slower, not faster. Next section.
 
 One run of the first stock round was lost to a DevTools socket that timed out on the read at the end of its 290 s; `bench.py` now opens a new socket for that read, and the 16 runs after it all completed.
+
+### The GPU clock (2026-11-27)
+
+The V3D clock is 500 MHz by default and 550 on this rig, because `hdmi_enable_4kp60=1` raises it and the core clock together. One boot per setting, checking that the firmware answers and the display has a mode:
+
+| `config.txt` | Result |
+| --- | --- |
+| `v3d_freq=750`, `over_voltage=6` (11-22) | firmware hung, no display |
+| `v3d_freq=600`, `over_voltage=6` | firmware hung, no display |
+| `v3d_freq=600` | firmware hung, no display |
+| `v3d_freq=600`, `v3d_freq_min=600`, `over_voltage=6` | firmware hung, no display |
+| `v3d_freq=550` | fine, 550 MHz |
+| `hdmi_enable_4kp60=0`, `v3d_freq=600` | fine, 600 MHz |
+| `hdmi_enable_4kp60=0`, `v3d_freq=700`, `over_voltage=6` | fine, 700 MHz |
+
+With `hdmi_enable_4kp60=1`, any V3D clock above 550 MHz hangs the firmware (2026-09-14 build, kernel 6.18.50) when `vc4` takes the display over from it, 9 to 10 s into boot: `Firmware transaction 0x00030066 timeout`, then `vc4_hdmi` fails to bind with -110, `vcgencmd` hangs, and a normal shutdown takes about eight minutes (`systemctl reboot --force` takes two). Voltage and clock ramping are not the cause. With the flag off the clock can be raised.
+
+Player release 4 and the stress playlist, `bench.sh` with 4 runs and 5 restarts per round, in this order:
+
+| Measure | Stock (550 MHz, core 550) | V3D 750 MHz, 4kp60 off, `over_voltage=6` | The same with the ARM at 2.0 GHz | Stock again |
+| --- | --- | --- | --- | --- |
+| Core clock | 550 MHz | 375 MHz | 375 MHz | 550 MHz |
+| Overall, cut | 0.45, 0.19% | 0.45, 0.25% | 0.48, 0.23% | 0.44, 0.22% |
+| Overall, fade | 0.31, 0.31% | 0.41, 0.34% | 0.35, 0.27% | 0.32, 0.29% |
+| Fade window | 0.69, 0.77% | 1.37, 0.94% | 0.86, 0.86% | 0.60, 0.86% |
+| Loading next | 5.9-13.3% | 8.1-13.3% | 7.9-14.2% | 7.9-13.3% |
+| Prepare median | 201-227 ms | 215-252 ms | 214-233 ms | 206-225 ms |
+| Chromium launch after a restart | 2.14-2.19 s | 2.29-2.43 s | 2.18-2.24 s | 2.16-2.23 s |
+| First prepare after a restart, median | 572 ms | 589 ms | 601 ms | 545 ms |
+| Temperature max | 58.4 C | 60.3 C | 62.3 C | 59.9 C |
+
+No kernel error and no throttling in any round, so 750 MHz is stable under this load.
+
+- **A faster V3D clock makes the player slower.** Prepares are 5 to 10% slower and Chromium launches 0.15 s later, and frames dropped while the next spot loads do not move. At 750 MHz the firmware runs the core clock at 375 MHz instead of 550, and the core clock cannot be set on a Pi 4.
+- **With the ARM at 2.0 GHz as well it is back to about stock**, 4 C hotter: the two cancel.
+- So `hdmi_enable_4kp60=1` stays, the V3D clock stays at 550 MHz, and the 3D clock is not what limits the player. 600 MHz with the flag off was booted but not benched.
 
 ### Boot
 
@@ -1723,4 +1759,4 @@ Kernel start to the first spot, from `signforge-bootprobe.service`, 3 reboots pe
 - **Turning off `e2scrub_reap`, `rpi-eeprom-update`, `udisks2` and `bluetooth` is rejected**: with the quiet console already on, it changed nothing beyond the spread between boots.
 - Settings that act before the kernel starts (`disable_splash`, `boot_delay`, the camera and display auto-detect) were not tried: `/proc/uptime` cannot see that time, so they could not be measured.
 
-Raw files are on the rig in `~/signforge/tuning-logs-20261122/`.
+Raw files are on the rig in `~/signforge/tuning-logs-20261122/` and `tuning-logs-20261127/`.

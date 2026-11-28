@@ -76,8 +76,9 @@ fi
 #    Frames dropped while the next spot loads, the first prepare after a start and boot time did not
 #    move. Not the default: it was measured on one Pi 400, whose keyboard is its heat sink, and a
 #    bare Pi 4 in an enclosure has to be checked for temperature and stability before it is left on.
-#    The GPU is left alone: v3d_freq=750 hung the display driver in a firmware call (screen dark,
-#    vcgencmd hung, eight minutes to shut down). A run without --overclock takes the block out.
+#    The GPU is left alone: above 550 MHz v3d_freq hangs the firmware while hdmi_enable_4kp60=1
+#    is set (no display), and with that off, 750 MHz made prepares 5 to 10% slower, as the core
+#    clock falls to 375 MHz. A run without --overclock takes the block out.
 sudo sed -i '/^# >>> signforge overclock/,/^# <<< signforge overclock/d' "$boot/config.txt"
 if $overclock; then
   printf '%s\n' '# >>> signforge overclock (device/pi/tune.sh --overclock)' 'arm_freq=2000' 'over_voltage=6' '# <<< signforge overclock' \
