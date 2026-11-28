@@ -1,4 +1,5 @@
-# bootc-image-builder's installer config. build-iso.sh fills in the SSH key and the time zone.
+# bootc-image-builder's installer config. build-iso.sh fills in the SSH key, the time zone and, when asked, a Wi-Fi
+# profile.
 # The builder adds the ostreecontainer line itself, and a custom kickstart cannot be combined with [[customizations.user]].
 [customizations.installer.kickstart]
 contents = """
@@ -6,11 +7,11 @@ text --non-interactive
 lang en_US.UTF-8
 keyboard us
 timezone @TIMEZONE@ --utc
-network --bootproto=dhcp --device=link --activate --onboot=on
 zerombr
 clearpart --all --initlabel --disklabel=gpt
 autopart --noswap --type=plain --fstype=xfs
 rootpw --lock
 sshkey --username=root "@SSH_PUBKEY@"
 reboot --eject
+@WIFI_PROFILE@
 """
