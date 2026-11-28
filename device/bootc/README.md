@@ -6,6 +6,8 @@ It is not the Pi kit (`device/pi`). The Pi serves the player on the device and p
 
 Fedora 44 has no `mesa-va-drivers`: its VA drivers are in `mesa-dri-drivers`, and the image adds RPM Fusion's `mesa-va-drivers-freeworld` for the codecs Fedora leaves out, and `intel-media-driver` from RPM Fusion nonfree.
 
+The first target is the MeLE PCG02 Pro stick (Celeron N5105, 8 GB, 128 GB eMMC). Its graphics decode H.264, HEVC and VP9 in hardware and not AV1, so give it no AV1 video. Nothing here has run on one yet: the image has been booted in a VM only (see [Testing in a VM](#testing-in-a-vm)), and 4K60 on the stick is still to be measured.
+
 ## Files
 
 Everything under `rootfs/` is copied into the image at the same path.
@@ -13,7 +15,7 @@ Everything under `rootfs/` is copied into the image at the same path.
 ```
 device/bootc/
   Containerfile          the image
-  config.toml            the installer's kickstart (build-iso.sh fills in the SSH key and time zone)
+  config.toml            the installer's kickstart (build-iso.sh fills in the SSH key, time zone and Wi-Fi)
   build-iso.sh           builds the USB installer
   rootfs/
     etc/signage/config.env                                       KIOSK_URL and CHROMIUM_EXTRA_FLAGS
@@ -36,7 +38,7 @@ podman build --build-arg KIOSK_URL='https://<cms-host>/test-screen/?kind=browser
   -t signforge-os:dev -f device/bootc/Containerfile device/bootc
 ```
 
-The build ends with `bootc container lint`. Without `KIOSK_URL` the image opens a placeholder, `https://player.example.com/pair`. CI builds with the repository variable `SIGNFORGE_KIOSK_URL` when it is set.
+The build ends with `bootc container lint`. On an arm64 Mac, where Docker runs x86_64 under emulation, that step fails with "Function not implemented": build on x86_64 Linux, as CI does. Without `KIOSK_URL` the image opens a placeholder, `https://player.example.com/pair`. CI builds with the repository variable `SIGNFORGE_KIOSK_URL` when it is set.
 
 ## The URL and the pairing
 
@@ -73,14 +75,16 @@ then `systemctl daemon-reload`. The window is local time, so set the zone too: `
 
 ## Health check and rollback
 
-greenboot runs `50-signforge-kiosk.sh` on each boot. It fails when:
-- the network is not up within 60 s (`nm-online`);
+greenboot runs `50-signforge-kiosk.sh` on each boot. It judges a deployment once, on its first boots after an update. It fails when:
+- the network is not up within 60 s (`nm-online`, over Ethernet or Wi-Fi);
 - `signforge-kiosk.service` is not active within 120 s;
 - the kiosk restarts or stops in the 15 s after that. Chromium exiting takes cage with it, and a crash loop reads as active between restarts.
 
-A failure reboots. After 3 failed boots (`GREENBOOT_MAX_BOOT_ATTEMPTS` in `/etc/greenboot/greenboot.conf`) grub boots the previous deployment.
+A failure reboots. After 3 more failed boots (`GREENBOOT_MAX_BOOT_ATTEMPTS` in `/etc/greenboot/greenboot.conf`) grub boots the previous deployment, and greenboot makes that the default. In a VM a broken kiosk was back on the previous deployment about two minutes after the update's reboot.
 
-An update applied while the site's network is down fails the check and rolls back. The timer tries it again the next night.
+A deployment that passes is written to `/var/lib/signforge/proven-deployments` and is not checked again; nor is one with no other deployment to go back to, as on a new install. greenboot reboots on a failed check on any boot, update or not, so without this a screen switched on while its network is down would reboot every minute and then fall back to an older OS.
+
+An update applied while the site's network is down fails the check and rolls back. The device stays on its tag, so the timer tries the same image again the next night, and a broken image on that tag costs those reboots every night until a good one is pushed.
 
 - `bootc status` shows the booted, staged and rollback deployments.
 - `bootc rollback`, then a reboot, goes back by hand.
@@ -105,16 +109,25 @@ The GHCR package must be public, or each device needs a pull secret in `/etc/ost
 On a Linux machine with podman:
 
 ```sh
-SSH_PUBKEY_FILE=~/.ssh/id_ed25519.pub TIMEZONE=America/New_York ./device/bootc/build-iso.sh [image]
+SSH_PUBKEY_FILE=~/.ssh/id_ed25519.pub TIMEZONE=America/New_York \
+  WIFI_SSID='Shop Floor' WIFI_PSK='…' ./device/bootc/build-iso.sh [image]
 ```
 
-The image defaults to `ghcr.io/alexrobinett/signforge-os:stable`; `SSH_PUBKEY_FILE` to `~/.ssh/id_ed25519.pub` and `TIMEZONE` to `UTC`. It prints the ISO's path, `device/bootc/output/bootiso/install.iso`. Write it to a stick:
+The image defaults to `ghcr.io/alexrobinett/signforge-os:stable`; `SSH_PUBKEY_FILE` to `~/.ssh/id_ed25519.pub` and `TIMEZONE` to `UTC`. `WIFI_SSID` and `WIFI_PSK` are optional; see [Wi-Fi](#wi-fi). It prints the ISO's path, `device/bootc/output/bootiso/install.iso`. Write it to a stick:
 
 ```sh
 sudo dd if=device/bootc/output/bootiso/install.iso of=/dev/sdX bs=4M status=progress oflag=sync
 ```
 
-The machine boots it, partitions the disk (GPT, XFS, no swap), installs the image, locks root's password, puts the key in root's `authorized_keys`, and reboots into the kiosk. SSH in as root with that key.
+The machine boots it, partitions the disk (GPT, XFS, no swap), installs the image, locks root's password, puts the key in root's `authorized_keys`, and reboots into the kiosk. SSH in as root with that key. The install itself needs no network: the image is on the stick.
+
+## Wi-Fi
+
+The image has NetworkManager's Wi-Fi support and Intel's Wi-Fi firmware beside the Realtek, MediaTek, Atheros and Broadcom firmware of the base image. A wired port needs nothing: NetworkManager runs DHCP on it.
+
+With `WIFI_SSID` and `WIFI_PSK` set, `build-iso.sh` has the installer write a WPA profile to `/etc/NetworkManager/system-connections/signforge-wifi.nmconnection` (root only), and the screen joins that network on its first boot. **That ISO holds the network's password in plain text**, as does the device: treat the stick as the password. The image on GHCR never holds it. Neither value can contain a backslash, a double quote or a newline. The profile has not been tried on a device yet.
+
+To set Wi-Fi up without putting the password on the stick, install over Ethernet and run `nmcli device wifi connect '<ssid>' password '<password>'` over SSH.
 
 ## Testing in a VM
 
@@ -137,7 +150,7 @@ qemu-system-x86_64 -enable-kvm -machine q35 -cpu host -m 4G -bios /usr/share/edk
 
 To try the installer, make a blank disk (`qemu-img create -f qcow2 blank.qcow2 40G`) and boot the ISO with it (`-drive file=blank.qcow2,if=virtio -cdrom output/bootiso/install.iso`).
 
-To prove rollback, build an image whose kiosk is broken (an `ExecStart` that exits, say), push it, and on the VM `bootc switch --apply` to it. Each boot fails the check and reboots; after the third, grub boots the previous deployment and `bootc status` shows it booted.
+To prove rollback, build an image whose kiosk is broken (an `ExecStart` that exits, say), push it, and on the VM `bootc switch --apply` to it. Each boot fails the check and reboots; after the fourth, grub boots the previous deployment and `bootc status` shows it booted.
 
 ## Checking video decode
 
@@ -147,7 +160,7 @@ A VM has no Intel iGPU, so this needs real hardware. Over SSH as root:
 vainfo --display drm --device /dev/dri/renderD128
 ```
 
-It should list `VAEntrypointVLD` for H.264, HEVC, VP9 and AV1. Then, in Chromium:
+It should list `VAEntrypointVLD` for H.264, HEVC and VP9 (and AV1 on newer Intel graphics than the N5105's). Then, in Chromium:
 1. Add `--remote-debugging-port=9222` to `CHROMIUM_EXTRA_FLAGS` and restart the kiosk.
 2. Forward the port: `ssh -L 9222:127.0.0.1:9222 root@<device>`, and open `http://localhost:9222` in a local Chromium.
 3. `chrome://gpu` should say "Video Decode: Hardware accelerated".
