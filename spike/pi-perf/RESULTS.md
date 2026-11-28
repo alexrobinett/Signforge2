@@ -1739,9 +1739,42 @@ Player release 4 and the stress playlist, `bench.sh` with 4 runs and 5 restarts 
 
 No kernel error and no throttling in any round, so 750 MHz is stable under this load.
 
-- **A faster V3D clock makes the player slower.** Prepares are 5 to 10% slower and Chromium launches 0.15 s later, and frames dropped while the next spot loads do not move. At 750 MHz the firmware runs the core clock at 375 MHz instead of 550, and the core clock cannot be set on a Pi 4.
-- **With the ARM at 2.0 GHz as well it is back to about stock**, 4 C hotter: the two cancel.
-- So `hdmi_enable_4kp60=1` stays, the V3D clock stays at 550 MHz, and the 3D clock is not what limits the player. 600 MHz with the flag off was booted but not benched.
+A second series the same evening, one round each, to see whether a smaller step does better:
+
+| Measure | V3D 600 MHz | V3D 650 MHz, `over_voltage=6` | V3D 700 MHz, `over_voltage=6` | Stock, third round |
+| --- | --- | --- | --- | --- |
+| Core clock | 300 MHz | 325 MHz | 350 MHz | 550 MHz |
+| Overall, cut | 0.63, 0.36% | 0.60, 0.34% | 0.49, 0.28% | 0.57, 0.24% |
+| Overall, fade | 0.53, 0.53% | 0.47, 0.43% | 0.42, 0.37% | 0.30, 0.26% |
+| Fade window | 2.06, 2.22% | 1.37, 1.21% | 1.11, 1.03% | 0.86, 0.86% |
+| Loading next | 9.2-17.2% | 8.5-16.7% | 9.1-13.9% | 7.0-15.0% |
+| Prepare median | 228-260 ms | 219-242 ms | 222-249 ms | 204-230 ms |
+| Chromium launch after a restart | 2.34-2.41 s | 2.32-2.39 s | 2.29-2.37 s | 2.14-2.18 s |
+| First prepare after a restart, median | 633 ms | 600 ms | 596 ms | 533 ms |
+
+All with `hdmi_enable_4kp60=0`; `kernel problems: 0` and never throttled in each.
+
+- **Every raised V3D clock makes the player slower than stock**, and the slowest is the smallest step. With `hdmi_enable_4kp60=0` and `v3d_freq` set, the firmware runs the core clock at half the V3D clock (300, 325, 350, 375 MHz), against 550 with the flag on, and the core clock cannot be set on a Pi 4. The results follow the core clock, not the V3D clock: fade-window drops 2.1% at 300 MHz, 1.3% at 325, 1.1% at 350, 0.9 to 1.4% at 375, 0.6 to 0.9% at 550. That the core clock is the cause is an inference from that order; nothing here varied it alone.
+- **With the ARM at 2.0 GHz as well, 750 MHz is back to about stock**, 4 C hotter: the two cancel.
+- So `hdmi_enable_4kp60=1` stays and the V3D clock stays at 550 MHz.
+
+### CPU or GPU when frames drop (2026-11-27)
+
+Stock clocks, player release 4, the stress playlist with fade 600 ms, 240 s in 462 windows of 0.5 s. Per window: the share of time the V3D had a job running (the kernel's `gpu_stats`, bin + render + tfu + csd runtime over its timestamp), the CPU share of the busiest thread among Chromium's and cage's (`/proc/<pid>/task/*/stat`), and the frames the player dropped (`__sf.byPhase`). One run; the sampler itself costs a few percent of a core.
+
+| Windows | n | V3D busy, mean (max) | Busiest thread, mean (max) | All threads, of 400% |
+| --- | --- | --- | --- | --- |
+| All | 462 | 28% (102%) | 12% (56%) | 48% |
+| Mostly playing | 425 | 26% (102%) | 11% (45%) | 44% |
+| Mostly loading next | 6 | 25% (43%) | 43% (56%) | 154% |
+| Mostly transition | 31 | 47% (95%) | 18% (34%) | 80% |
+| No frame dropped | 432 | 27% (102%) | 11% (45%) | 43% |
+| 1 or 2 dropped | 22 | 37% (101%) | 25% (52%) | 112% |
+| 3 or more dropped | 8 | 49% (95%) | 36% (56%) | 135% |
+
+- **The V3D is not what drops frames.** 27 windows had it over 90% busy, and 24 of them dropped nothing: it fills a 60 Hz frame at full load. The two worst windows, both while the next spot loaded, had it at 43% and 6% busy.
+- **The drops are single-thread CPU bursts.** The worst window dropped 19 frames (about 320 ms) with the GPU process's main thread at 56% of the window, 280 ms of work: the driver's CPU side, not the hardware. The next dropped 8 with the template renderer's main thread at 44% and the V3D at 6%. No thread is busy for a whole window, and the four cores together are at 135% of 400 when frames drop, so more cores would not help either.
+- That fits the clocks: the ARM at 2.0 GHz shortens prepares a little, and a faster V3D does nothing.
 
 ### Boot
 
