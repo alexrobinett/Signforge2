@@ -1755,6 +1755,7 @@ A second series the same evening, one round each, to see whether a smaller step 
 All with `hdmi_enable_4kp60=0`; `kernel problems: 0` and never throttled in each.
 
 - **Every raised V3D clock makes the player slower than stock**, and the slowest is the smallest step. With `hdmi_enable_4kp60=0` and `v3d_freq` set, the firmware runs the core clock at half the V3D clock (300, 325, 350, 375 MHz), against 550 with the flag on, and the core clock cannot be set on a Pi 4. The results follow the core clock, not the V3D clock: fade-window drops 2.1% at 300 MHz, 1.3% at 325, 1.1% at 350, 0.9 to 1.4% at 375, 0.6 to 0.9% at 550. That the core clock is the cause is an inference from that order; nothing here varied it alone.
+- **The halved core clock cannot be configured away** (2026-11-28, one boot each, flag off). At the default `v3d_freq` both clocks read 500 MHz, so the halving starts only when V3D is raised. At `v3d_freq=600`, `core_freq_min=500` and `force_turbo=1` each left the core clock at 300 MHz while `get_config` still reported `core_freq=500`. It reads as one source clock feeding both, with the core clock taking a whole-number division of it; that is a guess from the readings, and the Raspberry Pi documentation only says `core_freq` cannot be changed on a Pi 4.
 - **With the ARM at 2.0 GHz as well, 750 MHz is back to about stock**, 4 C hotter: the two cancel.
 - So `hdmi_enable_4kp60=1` stays and the V3D clock stays at 550 MHz.
 
